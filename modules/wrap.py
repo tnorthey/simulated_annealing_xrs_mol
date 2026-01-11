@@ -274,16 +274,16 @@ class Wrapper:
         else:
             # check if npy file exists and read from that or error
             print(
-                "Reading normal modes from nm/modes.npy and frequencies from nm/frequencies_cm1.npy."
+                "Reading normal modes from data/modes.npy and frequencies from data/freqs.npy."
             )
-            modes_npy_file = "nm/modes.npy"
-            freqs_npy_file = "nm/frequencies_cm1.npy"
+            modes_npy_file = "data/modes.npy"
+            freqs_npy_file = "data/freqs.npy"
             if os.path.exists(modes_npy_file) and os.path.exists(freqs_npy_file):
                 displacements = np.load(modes_npy_file)
                 freqs_cm1 = np.load(freqs_npy_file)
             else:
                 print(
-                    'EITHER "nm/modes.npy" or "nm/frequencies_cm1.npy" DOES NOT EXIST. CHANGE run_pyscf_modes TO True. EXITING...'
+                    'EITHER "data/modes.npy" or "data/freqs.npy" DOES NOT EXIST. CHANGE run_pyscf_modes TO True. EXITING...'
                 )
                 sys.exit()  # Exit program
         nmodes = displacements.shape[0]

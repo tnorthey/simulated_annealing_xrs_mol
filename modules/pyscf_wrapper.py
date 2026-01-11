@@ -30,8 +30,8 @@ class Pyscf_wrapper:
         
         if save_to_npy:
            # Save to .npy files
-           np.save("nm/modes.npy", mode_vectors)
-           np.save("nm/frequencies_cm1.npy", frequencies_cm1)
+           np.save("data/modes.npy", mode_vectors)
+           np.save("data/freqs.npy", frequencies_cm1)
         
         return mode_vectors, frequencies_cm1
 
