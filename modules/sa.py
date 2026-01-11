@@ -151,11 +151,14 @@ class Annealing:
                 total_xray_contrib,
             ) = (0, 0, 0, 0)
             ##=#=#=# END INITIATE LOOP VARIABLES #=#=#
+            # Pre-compute inverse nsteps and constants to avoid division in loop
+            inv_nsteps = 1.0 / nsteps
+            HALF = 0.5
 
             for i in range(nsteps):
 
                 ##=#=#=#=# TEMPERATURE #=#=#=#=#=#=#=#=##
-                tmp = 1 - i / nsteps  # this is prop. to how far the molecule moves
+                tmp = 1.0 - i * inv_nsteps  # this is prop. to how far the molecule moves
                 temp = starting_temp * tmp  # this is the probability of going uphill
                 ##=#=#=# END TEMPERATURE #=#=#=#=#=#=#=##
 
@@ -200,7 +203,12 @@ class Annealing:
                     k = 0
                     for ii in range(natoms):
                         for jj in range(ii + 1, natoms):  # j > i
-                            qdij = qvector * LA.norm(xyz_[ii, :] - xyz_[jj, :])
+                            # Manual distance calculation (faster than LA.norm in numba)
+                            dx = xyz_[ii, 0] - xyz_[jj, 0]
+                            dy = xyz_[ii, 1] - xyz_[jj, 1]
+                            dz = xyz_[ii, 2] - xyz_[jj, 2]
+                            r = np.sqrt(dx * dx + dy * dy + dz * dz)
+                            qdij = qvector * r
                             molecular += 2 * pre_molecular[k, :] * np.sin(qdij) / qdij
                             k += 1
                 iam_ = atomic_total + molecular + compton
@@ -211,8 +219,9 @@ class Annealing:
                     predicted_function_ = 100 * (iam_ / reference_iam - 1)
                     ### x-ray part of objective function
                     ### TO DO: depends on ewald_mode ...
+                    inv_qlen = 1.0 / qlen
                     xray_contrib = (
-                        np.sum((predicted_function_ - target_function) ** 2) / qlen
+                        np.sum((predicted_function_ - target_function) ** 2) * inv_qlen
                     )
                 else:
                     predicted_function_ = iam_
@@ -222,59 +231,72 @@ class Annealing:
                         n = qlen * tlen * plen
                     else:
                         n = qlen
+                    # Pre-compute inverse n to avoid division
+                    inv_n = 1.0 / n
                     xray_contrib = (
                         np.sum(
                             (predicted_function_ - target_function) ** 2
                             / np.abs(target_function)
                         )
-                        / n
+                        * inv_n
                     )
 
                 ### harmonic oscillator part of f
                 # somehow this is faster in numba than the vectorised version
                 # New method: read from bond_param_array (OpenMM params)
-                bonding_contrib = 0
+                bonding_contrib = 0.0
                 if bonds_bool:
-                    for i in range(nbonds):
-                        r = LA.norm(
-                            xyz_[bond_atom1_idx_arr[i], :]
-                            - xyz_[bond_atom2_idx_arr[i], :]
-                        )
-                        bonding_contrib += k_arr[i] * 0.5 * (r - r0_arr[i]) ** 2
+                    for i_bond in range(nbonds):
+                        # Manual distance calculation (faster than LA.norm in numba)
+                        idx1 = bond_atom1_idx_arr[i_bond]
+                        idx2 = bond_atom2_idx_arr[i_bond]
+                        dx = xyz_[idx1, 0] - xyz_[idx2, 0]
+                        dy = xyz_[idx1, 1] - xyz_[idx2, 1]
+                        dz = xyz_[idx1, 2] - xyz_[idx2, 2]
+                        r = np.sqrt(dx * dx + dy * dy + dz * dz)
+                        bonding_contrib += k_arr[i_bond] * HALF * (r - r0_arr[i_bond]) ** 2
 
-                angular_contrib = 0
+                angular_contrib = 0.0
                 if angles_bool:
-                    for i in range(nangles):
+                    for i_ang in range(nangles):
                         """Return angle ABC (at B) given three positions A, B, C."""
                         """Faster to not call outside function. And works better with numba."""
-                        BA = (
-                            xyz_[angle_atom1_idx_arr[i], :]
-                            - xyz_[angle_atom2_idx_arr[i], :]
-                        )
-                        BC = (
-                            xyz_[angle_atom3_idx_arr[i], :]
-                            - xyz_[angle_atom2_idx_arr[i], :]
-                        )
-                        norm_BA = np.sqrt(np.sum(BA * BA))
-                        norm_BC = np.sqrt(np.sum(BC * BC))
-                        cos_theta = np.dot(BA, BC) / (norm_BA * norm_BC)
+                        # Direct indexing to avoid repeated slicing
+                        idx1 = angle_atom1_idx_arr[i_ang]
+                        idx2 = angle_atom2_idx_arr[i_ang]
+                        idx3 = angle_atom3_idx_arr[i_ang]
+                        BA_x = xyz_[idx1, 0] - xyz_[idx2, 0]
+                        BA_y = xyz_[idx1, 1] - xyz_[idx2, 1]
+                        BA_z = xyz_[idx1, 2] - xyz_[idx2, 2]
+                        BC_x = xyz_[idx3, 0] - xyz_[idx2, 0]
+                        BC_y = xyz_[idx3, 1] - xyz_[idx2, 1]
+                        BC_z = xyz_[idx3, 2] - xyz_[idx2, 2]
+                        norm_BA = np.sqrt(BA_x * BA_x + BA_y * BA_y + BA_z * BA_z)
+                        norm_BC = np.sqrt(BC_x * BC_x + BC_y * BC_y + BC_z * BC_z)
+                        inv_norm_BA_BC = 1.0 / (norm_BA * norm_BC)
+                        cos_theta = (BA_x * BC_x + BA_y * BC_y + BA_z * BC_z) * inv_norm_BA_BC
                         cos_theta = min(
                             1.0, max(-1.0, cos_theta)
                         )  # stops cosine being out of range [-1, 1] due to slight numerical flucuations
                         theta = np.arccos(cos_theta)
 
                         angular_contrib += (
-                            k_theta_arr[i] * 0.5 * (theta - theta0_arr[i]) ** 2
+                            k_theta_arr[i_ang] * HALF * (theta - theta0_arr[i_ang]) ** 2
                         )
 
-                torsion_contrib = 0
+                torsion_contrib = 0.0
                 if torsions_bool:
-                    for i in range(ntorsions):
+                    for i_tors in range(ntorsions):
                         # calculate the dihedrals
-                        p0 = xyz_[torsion_atom1_idx_arr[i], :]
-                        p1 = xyz_[torsion_atom2_idx_arr[i], :]
-                        p2 = xyz_[torsion_atom3_idx_arr[i], :]
-                        p3 = xyz_[torsion_atom4_idx_arr[i], :]
+                        idx1 = torsion_atom1_idx_arr[i_tors]
+                        idx2 = torsion_atom2_idx_arr[i_tors]
+                        idx3 = torsion_atom3_idx_arr[i_tors]
+                        idx4 = torsion_atom4_idx_arr[i_tors]
+                        # Direct indexing instead of slicing
+                        p0 = xyz_[idx1, :]
+                        p1 = xyz_[idx2, :]
+                        p2 = xyz_[idx3, :]
+                        p3 = xyz_[idx4, :]
 
                         b0 = -1.0 * (p1 - p0)
                         b1 = p2 - p1
@@ -282,7 +304,9 @@ class Annealing:
 
                         # normalize b1 so that it does not influence magnitude of vector
                         # projections that come next
-                        b1 /= np.linalg.norm(b1)
+                        # Manual norm calculation (faster than np.linalg.norm in numba)
+                        b1_norm = np.sqrt(b1[0] * b1[0] + b1[1] * b1[1] + b1[2] * b1[2])
+                        b1 /= b1_norm
 
                         # vector projections
                         # v = projection of b0 onto plane perpendicular to b1
@@ -298,8 +322,8 @@ class Annealing:
                         y = np.dot(np.cross(b1, v), w)
                         torsion = np.arctan2(y, x)
 
-                        torsion_contrib += k_delta_arr[i] * (
-                            1 + np.cos(torsion - delta0_arr[i])
+                        torsion_contrib += k_delta_arr[i_tors] * (
+                            1 + np.cos(torsion - delta0_arr[i_tors])
                         )
 
                 ### combine x-ray and bonding, angular contributions

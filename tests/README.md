@@ -24,6 +24,16 @@ To run with coverage:
 pytest tests/ --cov=modules --cov-report=html
 ```
 
+To run performance tests (slow):
+```bash
+pytest tests/test_performance.py -v -s
+```
+
+To skip slow tests:
+```bash
+pytest tests/ -m "not slow"
+```
+
 ## Test Structure
 
 - `conftest.py`: Pytest configuration and fixtures
@@ -31,6 +41,7 @@ pytest tests/ --cov=modules --cov-report=html
 - `test_x.py`: Tests for `modules/x.py` (X-ray scattering calculations)
 - `test_read_input.py`: Tests for `modules/read_input.py` (TOML input parsing)
 - `test_wrap.py`: Tests for `modules/wrap.py` (Wrapper functions)
+- `test_performance.py`: Performance tests for simulated annealing (marked with `@pytest.mark.slow`)
 
 ## Requirements
 
