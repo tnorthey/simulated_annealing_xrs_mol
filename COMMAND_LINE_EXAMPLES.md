@@ -1,34 +1,32 @@
-# Simulated Annealing XRS Molecular
+# Command Line Usage Examples
 
-Simulated annealing optimization for X-ray scattering molecular structure refinement.
+This document provides examples of how to run `run.py` with various command-line arguments.
 
-## Quick Start
+## Basic Usage
 
-### Basic Usage
-
-Run with default configuration (uses `input.toml`):
+### Run with default configuration (uses `input.toml`)
 ```bash
 python3 run.py
 ```
 
-Run with a different config file:
+### Run with a different config file
 ```bash
 python3 run.py --config my_config.toml
 ```
 
-Show help message:
+### Show help message
 ```bash
 python3 run.py --help
 ```
 
-## Command Line Examples
+## Common Examples
 
-### Basic Run with Overrides
+### 1. Basic run with mode and molecule override
 ```bash
 python3 run.py --mode xyz --molecule chd --run-id test_run
 ```
 
-### Override File Paths
+### 2. Override file paths
 ```bash
 python3 run.py \
     --start-xyz-file xyz/my_start.xyz \
@@ -37,17 +35,17 @@ python3 run.py \
     --forcefield-file forcefields/my_forcefield.offxml
 ```
 
-### Enable PySCF Normal Modes Calculation
+### 3. Enable PySCF normal modes calculation
 ```bash
 python3 run.py --run-pyscf-modes --pyscf-basis 6-31g
 ```
 
-### Enable Verbose Output
+### 4. Enable verbose output
 ```bash
 python3 run.py --verbose
 ```
 
-### Configure Scattering Parameters
+### 5. Configure scattering parameters
 ```bash
 python3 run.py \
     --qmin 0.1 \
@@ -57,7 +55,7 @@ python3 run.py \
     --pcd-mode
 ```
 
-### Configure Simulated Annealing Parameters
+### 6. Configure simulated annealing parameters
 ```bash
 python3 run.py \
     --sa-starting-temp 1.0 \
@@ -68,24 +66,24 @@ python3 run.py \
     --ga-step-size 0.012
 ```
 
-### Enable Bonds, Angles, and Torsions
+### 7. Enable bonds, angles, and torsions
 ```bash
 python3 run.py --bonds --angles --torsions
 ```
 
-### Configure Restart Parameters
+### 8. Configure restart parameters
 ```bash
 python3 run.py \
     --nrestarts 5 \
     --ntotalruns 5
 ```
 
-### Enable Ewald Mode for Scattering
+### 9. Enable Ewald mode for scattering
 ```bash
 python3 run.py --ewald-mode
 ```
 
-### Configure Theta and Phi Parameters (for 2D/3D scattering)
+### 10. Configure theta and phi parameters (for 2D/3D scattering)
 ```bash
 python3 run.py \
     --tmin 0.0 \
@@ -96,41 +94,42 @@ python3 run.py \
     --plen 21
 ```
 
-### Enable Sampling with Boltzmann Temperature
+### 11. Enable sampling with Boltzmann temperature
 ```bash
 python3 run.py --sampling --boltzmann-temperature 300.0
 ```
 
-### Configure Noise Parameters
+### 12. Configure noise parameters
 ```bash
 python3 run.py \
     --noise-value 0.05 \
     --noise-data-file noise/my_noise.dat
 ```
 
-### Tuning Parameters for Simulated Annealing
+### 13. Tuning parameters for simulated annealing
 ```bash
 python3 run.py \
     --tuning-ratio-target 0.9 \
     --c-tuning-initial 0.001
 ```
 
-### Enable Non-Hydrogen Modes Only
+### 14. Enable non-hydrogen modes only
 ```bash
 python3 run.py --non-h-modes-only
 ```
 
-### Enable PySCF HF Energy Calculation
+### 15. Enable PySCF HF energy calculation
 ```bash
 python3 run.py --hf-energy
 ```
 
-### Write DAT File Output
+### 16. Write DAT file output
 ```bash
 python3 run.py --write-dat-file
 ```
 
-### Complete Example: Full Configuration Override
+## Complete Example: Full Configuration Override
+
 ```bash
 python3 run.py \
     --config input.toml \
@@ -173,6 +172,8 @@ python3 run.py \
 ```
 
 ## Parameter Groups
+
+Arguments are organized into logical groups:
 
 ### Run Parameters
 - `--run-id`: Run identifier
@@ -236,20 +237,11 @@ python3 run.py \
 
 5. **Molecule Parameters**: The `--molecule` argument must match a section in `molecule_params` in the TOML file (e.g., `[molecule_params.chd]`).
 
-## Viewing All Options
+## Quick Reference
 
-To see all available command-line options with descriptions:
+View all available options:
 ```bash
 python3 run.py --help
 ```
 
-This will display all arguments organized by group with their descriptions and default values.
-
-## Testing
-
-Run the test suite:
-```bash
-pytest tests/
-```
-
-For more information on tests, see `tests/README.md`.
+This will show all available arguments organized by group with their descriptions and default values.
