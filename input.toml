@@ -4,14 +4,14 @@ mode = "xyz"
 [run_params]
 run_id = "50_test"
 molecule = "chd"
-results_dir = "tmp_"
+results_dir = "results"
 
 [files]
 forcefield_file = "forcefields/openff_unconstrained-2.0.0.offxml"
 start_xyz_file = "xyz/start.xyz"
 start_sdf_file = "sdf/chd_start.sdf"
 reference_xyz_file = "xyz/chd_reference.xyz"
-target_file = "xyz/target_traj090/target_50.xyz"
+target_file = "xyz/target.xyz"
 
 [options]
 # Run normal modes calculation with PySCF

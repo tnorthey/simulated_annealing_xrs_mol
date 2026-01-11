@@ -207,6 +207,9 @@ class Wrapper:
                 f"VALUE OVERWRITTEN BY COMMAND LINE ARG: 'target_file' = {target_file}"
             )
 
+        # Create results directory if it doesn't exist
+        os.makedirs(p.results_dir, exist_ok=True)
+
         def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode):
             """convert xyz file to IAM signal"""
             if ewald_mode:
@@ -320,7 +323,7 @@ class Wrapper:
                 target_xyz, atomic_numbers, compton_array, p.ewald_mode
             )
 
-            # target_iam_file = "tmp_/TARGET_IAM_%s.dat" % run_id
+            # target_iam_file = "%s/TARGET_IAM_%s.dat" % (p.results_dir, run_id)
             # save target IAM file before noise is added
             # print("Saving data to %s ..." % target_iam_file)
             # np.savetxt(target_iam_file, np.column_stack((p.qvector, target_iam)))
@@ -587,7 +590,7 @@ class Wrapper:
             pprint.pprint(A)
             print("################")
             # also write final xyz as "result.xyz"
-            # m.write_xyz("tmp_/%s_result.xyz" % run_id, "result", atomlist, xyz_best)
+            # m.write_xyz("%s/%s_result.xyz" % (p.results_dir, run_id), "result", atomlist, xyz_best)
             # predicted data
             if p.ewald_mode:
                 if npy_save:
