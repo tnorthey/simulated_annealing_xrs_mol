@@ -1,8 +1,8 @@
-# Mode: "dat" or "xyz" (case insensitive)
-mode = "xyz"
+# Mode: "normal" or "test" (case insensitive)
+mode = "test"
 
 [run_params]
-run_id = "50_test"
+run_id = "test"
 molecule = "chd"
 results_dir = "results"
 

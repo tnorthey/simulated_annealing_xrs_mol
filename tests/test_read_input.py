@@ -18,7 +18,7 @@ class TestInputToParams:
         """Test reading a valid TOML file"""
         p = Input_to_params(sample_toml_file)
         
-        assert p.mode == "xyz"
+        assert p.mode == "test"
         assert p.run_id == "test_run"
         assert p.molecule == "test"
         assert p.inelastic is True
@@ -40,7 +40,7 @@ class TestInputToParams:
         assert p.run_id == "override_run"
         assert p.sa_nsteps == 5000
         # Other parameters should remain unchanged
-        assert p.mode == "xyz"
+        assert p.mode == "test"
         assert p.molecule == "test"
     
     def test_mode_validation(self):
@@ -124,7 +124,7 @@ hf_energy_bool = false
     
     def test_mode_case_insensitive(self):
         """Test that mode is case insensitive"""
-        toml_content = '''mode = "XYZ"
+        toml_content = '''mode = "TEST"
 [run_params]
 run_id = "test"
 molecule = "test"
@@ -210,7 +210,7 @@ dihedral_indices = []
         
         try:
             p = Input_to_params(temp_file)
-            assert p.mode.lower() == "xyz"
+            assert p.mode.lower() == "test"
         finally:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
@@ -226,7 +226,7 @@ dihedral_indices = []
     
     def test_molecule_params_loading(self):
         """Test molecule-specific parameters are loaded"""
-        toml_content = '''mode = "xyz"
+        toml_content = '''mode = "test"
 [run_params]
 run_id = "test"
 molecule = "chd"

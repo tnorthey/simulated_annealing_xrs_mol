@@ -37,11 +37,11 @@ class Input_to_params:
         # mode
         self.mode = str(data["mode"])
         mode = self.mode.lower()  # lower case mode string
-        ## handle the case when mode does not equal "dat" or "xyz"
+        ## handle the case when mode does not equal "normal" or "test"
         try:
-            if not (mode == "dat" or mode == "xyz"):
+            if not (mode == "normal" or mode == "test"):
                 raise ValueError(
-                    'mode value must equal "dat" or "xyz"! (case insensitive). Exiting...'
+                    'mode value must equal "normal" or "test"! (case insensitive). Exiting...'
                 )
         except ValueError as e:
             print(f"Error: {e}")
@@ -166,19 +166,12 @@ class Input_to_params:
         self.ga_mode_indices = np.arange(self.ga_mode_range[0], self.ga_mode_range[1])
 
         ### print out all attributes
-        print("")
-        print("##################################################")
-        print(" ___ ___ _______ _______ _______ _______ _____   ")
-        print("|   |   |     __|   _   |   |   |       |     |_ ")
-        print("|-     -|__     |       |       |   -   |       |")
-        print("|___|___|_______|___|___|__|_|__|_______|_______|")
-        print("")
-        print("##################################################")
-        print("### Initialised with the following parameters: ###")
-        print("##################################################")
         if self.verbose_bool:
+            print("##################################################")
+            print("### Initialised with the following parameters: ###")
+            print("##################################################")
             pprint.pprint(vars(self))
-        print("##################################################")
+            print("##################################################")
 
         ###################################
     

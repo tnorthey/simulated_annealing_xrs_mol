@@ -176,7 +176,7 @@ class Wrapper:
         target_file="TARGET_FILE",
     ):
         """
-        wrapper function that handles restarts, xyz/dat modes, output files,
+        wrapper function that handles restarts, test/normal modes, output files,
         and some analysis e.g. PySCF energy calculations, bond-distance and angle calculations.
         """
         #############################
@@ -313,10 +313,10 @@ class Wrapper:
 
         ###########################################################
         ###########################################################
-        ### Section: xyz or dat mode handling                   ###
+        ### Section: test or normal mode handling                   ###
         ###########################################################
         ###########################################################
-        if p.mode == "xyz":
+        if p.mode == "test":
             # read from target xyz file
             _, _, atomlist, target_xyz = m.read_xyz(target_file)
             target_iam, atomic, compton, pre_molecular = xyz2iam(
@@ -361,7 +361,7 @@ class Wrapper:
             else:
                 target_function_ = target_function
 
-        elif p.mode == "dat":
+        elif p.mode == "normal":
             # if target file is a data file, read as target_function
             target_function_ = np.loadtxt(target_file)
             excitation_factor = p.excitation_factor
@@ -369,10 +369,10 @@ class Wrapper:
             target_function_ /= excitation_factor  # scale target function up to 100% to fit the calculations
             target_xyz = xyz_start  # added simply to run the rmsd analysis later compared to this
         else:
-            print('Error: mode value must be "xyz" or "dat"!')
+            print('Error: mode value must be "test" or "normal"!')
         ###########################################################
         ###########################################################
-        ### End Section: xyz or dat mode handling               ###
+        ### End Section: test or normal mode handling               ###
         ###########################################################
         ###########################################################
 

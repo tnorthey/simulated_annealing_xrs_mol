@@ -25,7 +25,7 @@ python3 run.py --help
 
 ### Basic Run with Overrides
 ```bash
-python3 run.py --mode xyz --molecule chd --run-id test_run
+python3 run.py --mode test --molecule chd --run-id test_run
 ```
 
 ### Override File Paths
@@ -134,7 +134,7 @@ python3 run.py --write-dat-file
 ```bash
 python3 run.py \
     --config input.toml \
-    --mode xyz \
+    --mode test \
     --molecule chd \
     --run-id production_run_001 \
     --results-dir results/production \
@@ -232,7 +232,7 @@ python3 run.py \
 
 3. **Parameter Overrides**: Only parameters explicitly provided on the command line override the TOML file values. Unspecified parameters use TOML defaults.
 
-4. **Mode Validation**: The `--mode` argument must be either `"dat"` or `"xyz"` (case-insensitive).
+4. **Mode Validation**: The `--mode` argument must be either `"normal"` or `"test"` (case-insensitive).
 
 5. **Molecule Parameters**: The `--molecule` argument must match a section in `molecule_params` in the TOML file (e.g., `[molecule_params.chd]`).
 

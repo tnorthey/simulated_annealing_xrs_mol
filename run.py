@@ -3,7 +3,7 @@ Run simulated annealing
 """
 
 # run example: python3 run.py
-# Override defaults: python3 run.py --mode xyz --molecule chd --run-id test_run
+# Override defaults: python3 run.py --mode test --molecule chd --run-id test_run
 
 import argparse
 from timeit import default_timer
@@ -27,8 +27,8 @@ def create_parser():
                        help='Path to TOML config file')
     
     # Mode
-    parser.add_argument('--mode', type=str, choices=['dat', 'xyz'],
-                       help='Mode: "dat" or "xyz"')
+    parser.add_argument('--mode', type=str, choices=['normal', 'test'],
+                       help='Mode: "normal" or "test"')
     
     # Run params
     run_group = parser.add_argument_group('run_params', 'Run parameters')

@@ -58,7 +58,7 @@ def sample_qvector():
 @pytest.fixture
 def sample_toml_file():
     """Create a temporary TOML file for testing"""
-    toml_content = """mode = "xyz"
+    toml_content = """mode = "test"
 
 [run_params]
 run_id = "test_run"
