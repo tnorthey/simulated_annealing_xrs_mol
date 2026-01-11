@@ -133,8 +133,11 @@ class Annealing:
             qy = r_grid * np.sin(th_grid) * np.sin(ph_grid)
             qz = r_grid * np.cos(th_grid)
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
+        # Pre-compute abs(target_function) to avoid repeated abs() calls in loop
+        abs_target_function = np.abs(target_function)
+        ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
-        @njit(nogil=True)  # numba decorator to compile to machine code
+        @njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
         def run_annealing(nsteps):
 
             ##=#=#=# INITIATE LOOP VARIABLES #=#=#=#=#
@@ -236,7 +239,7 @@ class Annealing:
                     xray_contrib = (
                         np.sum(
                             (predicted_function_ - target_function) ** 2
-                            / np.abs(target_function)
+                            / abs_target_function
                         )
                         * inv_n
                     )
@@ -333,7 +336,8 @@ class Annealing:
                 ##=#=#=# END PCD & DSIGNAL CALCULATIONS #=#=#=##
 
                 ##=#=#=# ACCEPTANCE CRITERIA #=#=#=##
-                if f_ / f < 0.999:
+                # Use multiplication instead of division (faster)
+                if f_ < f * 0.999:
                     c += 1  # count acceptances
                     f, xyz = f_, xyz_  # update f and xyz
                     if f < f_best:
@@ -443,47 +447,3 @@ class Annealing:
                     displacements[j, dindex, 2] = tmp[i, j]  # z coordinates
         return displacements
 
-    def displacements_from_wavenumbers(self, wavenumbers, step_size, exponential=False):
-        nmodes = len(wavenumbers)
-        displacement_factors = np.zeros(nmodes)
-        for i in range(nmodes):  # initial factors are inv. prop. to wavenumber
-            if wavenumbers[i] > 0:
-                if exponential:
-                    displacement_factors[i] = np.exp(wavenumbers[0] / wavenumbers[i])
-                else:
-                    displacement_factors[i] = wavenumbers[0] / wavenumbers[i]
-            else:
-                displacement_factors[i] = 0.0
-        displacement_factors *= step_size  # adjust max size of displacement step
-        return displacement_factors
-
-    def uniform_factors(self, nmodes, displacement_factors):
-        """uniformly random displacement step along each mode"""
-        # initialise random number generator (with random seed)
-        rng = np.random.default_rng()
-        factors = np.zeros(nmodes)
-        for j in range(nmodes):
-            # random factors in range [-a, a]
-            a = displacement_factors[j]
-            factors[j] = 2 * a * rng.random() - a
-        return factors
-
-    def simulate_trajectory(
-        self, starting_xyz, displacements, wavenumbers, nsteps, step_size
-    ):
-        """creates a simulated trajectory by randomly moving along normal modes"""
-        natom = starting_xyz.shape[0]
-        nmodes = len(wavenumbers)
-        modes = list(range(nmodes))
-        displacement_factors = self.displacements_from_wavenumbers(
-            wavenumbers, step_size
-        )
-        xyz = starting_xyz  # start at starting xyz
-        xyz_traj = np.zeros((natom, 3, nsteps))
-        for i in range(nsteps):
-            factors = self.uniform_factors(
-                nmodes, displacement_factors
-            )  # random factors
-            xyz = nm.nm_displacer(xyz, displacements, modes, factors)
-            xyz_traj[:, :, i] = xyz
-        return xyz_traj

@@ -36,13 +36,6 @@ class Xyz:
         }
         return periodic_table_dict.get(element)
 
-    def atomic_mass(self, element: str):
-        """Outputs atomic mass for each element in the periodic table"""
-        with open("data/atomic_masses.txt") as am_file:
-            for line in am_file:
-                if line.split()[0] == element:
-                    return float(line.split()[1])
-
     # read/write xyz files
 
     def read_xyz(self, fname: str):
@@ -65,50 +58,6 @@ class Xyz:
             fmt="%s",
             delimiter=" ",
             header=str(natom) + "\n" + comment,
-            footer="",
-            comments="",
-        )
-        return
-
-    def read_xyz_traj(self, fname: str, ntsteps: int):
-        """Read a .xyz trajectory file"""
-        with open(fname, "r") as xyzfile:
-            natoms = int(xyzfile.readline())
-            comment = xyzfile.readline()
-            xyztraj = np.zeros((natoms, 3, ntsteps))
-            atomarray = []
-            for line in range(natoms):
-                atomarray.append(xyzfile.readline().split()[0])
-                print(atomarray)
-        with open(fname, "r") as xyzfile:
-            for t in range(ntsteps):
-                print("read_xyz_traj: reading frame: %i" % t)
-                natoms = int(xyzfile.readline())
-                comment = xyzfile.readline()
-                for line in range(natoms):
-                    xyztraj[line, :, t] = xyzfile.readline().split()[1:4]
-        return natoms, comment, atomarray, xyztraj
-
-    def write_xyz_traj(self, fname, atoms, xyz_traj):
-        """converts xyz_traj array to traj.xyz"""
-        natom = len(atoms)
-        atoms_xyz_traj = np.empty((1, 4))
-        for t in range(xyz_traj.shape[2]):
-            comment = "iteration: %i" % t
-            xyz = xyz_traj[:, :, t]
-            xyz = xyz.astype("|S14")  # convert to string array (max length 14)
-            tmp = np.array([[str(natom), "", "", ""], [comment, "", "", ""]])
-            atoms_xyz = np.append(np.transpose([atoms]), xyz, axis=1)
-            atoms_xyz = np.append(tmp, atoms_xyz, axis=0)
-            atoms_xyz_traj = np.append(atoms_xyz_traj, atoms_xyz, axis=0)
-        atoms_xyz_traj = atoms_xyz_traj[1:, :]  # remove 1st line of array
-        print("writing %s..." % fname)
-        np.savetxt(
-            fname,
-            atoms_xyz_traj,
-            fmt="%s",
-            delimiter=" ",
-            header="",
             footer="",
             comments="",
         )
