@@ -197,6 +197,6 @@ p = read_input.Input_to_params(args.config, overrides=overrides)
 p = w.run_xyz_openff_mm_params(p, p.start_xyz_file)
 
 # Call the run function
-w.run(p, p.run_id, p.start_xyz_file, p.target_file)
+w.run(p)
 
 print("Total time: %3.2f s" % float(default_timer() - start))
