@@ -1,21 +1,38 @@
 # import math
 import numpy as np
-import json
 import sys
 import pprint
+
+# Try to use tomllib (Python 3.11+) or fall back to tomli
+try:
+    import tomllib
+except ImportError:
+    try:
+        import tomli as tomllib
+    except ImportError:
+        raise ImportError("Please install 'tomli' package: pip install tomli")
 
 
 ######
 class Input_to_params:
     """read parameters for simulated annealing"""
 
-    def __init__(self, input_json_file):
-        """initialise with hard-coded params"""
+    def __init__(self, input_toml_file, overrides=None):
+        """initialise with TOML file and optional argparse overrides
+        
+        Args:
+            input_toml_file: Path to TOML input file
+            overrides: Dict of parameter overrides from argparse (optional)
+        """
 
         ###################################
-        # Load input JSON
-        with open(input_json_file, "r") as f:
-            data = json.load(f)
+        # Load input TOML
+        with open(input_toml_file, "rb") as f:
+            data = tomllib.load(f)
+        
+        # Apply overrides if provided (merge into data structure)
+        if overrides:
+            self._apply_overrides(data, overrides)
         ### Parameters
         # mode
         self.mode = str(data["mode"])
@@ -40,7 +57,7 @@ class Input_to_params:
         self.write_dat_file_bool = bool(data["options"]["write_dat_file_bool"])
         # sampling options
         self.sampling_bool = bool(data["sampling"]["sampling_bool"])
-        self.boltzmann_temperature = bool(data["sampling"]["boltzmann_temperature"])
+        self.boltzmann_temperature = float(data["sampling"]["boltzmann_temperature"])
         # file params
         self.forcefield_file = str(data["files"]["forcefield_file"])
         self.start_xyz_file = str(data["files"]["start_xyz_file"])
@@ -164,3 +181,19 @@ class Input_to_params:
         print("##################################################")
 
         ###################################
+    
+    def _apply_overrides(self, data, overrides):
+        """Apply argparse overrides to data dictionary using nested key paths"""
+        for key_path, value in overrides.items():
+            if value is None:
+                continue
+            # Split the dotted path (e.g., "run_params.run_id")
+            parts = key_path.split('.')
+            current = data
+            # Navigate to the parent dict
+            for part in parts[:-1]:
+                if part not in current:
+                    current[part] = {}
+                current = current[part]
+            # Set the value
+            current[parts[-1]] = value
