@@ -2,6 +2,25 @@
 
 Simulated annealing optimization for X-ray scattering molecular structure refinement.
 
+---
+
+## Installation (via Conda)
+
+We recommend using **[Miniconda](https://docs.conda.io/en/latest/miniconda.html)** or **Anaconda** for environment setup.
+
+1. Create a new conda environment:
+   ```sh
+   conda create --name sa python=3.10
+   conda activate sa
+   ```
+
+2. Install the following required packages from `conda-forge`:
+   ```sh
+   conda install -c conda-forge pyscf numba rdkit openbabel openmm openff-toolkit openff-forcefields pytest
+   ```
+---
+
+
 ## Quick Start
 
 ### Basic Usage
