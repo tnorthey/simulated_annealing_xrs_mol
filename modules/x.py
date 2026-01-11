@@ -243,7 +243,7 @@ class Xray:
         compton_array = np.zeros(
             (natom, len(qvector))
         )  # inelastic component for each atom
-        tmp = np.load("data_/Compton_Scattering_Intensities.npz")  # compton factors
+        tmp = np.load("data/Compton_Scattering_Intensities.npz")  # compton factors
         q_compton, arr = tmp["q_compton"], tmp["compton"]
         for i in range(natom):
             tck = interpolate.splrep(q_compton, arr[atomic_numbers[i] - 1, :], s=0)
@@ -348,7 +348,7 @@ class Xray:
         compton_array = np.zeros(
             (natoms, len(qvector))
         )  # inelastic component for each atom
-        tmp = np.load("data_/Compton_Scattering_Intensities.npz")  # compton factors
+        tmp = np.load("data/Compton_Scattering_Intensities.npz")  # compton factors
         q_compton, arr = tmp["q_compton"], tmp["compton"]
         for i in range(natoms):
             tck = interpolate.splrep(q_compton, arr[atomic_numbers[i] - 1, :], s=0)

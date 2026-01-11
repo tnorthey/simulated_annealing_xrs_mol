@@ -38,7 +38,7 @@ class Xyz:
 
     def atomic_mass(self, element: str):
         """Outputs atomic mass for each element in the periodic table"""
-        with open("data_/atomic_masses.txt") as am_file:
+        with open("data/atomic_masses.txt") as am_file:
             for line in am_file:
                 if line.split()[0] == element:
                     return float(line.split()[1])
