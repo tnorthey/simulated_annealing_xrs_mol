@@ -107,7 +107,7 @@ plen = 21
 
 [scattering_params.noise]
 noise_value = 0.0
-noise_data_file = "noise/noise.dat"
+noise_data_file = "data/noise.dat"
 
 [simulated_annealing_params]
 sa_starting_temp = 1.0

@@ -101,8 +101,8 @@ plen = 21
 [scattering_params.noise]
 # Standard deviation of noise to add to target function
 noise_value = 0.0
-# Path to noise data file (if file exists, reads from file; otherwise generates random noise)
-noise_data_file = "noise/noise.dat"
+# Path to noise data file (if file exists, reads from file; otherwise generates random noise and saves to data directory)
+noise_data_file = "data/noise.dat"
 
 # ============================================================================
 # SIMULATED ANNEALING PARAMETERS

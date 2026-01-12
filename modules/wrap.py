@@ -342,6 +342,12 @@ class Wrapper:
                     % sigma
                 )
                 noise_array = sigma * np.random.randn(p.qlen) + mu
+                # Save generated noise to data directory
+                noise_dir = os.path.dirname(p.noise_data_file)
+                if noise_dir and not os.path.exists(noise_dir):
+                    os.makedirs(noise_dir, exist_ok=True)
+                np.savetxt(p.noise_data_file, noise_array)
+                print(f"Saved generated noise to {p.noise_data_file}")
             # if Ewald mode the noise_array has to be 3D
             if p.ewald_mode:
                 noise_array_3d = np.zeros((p.qlen, p.tlen, p.plen))
