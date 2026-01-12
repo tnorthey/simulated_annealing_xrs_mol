@@ -193,6 +193,130 @@ python3 run.py \
     --c-tuning-initial 0.001
 ```
 
+## Standalone IAM Calculation Tool
+
+The `calculate_iam.py` script is a standalone tool for calculating IAM (Independent Atom Model) scattering signals from XYZ files without running the full simulated annealing optimization. This is useful for:
+
+- **Quick IAM calculations** from single structures or trajectories
+- **Generating reference signals** for comparison
+- **Testing scattering calculations** independently
+- **Batch processing** multiple structures
+
+### Basic Usage
+
+Calculate IAM signal from a single XYZ file:
+```bash
+python3 calculate_iam.py input.xyz output.dat
+```
+
+Calculate IAM from an XYZ trajectory (multiple structures):
+```bash
+python3 calculate_iam.py trajectory.xyz output.dat
+```
+
+### Q-Vector Parameters
+
+Configure the q-vector range and resolution:
+```bash
+python3 calculate_iam.py input.xyz output.dat \
+    --qmin 0.1 \
+    --qmax 8.0 \
+    --qlen 100
+```
+
+### PCD Mode (Percentage Change Difference)
+
+Calculate PCD signal relative to a reference structure:
+```bash
+python3 calculate_iam.py input.xyz output.dat \
+    --reference reference.xyz \
+    --pcd
+```
+
+PCD is calculated as: `PCD = 100 × (IAM / reference_IAM - 1)`
+
+### Inelastic Scattering
+
+Include Compton (inelastic) scattering contributions:
+```bash
+python3 calculate_iam.py input.xyz output.dat --inelastic
+```
+
+**Note**: Requires `data/Compton_Scattering_Intensities.npz` file. If not found, the script will continue without inelastic scattering.
+
+### Ewald Sphere Mode
+
+Calculate 3D scattering in Ewald sphere mode:
+```bash
+python3 calculate_iam.py input.xyz output.dat --ewald
+```
+
+Configure Ewald parameters (theta and phi angles):
+```bash
+python3 calculate_iam.py input.xyz output.dat \
+    --ewald \
+    --tmin 0.0 \
+    --tmax 1.0 \
+    --tlen 21 \
+    --pmin 0.0 \
+    --pmax 2.0 \
+    --plen 21
+```
+
+**Note**: Theta and phi are specified in units of π (e.g., `tmax=1.0` means π radians).
+
+### Combined Options
+
+Example with all options enabled:
+```bash
+python3 calculate_iam.py input.xyz output.dat \
+    --reference reference.xyz \
+    --pcd \
+    --inelastic \
+    --ewald \
+    --qmin 0.1 \
+    --qmax 8.0 \
+    --qlen 100 \
+    --tmin 0.0 \
+    --tmax 1.0 \
+    --tlen 21 \
+    --pmin 0.0 \
+    --pmax 2.0 \
+    --plen 21
+```
+
+### Output Format
+
+- **Single structure**: Output file contains two columns: `q (Å⁻¹)` and `IAM signal`
+- **Trajectory**: Output file contains multiple columns: `q (Å⁻¹)`, `IAM_1`, `IAM_2`, `IAM_3`, ...
+
+### Command-Line Arguments
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `input_xyz` | required | - | Input XYZ file (single structure or trajectory) |
+| `output_dat` | required | - | Output DAT file with IAM signal |
+| `--qmin` | float | 0.1 | Minimum q value (Å⁻¹) |
+| `--qmax` | float | 8.0 | Maximum q value (Å⁻¹) |
+| `--qlen` | int | 100 | Number of q points |
+| `--reference` | str | None | Reference XYZ file for PCD calculation |
+| `--pcd` | flag | False | Calculate PCD instead of IAM |
+| `--inelastic` | flag | False | Include inelastic (Compton) scattering |
+| `--ewald` | flag | False | Use Ewald sphere mode (3D scattering) |
+| `--tmin` | float | 0.0 | Minimum theta (units of π) |
+| `--tmax` | float | 1.0 | Maximum theta (units of π) |
+| `--tlen` | int | 21 | Number of theta points |
+| `--pmin` | float | 0.0 | Minimum phi (units of π) |
+| `--pmax` | float | 2.0 | Maximum phi (units of π) |
+| `--plen` | int | 21 | Number of phi points |
+
+### Help
+
+View all available options:
+```bash
+python3 calculate_iam.py --help
+```
+
 ## Parameter Groups
 
 > **Note**: Detailed explanations of all parameters, including their units, purpose, and relationships, are provided as comments in the `input.toml` configuration file. Refer to that file for comprehensive parameter documentation.

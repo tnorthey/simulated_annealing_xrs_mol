@@ -78,18 +78,18 @@ class Wrapper:
         
         if not use_robust_method or topology is None:
             # Original SDF-based method (fallback)
-            # Remove path
-            filename = os.path.basename(start_xyz_file)
-            filename_without_ext = os.path.splitext(filename)[0]
-            sdf_file = p.start_sdf_file
-            # sdf_file = f"{p.results_dir}/{filename_without_ext}.sdf"
+        # Remove path
+        filename = os.path.basename(start_xyz_file)
+        filename_without_ext = os.path.splitext(filename)[0]
+        sdf_file = p.start_sdf_file
+        # sdf_file = f"{p.results_dir}/{filename_without_ext}.sdf"
             # Default action: If SDF file exists, use it instead of recreating from XYZ
             if os.path.exists(sdf_file):
                 print(f"Using existing SDF file: {sdf_file}")
             else:
                 print(f"SDF file not found. Creating SDF file from XYZ: {start_xyz_file}")
                 try:
-                    mm_params.openbabel_xyz2sdf(start_xyz_file, sdf_file)
+            mm_params.openbabel_xyz2sdf(start_xyz_file, sdf_file)
                 except Exception as e:
                     print(f"Warning: Failed to create SDF file with OpenBabel: {e}")
                     print("Trying RDKit method instead...")
@@ -103,7 +103,7 @@ class Wrapper:
                             f"RDKit error: {e2}\n"
                             f"Please check your XYZ file: {start_xyz_file}"
                         ) from e2
-            # Now read the SDF file...
+        # Now read the SDF file...
             try:
                 # Try robust SDF method first (applies same fixes as robust XYZ method)
                 print("Attempting robust SDF method (with radical fixing and bond simplification)...")
@@ -115,9 +115,9 @@ class Wrapper:
                 except Exception as e_robust:
                     print(f"Robust SDF method failed: {e_robust}")
                     print("Trying original SDF method...")
-                    topology, openmm_system = mm_params.create_topology_from_sdf(
-                        sdf_file, p.forcefield_file
-                    )
+        topology, openmm_system = mm_params.create_topology_from_sdf(
+            sdf_file, p.forcefield_file
+        )
             except Exception as e:
                 import traceback
                 print(f"\n{'='*60}")
