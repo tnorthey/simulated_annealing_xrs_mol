@@ -83,7 +83,7 @@ def create_parser():
                               dest='scattering_params.excitation_factor',
                               help='Excitation factor')
     scatter_group.add_argument('--ewald-mode', action='store_true',
-                              dest='scattering_params.ewald_mode_bool', help='Ewald mode')
+                              dest='scattering_params.ewald.ewald_mode_bool', help='Ewald mode')
     
     # Q params
     scatter_group.add_argument('--qmin', type=float, dest='scattering_params.q.qmin',
@@ -94,19 +94,19 @@ def create_parser():
                               help='Q length')
     
     # Theta params
-    scatter_group.add_argument('--tmin', type=float, dest='scattering_params.th.tmin',
+    scatter_group.add_argument('--tmin', type=float, dest='scattering_params.ewald.th.tmin',
                               help='Theta minimum')
-    scatter_group.add_argument('--tmax', type=float, dest='scattering_params.th.tmax',
+    scatter_group.add_argument('--tmax', type=float, dest='scattering_params.ewald.th.tmax',
                               help='Theta maximum')
-    scatter_group.add_argument('--tlen', type=int, dest='scattering_params.th.tlen',
+    scatter_group.add_argument('--tlen', type=int, dest='scattering_params.ewald.th.tlen',
                               help='Theta length')
     
     # Phi params
-    scatter_group.add_argument('--pmin', type=float, dest='scattering_params.ph.pmin',
+    scatter_group.add_argument('--pmin', type=float, dest='scattering_params.ewald.ph.pmin',
                               help='Phi minimum')
-    scatter_group.add_argument('--pmax', type=float, dest='scattering_params.ph.pmax',
+    scatter_group.add_argument('--pmax', type=float, dest='scattering_params.ewald.ph.pmax',
                               help='Phi maximum')
-    scatter_group.add_argument('--plen', type=int, dest='scattering_params.ph.plen',
+    scatter_group.add_argument('--plen', type=int, dest='scattering_params.ewald.ph.plen',
                               help='Phi length')
     
     # Noise params
@@ -160,6 +160,9 @@ def create_parser():
     sa_group.add_argument('--non-h-modes-only', action='store_true',
                          dest='simulated_annealing_params.non_h_modes_only_bool',
                          help='Only include non-hydrogen modes')
+    sa_group.add_argument('--hydrogen-mode-damping-factor', type=float,
+                         dest='simulated_annealing_params.hydrogen_mode_damping_factor',
+                         help='Damping factor for hydrogen modes (multiplies step size)')
     sa_group.add_argument('--hf-energy', action='store_true',
                          dest='simulated_annealing_params.hf_energy_bool',
                          help='Run PySCF HF energy')

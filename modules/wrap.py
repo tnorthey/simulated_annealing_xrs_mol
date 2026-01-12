@@ -264,11 +264,6 @@ class Wrapper:
 
         natoms = xyz_start.shape[0]
         ###### mode displacements ######
-        old_txtfile_method = False
-        if (
-            old_txtfile_method
-        ):  # Don't use this unless needed or debugging. Use the PySCF mode option!
-            displacements = sa.read_nm_displacements(p.nmfile, natoms)
         if p.run_pyscf_modes_bool:
             print("Running PySCF normal modes calculation...")
             displacements, freq_cm1 = pyscfw.xyz_calc_modes(
@@ -294,7 +289,7 @@ class Wrapper:
         # hydrogen modes damped
         sa_h_mode_modification = np.ones(nmodes)
         for i in p.hydrogen_mode_indices:
-            sa_h_mode_modification[i] = 0.2
+            sa_h_mode_modification[i] = p.hydrogen_mode_damping_factor
         p.sa_step_size_array = p.sa_step_size * np.ones(nmodes) * sa_h_mode_modification
 
         #############################

@@ -30,6 +30,8 @@ Run with default configuration (uses `input.toml`):
 python3 run.py
 ```
 
+> **Tip**: The `input.toml` file contains detailed comments explaining all parameters. See that file for comprehensive parameter documentation.
+
 Run with a different config file:
 ```bash
 python3 run.py --config my_config.toml
@@ -192,6 +194,8 @@ python3 run.py \
 ```
 
 ## Parameter Groups
+
+> **Note**: Detailed explanations of all parameters, including their units, purpose, and relationships, are provided as comments in the `input.toml` configuration file. Refer to that file for comprehensive parameter documentation.
 
 ### Run Parameters
 - `--run-id`: Run identifier

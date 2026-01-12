@@ -68,19 +68,20 @@ class Input_to_params:
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])
         self.pcd_mode = bool(data["scattering_params"]["pcd_mode_bool"])
         self.excitation_factor = float(data["scattering_params"]["excitation_factor"])
-        self.ewald_mode = bool(data["scattering_params"]["ewald_mode_bool"])
+        # ewald params
+        self.ewald_mode = bool(data["scattering_params"]["ewald"]["ewald_mode_bool"])
         # radial q params
         self.qmin = float(data["scattering_params"]["q"]["qmin"])
         self.qmax = float(data["scattering_params"]["q"]["qmax"])
         self.qlen = int(data["scattering_params"]["q"]["qlen"])
-        # theta params
-        self.tmin = float(data["scattering_params"]["th"]["tmin"])
-        self.tmax = float(data["scattering_params"]["th"]["tmax"])
-        self.tlen = int(data["scattering_params"]["th"]["tlen"])
-        # phi params
-        self.pmin = float(data["scattering_params"]["ph"]["pmin"])
-        self.pmax = float(data["scattering_params"]["ph"]["pmax"])
-        self.plen = int(data["scattering_params"]["ph"]["plen"])
+        # theta params (from ewald section)
+        self.tmin = float(data["scattering_params"]["ewald"]["th"]["tmin"])
+        self.tmax = float(data["scattering_params"]["ewald"]["th"]["tmax"])
+        self.tlen = int(data["scattering_params"]["ewald"]["th"]["tlen"])
+        # phi params (from ewald section)
+        self.pmin = float(data["scattering_params"]["ewald"]["ph"]["pmin"])
+        self.pmax = float(data["scattering_params"]["ewald"]["ph"]["pmax"])
+        self.plen = int(data["scattering_params"]["ewald"]["ph"]["plen"])
         # noise params
         self.noise_value = float(data["scattering_params"]["noise"]["noise_value"])
         self.noise_data_file = str(
@@ -115,6 +116,9 @@ class Input_to_params:
         self.non_h_modes_only = bool(
             data["simulated_annealing_params"]["non_h_modes_only_bool"]
         )  # only include "non-hydrogen" modes
+        self.hydrogen_mode_damping_factor = float(
+            data["simulated_annealing_params"]["hydrogen_mode_damping_factor"]
+        )  # damping factor for hydrogen modes
         self.hf_energy = bool(
             data["simulated_annealing_params"]["hf_energy_bool"]
         )  # run PySCF HF energy
@@ -123,7 +127,6 @@ class Input_to_params:
         molecule = self.molecule
         self.natoms = int(data["molecule_params"][molecule]["natoms"])
         self.nmodes = int(data["molecule_params"][molecule]["nmodes"])
-        self.nmfile = str(data["molecule_params"][molecule]["nmfile"])
         self.hydrogen_mode_range = np.array(
             data["molecule_params"][molecule]["hydrogen_mode_range"]
         )

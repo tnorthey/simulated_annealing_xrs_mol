@@ -422,28 +422,3 @@ class Annealing:
             c_tuning_adjusted,
         )
 
-    def read_nm_displacements(self, fname: str, natoms: int) -> NDArray:
-        """read_nm_displacements: Reads displacement vector from file=fname e.g. 'normalmodes.txt'
-        Inputs: 	natoms (int), total number of atoms
-        Outputs:	displacements, array of displacements, size: (nmodes, natoms, 3)"""
-        if natoms == 2:
-            nmodes = 1
-        elif natoms > 2:
-            nmodes = 3 * natoms - 6
-        else:
-            print("ERROR: natoms. Are there < 2 atoms?")
-            return False
-        with open(fname, "r") as xyzfile:
-            tmp = np.loadtxt(fname)
-        displacements = np.zeros((nmodes, natoms, 3))
-        for i in range(3 * natoms):
-            for j in range(nmodes):
-                if i % 3 == 0:  # Indices 0,3,6,...
-                    dindex = int(i / 3)
-                    displacements[j, dindex, 0] = tmp[i, j]  # x coordinates
-                elif (i - 1) % 3 == 0:  # Indices 1,4,7,...
-                    displacements[j, dindex, 1] = tmp[i, j]  # y coordinates
-                elif (i - 2) % 3 == 0:  # Indices 2,5,8,...
-                    displacements[j, dindex, 2] = tmp[i, j]  # z coordinates
-        return displacements
-

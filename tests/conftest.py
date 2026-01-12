@@ -86,19 +86,21 @@ boltzmann_temperature = 300.0
 inelastic_bool = true
 pcd_mode_bool = false
 excitation_factor = 1.0
-ewald_mode_bool = false
 
 [scattering_params.q]
 qmin = 0.1
 qmax = 10.0
 qlen = 50
 
-[scattering_params.th]
+[scattering_params.ewald]
+ewald_mode_bool = false
+
+[scattering_params.ewald.th]
 tmin = 0.0
 tmax = 1.0
 tlen = 21
 
-[scattering_params.ph]
+[scattering_params.ewald.ph]
 pmin = 0.0
 pmax = 2.0
 plen = 21
@@ -122,12 +124,12 @@ torsions_bool = true
 tuning_ratio_target = 1.0
 c_tuning_initial = 1.0
 non_h_modes_only_bool = false
+hydrogen_mode_damping_factor = 0.2
 hf_energy_bool = false
 
 [molecule_params.test]
 natoms = 2
 nmodes = 6
-nmfile = "nm/test_normalmodes.txt"
 hydrogen_mode_range = [4, 6]
 sa_mode_range = [0, 6]
 ga_mode_range = [0, 6]
