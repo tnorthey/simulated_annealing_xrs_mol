@@ -32,8 +32,8 @@ class Sample:
         bohr_to_ang = 0.529177210903
         std_ang = std_bohr * bohr_to_ang
 
-        # Sample random coefficients
-        coeffs = np.random.normal(0.0, std_ang)  # shape (N_modes,)
+        # Sample random coefficients from normal distribution with mode-specific standard deviations
+        coeffs = np.random.normal(0.0, std_ang, size=len(std_ang))  # shape (N_modes,)
 
         # Weighted sum over modes
         displacement = np.tensordot(coeffs, modes, axes=(0, 0))  # shape (N_atoms, 3)

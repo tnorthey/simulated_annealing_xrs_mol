@@ -247,6 +247,101 @@ python3 run.py \
 - `--non-h-modes-only`: Only use non-hydrogen modes
 - `--hf-energy`: Run PySCF HF energy calculation
 
+## Generic Force Constants (Fallback Method)
+
+When the program cannot obtain molecular mechanics (MM) force field parameters from OpenFF Toolkit (e.g., due to radicals, unusual bond orders, or other compatibility issues), it automatically falls back to a **geometry-based parameter extraction method** that uses generic force constants.
+
+### When Are Generic Force Constants Used?
+
+The generic force constants are used as a **last-resort fallback** when:
+1. The robust XYZ-to-OpenFF method fails (after radical fixing and bond simplification)
+2. The robust SDF method fails (after radical fixing and bond simplification)
+3. The original SDF method fails
+
+If any of these methods succeed, the program uses the force field parameters from OpenFF Toolkit instead.
+
+### What Are the Generic Force Constants?
+
+The fallback method extracts parameters directly from your starting geometry:
+
+- **Equilibrium values**: Calculated from the current XYZ coordinates
+  - Bond lengths: Current distances between bonded atoms
+  - Bond angles: Current angles between three connected atoms
+  - Torsion angles: Current dihedral angles between four connected atoms
+
+- **Force constants**: Generic values based on typical molecular mechanics force fields:
+
+#### Bond Force Constants
+```
+k_bond = 400.0 + 50.0 × (average atomic number)  [kcal/mol/Å²]
+```
+
+**Examples:**
+- C-C bond (both atomic number 6): `400 + 50×6 = 700 kcal/mol/Å²`
+- C-H bond (avg atomic number ~3.5): `400 + 50×3.5 = 575 kcal/mol/Å²`
+- C-O bond (avg atomic number ~7): `400 + 50×7 = 750 kcal/mol/Å²`
+
+**Reference**: Typical C-C bonds in OpenFF are ~529 kcal/mol/Å², so these values are in a similar range (slightly higher for safety).
+
+#### Angle Force Constants
+```
+k_angle = 60.0  [kcal/mol/rad²]
+```
+
+This is a fixed value for all angles. Typical range in force fields: 50-100 kcal/mol/rad².
+
+#### Torsion Force Constants
+```
+k_torsion = 2.0  [kcal/mol]
+```
+
+This is a fixed value for all torsions. Typical range in force fields: 0.1-5 kcal/mol.
+
+### Where Do These Values Come From?
+
+These generic force constants are based on typical values from standard molecular mechanics force fields:
+
+- **AMBER**: Bond constants ~300-600 kcal/mol/Å², angle constants ~40-100 kcal/mol/rad², torsion constants ~0.1-3 kcal/mol
+- **CHARMM**: Similar ranges to AMBER
+- **OpenFF**: Bond constants ~400-800 kcal/mol/Å², angle constants ~50-100 kcal/mol/rad², torsion constants ~0.1-5 kcal/mol
+
+The values chosen are:
+- **Conservative** (slightly higher than typical) to provide reasonable constraints
+- **Within typical ranges** used in standard force fields
+- **Simple heuristics** that work for most organic molecules
+
+### Limitations
+
+The generic force constants are **approximations** and have the following limitations:
+
+1. **Not atom-type specific**: All C-C bonds get the same force constant, regardless of hybridization (sp³ vs sp²)
+2. **Not bond-order specific**: Single, double, and triple bonds are treated the same
+3. **Not environment-specific**: Aromatic vs aliphatic bonds are treated the same
+4. **Fixed angle/torsion constants**: All angles and torsions use the same force constant regardless of atom types
+
+### Why They Work
+
+Despite these limitations, the generic force constants work well for simulated annealing because:
+
+1. **Reasonable constraints**: They provide sufficient constraints to keep the structure near the starting geometry
+2. **Typical ranges**: The values are within typical force field ranges
+3. **Equilibrium from geometry**: The equilibrium values come from your actual starting structure, so they're appropriate for your molecule
+4. **Simulated annealing tolerance**: For optimization purposes, approximate constraints are often sufficient
+
+### How to Know If Generic Force Constants Are Being Used
+
+When the fallback method is used, you'll see output like:
+```
+Both robust method and SDF method failed!
+Attempting final fallback: extracting parameters directly from geometry...
+(This uses starting geometry as equilibrium values with generic force constants)
+Successfully extracted parameters from geometry!
+Found X bonds, Y angles, Z torsions
+Note: Using generic force constants and starting geometry as equilibrium values.
+```
+
+If you see this message, the program is using generic force constants instead of OpenFF parameters.
+
 ## Notes
 
 1. **Default Values**: All parameters have default values defined in the TOML config file (`input.toml` by default). Command-line arguments override these defaults.
