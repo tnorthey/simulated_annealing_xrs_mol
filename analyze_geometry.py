@@ -32,6 +32,7 @@ import csv
 
 # Import modules
 import modules.mol as mol
+import modules.analysis as analysis
 
 
 def read_xyz_trajectory(filename):
@@ -89,21 +90,10 @@ def read_xyz_trajectory(filename):
     return structures
 
 
-def calculate_bond_length(xyz, i, j):
-    """Calculate bond length between atoms i and j (0-indexed)."""
-    return np.linalg.norm(xyz[i] - xyz[j])
-
-
-def calculate_angle(xyz, i, j, k):
-    """Calculate angle i-j-k in degrees (0-indexed)."""
-    m = mol.Xyz()
-    return m.angle_2p_3d(xyz[i], xyz[j], xyz[k])
-
-
-def calculate_dihedral(xyz, i, j, k, l):
-    """Calculate dihedral angle i-j-k-l in degrees (0-indexed)."""
-    m = mol.Xyz()
-    return m.new_dihedral((xyz[i], xyz[j], xyz[k], xyz[l]))
+# Use functions from analysis module
+calculate_bond_length = analysis.calculate_bond_length
+calculate_angle = analysis.calculate_angle
+calculate_dihedral = analysis.calculate_dihedral
 
 
 def validate_indices(indices, natoms, name):

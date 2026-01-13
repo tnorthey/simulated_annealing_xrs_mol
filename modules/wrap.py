@@ -19,6 +19,7 @@ import modules.sa as sa
 import modules.pyscf_wrapper as pyscf_wrapper
 import modules.openff_retreive_mm_params as openff_retreive_mm_params
 import modules.sample as sample
+import modules.analysis as analysis
 
 # create class objects
 m = mol.Xyz()
@@ -696,13 +697,13 @@ class Wrapper:
             p0 = np.array(xyz_best[p.angle_indices[0], :])
             p1 = np.array(xyz_best[p.angle_indices[1], :])  # central point
             p2 = np.array(xyz_best[p.angle_indices[2], :])
-            angle_degrees = m.directional_angle_3d(p0, p1, p2, [0, 1, 0])
+            angle_degrees = analysis.directional_angle_3d(p0, p1, p2, [0, 1, 0])
             # dihedral of interest
             p0 = np.array(xyz_best[p.dihedral_indices[0], :])
             p1 = np.array(xyz_best[p.dihedral_indices[1], :])
             p2 = np.array(xyz_best[p.dihedral_indices[2], :])
             p3 = np.array(xyz_best[p.dihedral_indices[3], :])
-            dihedral = m.new_dihedral(np.array([p0, p1, p2, p3]))
+            dihedral = analysis.new_dihedral((p0, p1, p2, p3))
             rmsd_target_bool = True
             if rmsd_target_bool:
                 # rmsd compared to target
