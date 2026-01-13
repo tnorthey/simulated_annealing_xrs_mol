@@ -49,6 +49,8 @@ def create_parser():
                             help='Start SDF file')
     files_group.add_argument('--reference-xyz-file', type=str, dest='files.reference_xyz_file',
                             help='Reference XYZ file')
+    files_group.add_argument('--reference-dat-file', type=str, dest='files.reference_dat_file',
+                            help='Reference DAT file for PCD mode (optional, overrides reference_xyz_file calculation)')
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
     

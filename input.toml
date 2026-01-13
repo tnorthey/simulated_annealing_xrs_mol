@@ -29,6 +29,9 @@ start_xyz_file = "xyz/start.xyz"
 start_sdf_file = "sdf/chd_start.sdf"
 # Reference structure for comparison (used for RMSD calculations)
 reference_xyz_file = "xyz/chd_reference.xyz"
+# Reference DAT file for PCD mode (optional, if provided, uses this instead of calculating from reference_xyz_file)
+# If empty string or not provided, reference IAM is calculated from reference_xyz_file
+reference_dat_file = ""
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
 target_file = "xyz/target.xyz"
 
@@ -43,7 +46,7 @@ pyscf_basis = "6-31g*"
 # Enable verbose output (prints all parameters during initialization)
 verbose_bool = false
 # Write DAT file output with scattering data
-write_dat_file_bool = false
+write_dat_file_bool = true
 
 # ============================================================================
 # SAMPLING PARAMETERS
@@ -121,9 +124,9 @@ sa_step_size = 0.012
 # Step size for greedy algorithm
 ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
-nrestarts = 5
+nrestarts = 2
 # Total number of runs (repeats entire process ntotalruns times)
-ntotalruns = 5
+ntotalruns = 1
 # Enable bond length constraints (harmonic oscillator potential)
 bonds_bool = true
 # Enable bond angle constraints (harmonic oscillator potential)

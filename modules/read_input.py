@@ -52,6 +52,13 @@ class Input_to_params:
         # Apply overrides if provided (merge into data structure)
         if overrides:
             self._apply_overrides(data, overrides)
+        
+        # Handle reference_dat_file: ensure it's None if empty string
+        if "files" in data and "reference_dat_file" in data["files"]:
+            ref_dat = str(data["files"]["reference_dat_file"])
+            if ref_dat == "":
+                data["files"]["reference_dat_file"] = None
+        
         ### Parameters
         # mode
         try:
@@ -102,6 +109,14 @@ class Input_to_params:
         self.start_xyz_file = str(data["files"]["start_xyz_file"])
         self.start_sdf_file = str(data["files"]["start_sdf_file"])
         self.reference_xyz_file = str(data["files"]["reference_xyz_file"])
+        # reference_dat_file is optional
+        if "reference_dat_file" in data["files"]:
+            self.reference_dat_file = str(data["files"]["reference_dat_file"])
+            # Treat empty string as None
+            if self.reference_dat_file == "":
+                self.reference_dat_file = None
+        else:
+            self.reference_dat_file = None
         self.target_file = str(data["files"]["target_file"])
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])

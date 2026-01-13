@@ -407,9 +407,33 @@ class Wrapper:
         starting_iam, atomic, compton, pre_molecular = xyz2iam(
             xyz_start, atomic_numbers, compton_array, p.ewald_mode
         )
-        reference_iam, atomic, compton, pre_molecular = xyz2iam(
-            reference_xyz, atomic_numbers, compton_array, p.ewald_mode
-        )
+        
+        # Check if reference DAT file is provided for PCD mode
+        if p.pcd_mode and p.reference_dat_file is not None and p.reference_dat_file != "":
+            # Load reference IAM from DAT file
+            print(f"Loading reference IAM from DAT file: {p.reference_dat_file}")
+            ref_data = np.loadtxt(p.reference_dat_file)
+            if ref_data.ndim == 1:
+                # Single column: assume it's I(q) and q is index-based
+                ref_q = np.arange(ref_data.size, dtype=np.float64)
+                ref_iam = ref_data.astype(np.float64)
+            else:
+                # Two or more columns: first is q, second is I
+                if ref_data.shape[1] >= 2:
+                    ref_q = ref_data[:, 0].astype(np.float64)
+                    ref_iam = ref_data[:, 1].astype(np.float64)
+                else:
+                    ref_q = np.arange(ref_data.shape[0], dtype=np.float64)
+                    ref_iam = ref_data[:, 0].astype(np.float64)
+            
+            # Interpolate to match current q-vector
+            reference_iam = np.interp(p.qvector, ref_q, ref_iam, left=ref_iam[0], right=ref_iam[-1])
+            print(f"Interpolated reference IAM from {len(ref_q)} points to {len(p.qvector)} points")
+        else:
+            # Calculate reference IAM from XYZ file (default behavior)
+            reference_iam, atomic, compton, pre_molecular = xyz2iam(
+                reference_xyz, atomic_numbers, compton_array, p.ewald_mode
+            )
 
         save_starting_reference_iams = False  # for debugging
         if save_starting_reference_iams:
