@@ -29,8 +29,8 @@ class Input_to_params:
         ###################################
         # Load input TOML
         try:
-        with open(input_toml_file, "rb") as f:
-            data = tomllib.load(f)
+            with open(input_toml_file, "rb") as f:
+                data = tomllib.load(f)
         except FileNotFoundError:
             print(f"\n{'='*60}")
             print("ERROR: Input file not found")
@@ -55,7 +55,7 @@ class Input_to_params:
         ### Parameters
         # mode
         try:
-        self.mode = str(data["mode"])
+            self.mode = str(data["mode"])
         except KeyError:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
@@ -78,9 +78,9 @@ class Input_to_params:
         
         # run params
         try:
-        self.run_id = str(data["run_params"]["run_id"])
-        self.molecule = str(data["run_params"]["molecule"])
-        self.results_dir = str(data["run_params"]["results_dir"])
+            self.run_id = str(data["run_params"]["run_id"])
+            self.molecule = str(data["run_params"]["molecule"])
+            self.results_dir = str(data["run_params"]["results_dir"])
         except KeyError as e:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
@@ -165,34 +165,34 @@ class Input_to_params:
         # molecule params
         molecule = self.molecule
         try:
-        self.natoms = int(data["molecule_params"][molecule]["natoms"])
-        self.nmodes = int(data["molecule_params"][molecule]["nmodes"])
-        self.hydrogen_mode_range = np.array(
-            data["molecule_params"][molecule]["hydrogen_mode_range"]
-        )
-        self.sa_mode_range = np.array(
-            data["molecule_params"][molecule]["sa_mode_range"]
-        )
-        self.ga_mode_range = np.array(
-            data["molecule_params"][molecule]["ga_mode_range"]
-        )
-        self.bond_ignore_array = np.array(
-            data["molecule_params"][molecule]["bond_ignore_array"]
-        )
-        self.angle_ignore_array = np.array(
-            data["molecule_params"][molecule]["angle_ignore_array"]
-        )
-        self.torsion_ignore_array = np.array(
-            data["molecule_params"][molecule]["torsion_ignore_array"]
-        )
-        self.rmsd_indices = np.array(data["molecule_params"][molecule]["rmsd_indices"])
-        self.bond_indices = np.array(data["molecule_params"][molecule]["bond_indices"])
-        self.angle_indices = np.array(
-            data["molecule_params"][molecule]["angle_indices"]
-        )
-        self.dihedral_indices = np.array(
-            data["molecule_params"][molecule]["dihedral_indices"]
-        )
+            self.natoms = int(data["molecule_params"][molecule]["natoms"])
+            self.nmodes = int(data["molecule_params"][molecule]["nmodes"])
+            self.hydrogen_mode_range = np.array(
+                data["molecule_params"][molecule]["hydrogen_mode_range"]
+            )
+            self.sa_mode_range = np.array(
+                data["molecule_params"][molecule]["sa_mode_range"]
+            )
+            self.ga_mode_range = np.array(
+                data["molecule_params"][molecule]["ga_mode_range"]
+            )
+            self.bond_ignore_array = np.array(
+                data["molecule_params"][molecule]["bond_ignore_array"]
+            )
+            self.angle_ignore_array = np.array(
+                data["molecule_params"][molecule]["angle_ignore_array"]
+            )
+            self.torsion_ignore_array = np.array(
+                data["molecule_params"][molecule]["torsion_ignore_array"]
+            )
+            self.rmsd_indices = np.array(data["molecule_params"][molecule]["rmsd_indices"])
+            self.bond_indices = np.array(data["molecule_params"][molecule]["bond_indices"])
+            self.angle_indices = np.array(
+                data["molecule_params"][molecule]["angle_indices"]
+            )
+            self.dihedral_indices = np.array(
+                data["molecule_params"][molecule]["dihedral_indices"]
+            )
         except KeyError as e:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
