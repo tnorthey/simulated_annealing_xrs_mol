@@ -73,6 +73,28 @@ class Xray:
             ]
         )
 
+        self.dd = np.array(  # extra term that I added (for approx C+ factor with Eirik data)
+            [
+                0.0000,  # hydrogen
+                0.0000,  # helium
+                0.0000,  # lithium
+                0.0000,  # berylium
+                0.0000,  # boron
+                0.1667,  # carbon (1/6)
+            ]
+        )
+
+        self.ee = np.array(  # extra term that I added (for approx C+ factor with Eirik data)
+            [
+                0.0000,  # hydrogen
+                0.0000,  # helium
+                0.0000,  # lithium
+                0.0000,  # berylium
+                0.0000,  # boron
+                1.0000,  # carbon
+            ]
+        )
+
     def iam_calc(
         self,
         atomic_numbers,
@@ -235,6 +257,9 @@ class Xray:
                     -bb[atom_number - 1, i] * (0.25 * qvector[j] / np.pi) ** 2
                 )
         atomfactor += cc[atom_number - 1]
+        eirik=True
+        if eirik:
+            atomfactor -= dd[atom_number - 1] * np.exp(- ee[atom_number - 1] * qvector ** 2)  # I added this for the extra exp term to approx C+ for Eirik data
         return atomfactor
 
     def compton_spline(self, atomic_numbers, qvector):
