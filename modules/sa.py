@@ -137,7 +137,7 @@ class Annealing:
         abs_target_function = np.abs(target_function)
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
-        #@njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
+        @njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
         def run_annealing(nsteps):
 
             ##=#=#=# INITIATE LOOP VARIABLES #=#=#=#=#

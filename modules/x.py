@@ -102,7 +102,7 @@ class Xray:
                 0.0000,  # lithium
                 0.0000,  # berylium
                 0.0000,  # boron
-                1.0000,  # carbon
+                0.5000,  # carbon
                 0.0000,  # nitrogen
                 0.0000,  # oxygen
                 0.0000,  # fluorine

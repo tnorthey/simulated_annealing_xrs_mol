@@ -126,7 +126,7 @@ ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
 nrestarts = 1
 # Total number of runs (repeats entire process ntotalruns times)
-ntotalruns = 1
+ntotalruns = 5
 # Enable bond length constraints (harmonic oscillator potential)
 bonds_bool = true
 # Enable bond angle constraints (harmonic oscillator potential)
