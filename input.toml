@@ -4,7 +4,7 @@
 # Mode: "normal" or "test" (case insensitive)
 #   - "test": Reads target structure from XYZ file and generates IAM scattering
 #   - "normal": Reads target scattering data directly from a DAT file
-mode = "test"
+mode = "normal"
 
 # ============================================================================
 # RUN PARAMETERS
@@ -31,7 +31,7 @@ start_sdf_file = "sdf/chd_start.sdf"
 reference_xyz_file = "xyz/chd_reference.xyz"
 # Reference DAT file for PCD mode (optional, if provided, uses this instead of calculating from reference_xyz_file)
 # If empty string or not provided, reference IAM is calculated from reference_xyz_file
-reference_dat_file = ""
+reference_dat_file = "data/chd_reference.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
 target_file = "xyz/target.xyz"
 
@@ -71,11 +71,11 @@ excitation_factor = 1.0
 # Q-vector parameters (scattering vector magnitude)
 [scattering_params.q]
 # Minimum q value (Å⁻¹)
-qmin = 1e-9
+qmin = 0.4
 # Maximum q value (Å⁻¹)
-qmax = 8.0
+qmax = 4.0
 # Number of q points
-qlen = 81
+qlen = 100
 
 # Ewald sphere parameters (3D scattering mode)
 [scattering_params.ewald]
@@ -124,7 +124,7 @@ sa_step_size = 0.012
 # Step size for greedy algorithm
 ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
-nrestarts = 2
+nrestarts = 1
 # Total number of runs (repeats entire process ntotalruns times)
 ntotalruns = 1
 # Enable bond length constraints (harmonic oscillator potential)
@@ -159,7 +159,7 @@ sa_mode_range = [0, 36]
 # Range of modes to use in greedy algorithm phase [start, end)
 ga_mode_range = [0, 36]
 # Bonds to ignore in constraint calculations (atom indices: [atom1, atom2])
-bond_ignore_array = [[0, 5]]
+bond_ignore_array = []
 # Angles to ignore in constraint calculations (atom indices: [atom1, atom2, atom3])
 angle_ignore_array = []
 # Torsions to ignore in constraint calculations (atom indices: [atom1, atom2, atom3, atom4])
