@@ -285,7 +285,7 @@ class Xray:
             # Only apply if atom_number is within bounds of dd and ee arrays
             idx = atom_number - 1
             if idx < len(dd) and idx < len(ee):
-                if dd[idx] != 0.0 or ee[idx] != 0.0:  # Only subtract if non-zero
+                if dd[idx] != 0.0:  # Only subtract if non-zero
                     atomfactor -= dd[idx] * np.exp(-ee[idx] * qvector ** 2)
         return atomfactor
 
