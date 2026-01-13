@@ -317,6 +317,171 @@ View all available options:
 python3 calculate_iam.py --help
 ```
 
+## Optimal Path Trajectory Tool
+
+The `optimal_path.py` script finds the globally optimal "smoothest" trajectory through multiple candidate structures at each timestep. It uses dynamic programming to minimize a weighted sum of:
+
+- **Fit factor**: Per-candidate fit quality (parsed from filename)
+- **Signal delta**: Signal difference between consecutive timesteps (MSE on interpolated common q-grid)
+- **Structure delta**: Structural difference between consecutive timesteps (Kabsch-aligned RMSD)
+
+This is useful for:
+- **Selecting optimal trajectories** from multiple candidate structures per timestep
+- **Smoothing trajectories** by minimizing structural and signal jumps
+- **Post-processing simulation results** to find the best path through candidate structures
+
+### File Naming Convention
+
+The script expects files with a specific naming pattern:
+```
+01_000.17533577.dat
+01_000.17533577.xyz
+02_000.46654335.dat
+02_000.46654335.xyz
+```
+
+Where:
+- First number (`01`, `02`, etc.) is the timestep
+- Second number (`0.17533577`, etc.) is the fit factor (lower is better)
+- Each timestep should have matching `.dat` and `.xyz` files
+
+### Basic Usage
+
+Find optimal path in a directory containing candidate files:
+```bash
+python3 optimal_path.py results/
+```
+
+This will:
+1. Load all candidate structures and signals
+2. Find the optimal path through timesteps
+3. Write the selected trajectory to `optimal_trajectory.xyz`
+4. Print the chosen path and statistics
+
+### Pruning Options
+
+Limit the number of candidates considered per timestep:
+
+**Keep top M candidates** (by fit factor):
+```bash
+python3 optimal_path.py results/ --topM 50
+```
+
+**Keep candidates within a fit window**:
+```bash
+python3 optimal_path.py results/ --delta 0.1
+```
+
+This keeps candidates with `fit <= best_fit + 0.1` at each timestep.
+
+**Combine both** (delta applied first, then topM):
+```bash
+python3 optimal_path.py results/ --delta 0.1 --topM 50
+```
+
+### Weight Configuration
+
+Control the relative importance of fit, signal, and RMSD terms:
+
+```bash
+python3 optimal_path.py results/ \
+    --fit-weight 1.0 \
+    --signal-weight 1.0 \
+    --rmsd-weight 1.0
+```
+
+**Auto-scaling** (enabled by default) normalizes weights so they're comparable:
+```bash
+python3 optimal_path.py results/  # Auto-scaling enabled
+```
+
+**Disable auto-scaling** to use raw weights:
+```bash
+python3 optimal_path.py results/ --no-autoscale
+```
+
+### RMSD Atom Selection
+
+Select which atoms to include in RMSD calculations:
+
+```bash
+python3 optimal_path.py results/ --rmsd-indices "0,1,2,5"
+```
+
+Use comma-separated atom indices (0-based). If not specified, all atoms are used.
+
+**Example**: Calculate RMSD using only heavy atoms or specific regions:
+```bash
+python3 optimal_path.py results/ --rmsd-indices "3,5,6,10,12"
+```
+
+### Output Options
+
+**Custom output filename**:
+```bash
+python3 optimal_path.py results/ --xyz-out my_trajectory.xyz
+```
+
+**Auto-scaling parameters**:
+```bash
+python3 optimal_path.py results/ \
+    --edge-sample-cap 5000 \
+    --seed 42
+```
+
+- `--edge-sample-cap`: Number of random edges sampled for auto-scaling (default: 3000)
+- `--seed`: Random seed for edge sampling (default: 0)
+
+### Complete Example
+
+```bash
+python3 optimal_path.py results/ \
+    --topM 100 \
+    --delta 0.2 \
+    --fit-weight 1.0 \
+    --signal-weight 1.0 \
+    --rmsd-weight 1.0 \
+    --rmsd-indices "3,5,6,10,12" \
+    --xyz-out optimal_trajectory.xyz \
+    --edge-sample-cap 5000 \
+    --seed 42
+```
+
+### Output
+
+The script provides:
+1. **Console output**: 
+   - Auto-scaling information (if enabled)
+   - Progress for each timestep transition
+   - Optimal path with timestep, fit, and filenames
+   - Unweighted totals (sum of fit factors, signal MSE, RMSD)
+   - Best weighted cost
+
+2. **XYZ trajectory file**: Multi-frame XYZ file containing the selected structures, with comment lines recording timestep and fit values.
+
+### Command-Line Arguments
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `directory` | required | - | Directory containing `*.dat` and `*.xyz` files |
+| `--topM` | int | 100 | Number of lowest-fit candidates to keep per timestep |
+| `--delta` | float | None | Fit window: keep candidates with `fit <= best_fit + delta` |
+| `--fit-weight` | float | 1.0 | Weight for fit factor term |
+| `--signal-weight` | float | 1.0 | Weight for signal MSE term |
+| `--rmsd-weight` | float | 1.0 | Weight for RMSD term |
+| `--no-autoscale` | flag | False | Disable automatic scaling of cost terms |
+| `--rmsd-indices` | str | None | Comma-separated atom indices (0-based) for RMSD calculation |
+| `--xyz-out` | str | optimal_trajectory.xyz | Output XYZ trajectory filename |
+| `--edge-sample-cap` | int | 3000 | Number of edges sampled for auto-scaling |
+| `--seed` | int | 0 | RNG seed for auto-scale edge sampling |
+
+### Help
+
+View all available options:
+```bash
+python3 optimal_path.py --help
+```
+
 ## Parameter Groups
 
 > **Note**: Detailed explanations of all parameters, including their units, purpose, and relationships, are provided as comments in the `input.toml` configuration file. Refer to that file for comprehensive parameter documentation.
