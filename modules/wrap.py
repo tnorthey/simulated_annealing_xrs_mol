@@ -101,36 +101,93 @@ class Wrapper:
         # read from the xyz file to get atom positions
         _, _, atomlist, xyz_start = m.read_xyz(start_xyz_file)
         
-        # Try robust method first (bypasses OpenFF and SDF entirely)
-        use_robust_method = True  # Set to False to use old SDF method
+        # Determine which method to use based on input parameter
+        mm_method = p.mm_param_method.lower()
         topology = None
         openmm_system = None
         
-        if use_robust_method:
-            print("Using robust method: Creating OpenMM system directly from XYZ file...")
+        if mm_method == "basic":
+            # Go straight to basic method (geometry extraction)
+            print("Using basic method: extracting parameters directly from geometry...")
+            print("(This uses starting geometry as equilibrium values with generic force constants)")
             try:
-                # Determine force field to use
-                # If forcefield_file ends with .offxml, try to use it with robust method
-                # Otherwise, use AMBER14 as default
-                # Robust method works directly with OpenFF force fields from XYZ
-                # It fixes radicals in RDKit before conversion, avoiding RadicalsNotSupportedError
-                topology, openmm_system = _mm_params().create_topology_from_xyz_robust(
-                    start_xyz_file, ff_file=p.forcefield_file
+                bond_param_array, angle_param_array, torsion_param_array = _mm_params().extract_params_from_geometry(
+                    start_xyz_file, xyz_coords=xyz_start
                 )
-                print("Successfully created system using robust method (direct XYZ to OpenFF).")
+                print("Successfully extracted parameters from geometry!")
+                print(f"Found {len(bond_param_array)} bonds, {len(angle_param_array)} angles, {len(torsion_param_array)} torsions")
+                print("Note: Using generic force constants and starting geometry as equilibrium values.")
+                
+                # Mask out ignored bonds/angles/torsions
+                # Bonds
+                mask = np.ones(len(bond_param_array), dtype=bool)
+                for i, j in p.bond_ignore_array:
+                    remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
+                        (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
+                    )
+                    mask &= ~remove
+                bond_param_array = bond_param_array[mask]
+                
+                # Angles
+                if len(angle_param_array) > 0:
+                    mask = np.ones(len(angle_param_array), dtype=bool)
+                    for i, j, k in p.angle_ignore_array:
+                        remove = (
+                            (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
+                        ) & (angle_param_array[:, 2] == k) | (
+                            (angle_param_array[:, 0] == k) & (angle_param_array[:, 1] == j)
+                        ) & (
+                            angle_param_array[:, 2] == i
+                        )
+                        mask &= ~remove
+                    angle_param_array = angle_param_array[mask]
+                
+                # Torsions
+                if len(torsion_param_array) > 0:
+                    torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
+                    mask = np.ones(len(torsion_param_array), dtype=bool)
+                    for i, j, k, l in p.torsion_ignore_array:
+                        remove = (
+                            ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
+                            & (torsion_param_array[:, 2] == k)
+                        ) & (torsion_param_array[:, 3] == l) | (
+                            ((torsion_param_array[:, 0] == l) & (torsion_param_array[:, 1] == k))
+                            & (torsion_param_array[:, 2] == j)
+                        ) & (
+                            torsion_param_array[:, 3] == i
+                        )
+                        mask &= ~remove
+                    torsion_param_array = torsion_param_array[mask]
+                
+                # Print and assign
+                print(bond_param_array)
+                print(angle_param_array)
+                print(torsion_param_array)
+                p.bond_param_array = bond_param_array
+                p.angle_param_array = angle_param_array
+                p.torsion_param_array = torsion_param_array
+                return p
+                
             except Exception as e:
                 import traceback
                 print(f"\n{'='*60}")
-                print("Robust method failed with error:")
+                print("Basic method (geometry extraction) failed:")
                 print(f"Error type: {type(e).__name__}")
                 print(f"Error message: {e}")
                 print(f"\nFull traceback:")
                 traceback.print_exc()
                 print(f"{'='*60}\n")
-                print("Falling back to SDF method...")
-                use_robust_method = False
+                print("\nTroubleshooting suggestions:")
+                print("1. Check that your XYZ file has correct atom symbols and coordinates")
+                print("2. Verify the molecule structure is chemically sensible")
+                print(f"3. Check XYZ file: {start_xyz_file}")
+                raise RuntimeError(
+                    f"Failed to extract parameters from geometry: {type(e).__name__}: {e}\n"
+                    f"Please check your XYZ file and molecule structure."
+                ) from e
         
-        if not use_robust_method or topology is None:
+        elif mm_method == "sdf":
+            # Try SDF method first (with fallback to basic)
             # Original SDF-based method (fallback)
             # Remove path
             filename = os.path.basename(start_xyz_file)
@@ -262,11 +319,16 @@ class Wrapper:
                     print("5. Consider using a molecular editor to fix bond orders and remove radicals")
                     raise RuntimeError(
                         f"Failed to create OpenMM system. All methods failed:\n"
-                        f"  - Robust XYZ method failed\n"
                         f"  - SDF method failed: {type(e).__name__}: {e}\n"
                         f"  - Geometry extraction failed: {type(e_final).__name__}: {e_final}\n"
                         f"Please check your input files and molecule structure."
                     ) from e_final
+        else:
+            raise ValueError(
+                f"Invalid mm_param_method: {mm_method}. Must be 'sdf' or 'basic'."
+            )
+        
+        # If we got here with SDF method, extract parameters from topology/system
         # Get the bonds and params
         (
             atom1_idx_array,

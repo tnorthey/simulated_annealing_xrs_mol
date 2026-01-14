@@ -47,6 +47,8 @@ pyscf_basis = "6-31g*"
 verbose_bool = false
 # Write DAT file output with scattering data
 write_dat_file_bool = true
+# MM parameter retrieval method: "sdf" (try SDF method first, fallback to basic) or "basic" (use basic method directly)
+mm_param_method = "basic"
 
 # ============================================================================
 # SAMPLING PARAMETERS
@@ -124,7 +126,7 @@ sa_step_size = 0.012
 # Step size for greedy algorithm
 ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
-nrestarts = 1
+nrestarts = 5
 # Total number of runs (repeats entire process ntotalruns times)
 ntotalruns = 5
 # Enable bond length constraints (harmonic oscillator potential)

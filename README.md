@@ -771,6 +771,7 @@ python3 plot_geometry.py --help
 - `--pyscf-basis`: Basis set for PySCF (e.g., "6-31g*", "sto-3g")
 - `--verbose`: Enable verbose output
 - `--write-dat-file`: Write DAT file output
+- `--mm-param-method`: MM parameter retrieval method (see "MM Parameter Retrieval Methods" below)
 
 ### Sampling Parameters
 - `--sampling`: Enable sampling
@@ -804,18 +805,114 @@ python3 plot_geometry.py --help
 - `--non-h-modes-only`: Only use non-hydrogen modes
 - `--hf-energy`: Run PySCF HF energy calculation
 
+## MM Parameter Retrieval Methods
+
+The program supports two methods for retrieving molecular mechanics (MM) force field parameters:
+
+### Method Selection
+
+You can choose the method using the `mm_param_method` parameter in `input.toml`:
+
+```toml
+[options]
+mm_param_method = "sdf"  # or "basic"
+```
+
+Or via command line:
+```bash
+python3 run.py --mm-param-method sdf
+```
+
+### Method 1: SDF Method (`mm_param_method = "sdf"`)
+
+**Default method.** This method attempts to use force field parameters from OpenFF Toolkit by working with SDF files.
+
+**Process:**
+1. **Robust SDF method**: Tries to create an OpenMM system from the SDF file with:
+   - Automatic radical fixing (removes radicals that OpenFF doesn't support)
+   - Bond order simplification (converts double/triple/aromatic bonds to single bonds if needed)
+   - Direct RDKit-to-OpenFF conversion
+2. **Original SDF method**: If robust SDF fails, tries the original SDF method (standard OpenFF parameterization)
+3. **Basic method fallback**: If both SDF methods fail, automatically falls back to the basic method (geometry extraction with generic force constants)
+
+**When to use:**
+- **Default choice** for most molecules
+- When you want to use accurate force field parameters from OpenFF
+- When your molecule is compatible with OpenFF (or can be made compatible with radical fixing/bond simplification)
+- When you have an SDF file or can create one from your XYZ file
+
+**Advantages:**
+- Uses accurate, atom-type-specific force field parameters
+- Handles radicals and unusual bond orders automatically
+- Falls back gracefully to basic method if needed
+
+**Requirements:**
+- SDF file (will be created from XYZ if not present)
+- OpenFF Toolkit installed
+- Force field file (e.g., `openff_unconstrained-2.0.0.offxml`)
+
+### Method 2: Basic Method (`mm_param_method = "basic"`)
+
+This method extracts parameters directly from the molecular geometry using generic force constants, bypassing OpenFF entirely.
+
+**Process:**
+1. Reads the starting XYZ structure
+2. Identifies bonds, angles, and torsions from atomic connectivity
+3. Uses current geometry as equilibrium values
+4. Applies generic force constants (see "Generic Force Constants" section below)
+
+**When to use:**
+- When OpenFF parameterization consistently fails
+- When you want to skip SDF file creation/conversion
+- When you need guaranteed parameter extraction (no dependency on OpenFF)
+- For quick testing or when approximate parameters are sufficient
+- For molecules with unusual structures that OpenFF cannot handle
+
+**Advantages:**
+- **Always works**: No dependency on OpenFF compatibility
+- **Fast**: No SDF conversion or OpenFF parameterization
+- **Simple**: Direct geometry-based extraction
+- **Reliable**: Guaranteed to produce parameters
+
+**Limitations:**
+- Uses generic force constants (not atom-type-specific)
+- Less accurate than force field parameters
+- See "Generic Force Constants" section for details
+
+### Comparison
+
+| Feature | SDF Method | Basic Method |
+|---------|------------|--------------|
+| **Accuracy** | High (force field parameters) | Moderate (generic constants) |
+| **Speed** | Slower (SDF conversion + OpenFF) | Faster (direct extraction) |
+| **Reliability** | May fail for unusual molecules | Always works |
+| **Dependencies** | Requires OpenFF + SDF | No special dependencies |
+| **Fallback** | Falls back to basic if needed | No fallback needed |
+| **Use case** | Production runs, accurate parameters | Quick testing, guaranteed extraction |
+
+### Recommendations
+
+- **Start with SDF method** (`mm_param_method = "sdf"`): It will automatically fall back to basic method if needed
+- **Use basic method** if:
+  - You consistently get errors with SDF method
+  - You're doing quick tests and don't need high accuracy
+  - You want to avoid SDF file dependencies
+  - Your molecule has unusual structures that OpenFF cannot handle
+
 ## Generic Force Constants (Fallback Method)
 
 When the program cannot obtain molecular mechanics (MM) force field parameters from OpenFF Toolkit (e.g., due to radicals, unusual bond orders, or other compatibility issues), it automatically falls back to a **geometry-based parameter extraction method** that uses generic force constants.
 
 ### When Are Generic Force Constants Used?
 
-The generic force constants are used as a **last-resort fallback** when:
-1. The robust XYZ-to-OpenFF method fails (after radical fixing and bond simplification)
-2. The robust SDF method fails (after radical fixing and bond simplification)
-3. The original SDF method fails
+The generic force constants are used in two scenarios:
 
-If any of these methods succeed, the program uses the force field parameters from OpenFF Toolkit instead.
+1. **When `mm_param_method = "basic"`**: Used directly as the primary method
+2. **When `mm_param_method = "sdf"`**: Used as a fallback when:
+   - The robust SDF method fails (after radical fixing and bond simplification)
+   - The original SDF method fails
+
+If the SDF method succeeds, the program uses the force field parameters from OpenFF Toolkit instead of generic constants.
 
 ### What Are the Generic Force Constants?
 
