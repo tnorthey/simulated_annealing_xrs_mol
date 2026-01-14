@@ -1,20 +1,7 @@
-from random import random
 from numba import njit
 import numpy as np
-from numpy import linalg as LA
-from numpy.typing import NDArray, DTypeLike
-import sys
+from numpy.typing import NDArray
 from timeit import default_timer
-import cProfile
-import pstats
-
-# my modules
-import modules.mol as mol
-import modules.x as xray
-
-# create class objects
-m = mol.Xyz()
-x = xray.Xray()
 
 
 #############################
@@ -54,6 +41,7 @@ class Annealing:
         predicted_start=0,
         tuning_ratio_target=1,
         c_tuning_initial=1,
+        verbose: bool = False,
     ):
         """simulated annealing minimisation to target_function"""
         ######## READ BOND/ANGLE PARAMS #######
@@ -90,38 +78,7 @@ class Annealing:
         qmin, qmax, qlen = qvector[0], qvector[-1], len(qvector)
         tmin, tmax, tlen = th[0], th[-1], len(th)
         pmin, pmax, plen = ph[0], ph[-1], len(ph)
-        if not inelastic:
-            compton = 0
         ##=#=#=# END DEFINITIONS #=#=#=#
-        ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
-
-        def angle3(A, B, C):
-            """Return angle ABC (at B) given three positions A, B, C."""
-            BA = A - B
-            BC = C - B
-            cos_theta = np.dot(BA, BC) / (np.linalg.norm(BA) * np.linalg.norm(BC))
-            cos_theta = np.clip(cos_theta, -1.0, 1.0)
-            angle_rad = np.arccos(cos_theta)
-            return angle_rad
-
-        def angle_array(angular_indices):
-            """calculate starting angles for angular indices"""
-            nangular_indices = len(angular_indices[0])  # number of angular indices
-            theta_arr = np.zeros((nangular_indices))
-            for i_ang in range(nangular_indices):
-                p0 = starting_xyz[angular_indices[0][i_ang], :]
-                p1 = starting_xyz[angular_indices[1][i_ang], :]
-                p2 = starting_xyz[angular_indices[2][i_ang], :]
-                ba = p1 - p0
-                bc = p1 - p2
-                cosine_theta = np.dot(ba, bc) / (
-                    np.linalg.norm(ba) * np.linalg.norm(bc)
-                )
-                theta_arr[i_ang] = np.arccos(cosine_theta)
-            return theta_arr
-
-        # print(np.degrees(theta0_arr))
-        # print("HO factors: %4.3f %4.3f" % (bonding_factor[0], bonding_factor[1]))
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
@@ -136,17 +93,26 @@ class Annealing:
         # Pre-compute abs(target_function) to avoid repeated abs() calls in loop
         abs_target_function = np.abs(target_function)
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
+        # Ensure predicted_start has the right shape/type (avoid int sentinel inside njit)
+        if isinstance(predicted_start, (int, float)) and predicted_start == 0:
+            if ewald_mode:
+                predicted_start = np.zeros((qlen, tlen, plen), dtype=np.float64)
+            else:
+                predicted_start = np.zeros(qlen, dtype=np.float64)
 
         @njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
         def run_annealing(nsteps):
 
             ##=#=#=# INITIATE LOOP VARIABLES #=#=#=#=#
-            xyz, xyz_best = starting_xyz, starting_xyz
+            xyz = starting_xyz.copy()
+            xyz_trial = np.empty_like(xyz)
+            xyz_best = xyz.copy()
             f_best, f_xray_best = f_start, f_xray_start  # initialise on restart
-            predicted_best = predicted_start  # initialise on restart
+            predicted_best = predicted_start.copy()  # initialise on restart
             f = 1e9  # high initial value so 1st step will be accepted
             c = 0  # count accepted steps
             mdisp = displacements
+            n_mode_indices = len(mode_indices)
             (
                 total_bonding_contrib,
                 total_angular_contrib,
@@ -157,6 +123,12 @@ class Annealing:
             # Pre-compute inverse nsteps and constants to avoid division in loop
             inv_nsteps = 1.0 / nsteps
             HALF = 0.5
+            # Reuse buffers to avoid per-step allocations
+            summed_displacement = np.zeros((natoms, 3), dtype=np.float64)
+            if not ewald_mode:
+                molecular = np.zeros(qlen, dtype=np.float64)
+                iam = np.empty(qlen, dtype=np.float64)
+                predicted_function_ = np.empty(qlen, dtype=np.float64)
 
             for i in range(nsteps):
 
@@ -168,18 +140,25 @@ class Annealing:
                 ##=#=#=# DISPLACE XYZ RANDOMLY ALONG ALL DISPLACEMENT VECTORS #=#=#=##
                 # this is faster in numba than the vectorised version...
                 # numba likes loops (not vectors apparently)
-                summed_displacement = np.zeros(mdisp[0, :, :].shape)
-                for n in mode_indices:
-                    summed_displacement += (
-                        mdisp[n, :, :] * step_size_array[n] * tmp * (2 * random() - 1)
-                    )
-                xyz_ = xyz + summed_displacement  # save a temporary displaced xyz: xyz_
+                summed_displacement[:, :] = 0.0
+                for mi in range(n_mode_indices):
+                    n = mode_indices[mi]
+                    scale = step_size_array[n] * tmp * (2.0 * np.random.random() - 1.0)
+                    # manual fused multiply-add into buffer
+                    for a in range(natoms):
+                        summed_displacement[a, 0] += mdisp[n, a, 0] * scale
+                        summed_displacement[a, 1] += mdisp[n, a, 1] * scale
+                        summed_displacement[a, 2] += mdisp[n, a, 2] * scale
+                for a in range(natoms):
+                    xyz_trial[a, 0] = xyz[a, 0] + summed_displacement[a, 0]
+                    xyz_trial[a, 1] = xyz[a, 1] + summed_displacement[a, 1]
+                    xyz_trial[a, 2] = xyz[a, 2] + summed_displacement[a, 2]
                 ##=#=#=# END DISPLACE XYZ RANDOMLY ALONG ALL DISPLACEMENT VECTORS #=#=#=##
 
                 ##=#=#=# TEMPERATURE ACCEPTANCE CRITERIA #=#=#=##
-                if temp > random():
+                if temp > np.random.random():
                     c += 1  # count acceptances
-                    xyz = xyz_  # update xyz to displaced xyz
+                    xyz, xyz_trial = xyz_trial, xyz  # accept trial (swap buffers)
                     continue  # go to next step in for loop
                 ##=#=#=# END TEMPERATURE ACCEPTANCE CRITERIA #=#=#=##
 
@@ -202,32 +181,42 @@ class Annealing:
                             )
                     ### end ewald_mode
                 else:  # assumed to be isotropic 1D signal
-                    molecular = np.zeros(qlen)  # total molecular factor
+                    molecular[:] = 0.0  # total molecular factor
                     k = 0
                     for ii in range(natoms):
                         for jj in range(ii + 1, natoms):  # j > i
                             # Manual distance calculation (faster than LA.norm in numba)
-                            dx = xyz_[ii, 0] - xyz_[jj, 0]
-                            dy = xyz_[ii, 1] - xyz_[jj, 1]
-                            dz = xyz_[ii, 2] - xyz_[jj, 2]
+                            dx = xyz_trial[ii, 0] - xyz_trial[jj, 0]
+                            dy = xyz_trial[ii, 1] - xyz_trial[jj, 1]
+                            dz = xyz_trial[ii, 2] - xyz_trial[jj, 2]
                             r = np.sqrt(dx * dx + dy * dy + dz * dz)
-                            qdij = qvector * r
-                            molecular += 2 * pre_molecular[k, :] * np.sin(qdij) / qdij
+                            for qi in range(qlen):
+                                qd = qvector[qi] * r
+                                molecular[qi] += (
+                                    2.0
+                                    * pre_molecular[k, qi]
+                                    * np.sin(qd)
+                                    / qd
+                                )
                             k += 1
-                iam_ = atomic_total + molecular + compton
+                    if inelastic:
+                        for qi in range(qlen):
+                            iam[qi] = atomic_total[qi] + molecular[qi] + compton[qi]
+                    else:
+                        for qi in range(qlen):
+                            iam[qi] = atomic_total[qi] + molecular[qi]
                 ##=#=#=# END IAM CALCULATION #=#=#=##
 
                 ##=#=#=# PCD & DSIGNAL CALCULATIONS #=#=#=##
                 if pcd_mode:
-                    predicted_function_ = 100 * (iam_ / reference_iam - 1)
-                    ### x-ray part of objective function
-                    ### TO DO: depends on ewald_mode ...
                     inv_qlen = 1.0 / qlen
-                    xray_contrib = (
-                        np.sum((predicted_function_ - target_function) ** 2) * inv_qlen
-                    )
+                    sse = 0.0
+                    for qi in range(qlen):
+                        predicted_function_[qi] = 100.0 * (iam[qi] / reference_iam[qi] - 1.0)
+                        diff = predicted_function_[qi] - target_function[qi]
+                        sse += diff * diff
+                    xray_contrib = sse * inv_qlen
                 else:
-                    predicted_function_ = iam_
                     ### x-ray part of objective function
                     ### TO DO: depends on ewald_mode ...
                     if ewald_mode:
@@ -236,13 +225,12 @@ class Annealing:
                         n = qlen
                     # Pre-compute inverse n to avoid division
                     inv_n = 1.0 / n
-                    xray_contrib = (
-                        np.sum(
-                            (predicted_function_ - target_function) ** 2
-                            / abs_target_function
-                        )
-                        * inv_n
-                    )
+                    sse = 0.0
+                    for qi in range(qlen):
+                        predicted_function_[qi] = iam[qi]
+                        diff = predicted_function_[qi] - target_function[qi]
+                        sse += (diff * diff) / abs_target_function[qi]
+                    xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
                 # somehow this is faster in numba than the vectorised version
@@ -253,9 +241,9 @@ class Annealing:
                         # Manual distance calculation (faster than LA.norm in numba)
                         idx1 = bond_atom1_idx_arr[i_bond]
                         idx2 = bond_atom2_idx_arr[i_bond]
-                        dx = xyz_[idx1, 0] - xyz_[idx2, 0]
-                        dy = xyz_[idx1, 1] - xyz_[idx2, 1]
-                        dz = xyz_[idx1, 2] - xyz_[idx2, 2]
+                        dx = xyz_trial[idx1, 0] - xyz_trial[idx2, 0]
+                        dy = xyz_trial[idx1, 1] - xyz_trial[idx2, 1]
+                        dz = xyz_trial[idx1, 2] - xyz_trial[idx2, 2]
                         r = np.sqrt(dx * dx + dy * dy + dz * dz)
                         bonding_contrib += k_arr[i_bond] * HALF * (r - r0_arr[i_bond]) ** 2
 
@@ -268,12 +256,12 @@ class Annealing:
                         idx1 = angle_atom1_idx_arr[i_ang]
                         idx2 = angle_atom2_idx_arr[i_ang]
                         idx3 = angle_atom3_idx_arr[i_ang]
-                        BA_x = xyz_[idx1, 0] - xyz_[idx2, 0]
-                        BA_y = xyz_[idx1, 1] - xyz_[idx2, 1]
-                        BA_z = xyz_[idx1, 2] - xyz_[idx2, 2]
-                        BC_x = xyz_[idx3, 0] - xyz_[idx2, 0]
-                        BC_y = xyz_[idx3, 1] - xyz_[idx2, 1]
-                        BC_z = xyz_[idx3, 2] - xyz_[idx2, 2]
+                        BA_x = xyz_trial[idx1, 0] - xyz_trial[idx2, 0]
+                        BA_y = xyz_trial[idx1, 1] - xyz_trial[idx2, 1]
+                        BA_z = xyz_trial[idx1, 2] - xyz_trial[idx2, 2]
+                        BC_x = xyz_trial[idx3, 0] - xyz_trial[idx2, 0]
+                        BC_y = xyz_trial[idx3, 1] - xyz_trial[idx2, 1]
+                        BC_z = xyz_trial[idx3, 2] - xyz_trial[idx2, 2]
                         norm_BA = np.sqrt(BA_x * BA_x + BA_y * BA_y + BA_z * BA_z)
                         norm_BC = np.sqrt(BC_x * BC_x + BC_y * BC_y + BC_z * BC_z)
                         inv_norm_BA_BC = 1.0 / (norm_BA * norm_BC)
@@ -296,10 +284,10 @@ class Annealing:
                         idx3 = torsion_atom3_idx_arr[i_tors]
                         idx4 = torsion_atom4_idx_arr[i_tors]
                         # Direct indexing instead of slicing
-                        p0 = xyz_[idx1, :]
-                        p1 = xyz_[idx2, :]
-                        p2 = xyz_[idx3, :]
-                        p3 = xyz_[idx4, :]
+                        p0 = xyz_trial[idx1, :]
+                        p1 = xyz_trial[idx2, :]
+                        p2 = xyz_trial[idx3, :]
+                        p3 = xyz_trial[idx4, :]
 
                         b0 = -1.0 * (p1 - p0)
                         b1 = p2 - p1
@@ -339,14 +327,13 @@ class Annealing:
                 # Use multiplication instead of division (faster)
                 if f_ < f * 0.999:
                     c += 1  # count acceptances
-                    f, xyz = f_, xyz_  # update f and xyz
+                    f = f_
+                    xyz, xyz_trial = xyz_trial, xyz  # accept trial (swap buffers)
                     if f < f_best:
                         # store values corresponding to f_best
-                        f_best, xyz_best, predicted_best = (
-                            f,
-                            xyz,
-                            predicted_function_,
-                        )
+                        f_best = f
+                        xyz_best[:, :] = xyz[:, :]
+                        predicted_best = predicted_function_.copy()
                         f_xray_best = xray_contrib
                     total_bonding_contrib += c_tuning * bonding_contrib
                     total_angular_contrib += c_tuning * angular_contrib
@@ -406,13 +393,13 @@ class Annealing:
             c,
             c_tuning_adjusted,
         ) = run_annealing(nsteps)
-        print("run_annealing() time: %3.2f s" % float(default_timer() - start))
-        ###
-        print("xray contrib ratio: %f" % xray_ratio)
-        print("bonding contrib ratio: %f" % bonding_ratio)
-        print("angular contrib ratio: %f" % angular_ratio)
-        print("torsional contrib ratio: %f" % torsional_ratio)
-        print("Accepted / Total steps: %i/%i" % (c, nsteps))
+        if verbose:
+            print("run_annealing() time: %3.2f s" % float(default_timer() - start))
+            print("xray contrib ratio: %f" % xray_ratio)
+            print("bonding contrib ratio: %f" % bonding_ratio)
+            print("angular contrib ratio: %f" % angular_ratio)
+            print("torsional contrib ratio: %f" % torsional_ratio)
+            print("Accepted / Total steps: %i/%i" % (c, nsteps))
         # end function
         return (
             f_best,

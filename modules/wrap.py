@@ -16,18 +16,71 @@ except ImportError:
 import modules.mol as mol
 import modules.x as xray
 import modules.sa as sa
-import modules.pyscf_wrapper as pyscf_wrapper
-import modules.openff_retreive_mm_params as openff_retreive_mm_params
-import modules.sample as sample
 import modules.analysis as analysis
+
+# Optional heavy dependencies (OpenFF / sampling / PySCF wrapper)
+try:
+    import modules.openff_retreive_mm_params as openff_retreive_mm_params
+
+    HAVE_OPENFF = True
+except ImportError:
+    HAVE_OPENFF = False
+    openff_retreive_mm_params = None
+
+try:
+    import modules.sample as sample_module
+
+    HAVE_SAMPLE = True
+except ImportError:
+    HAVE_SAMPLE = False
+    sample_module = None
+
+try:
+    import modules.pyscf_wrapper as pyscf_wrapper
+
+    HAVE_PYSCF_WRAPPER = True
+except ImportError:
+    HAVE_PYSCF_WRAPPER = False
+    pyscf_wrapper = None
 
 # create class objects
 m = mol.Xyz()
 x = xray.Xray()
 sa = sa.Annealing()
-pyscfw = pyscf_wrapper.Pyscf_wrapper()
-mm_params = openff_retreive_mm_params.Openff_retreive_mm_params()
-sample = sample.Sample()
+
+_MM_PARAMS = None
+_PyscfW = None
+_SAMPLE = None
+
+
+def _mm_params():
+    """Lazy singleton for OpenFF parameter retrieval."""
+    global _MM_PARAMS
+    if _MM_PARAMS is None:
+        if not HAVE_OPENFF:
+            raise ImportError("OpenFF dependencies are not available")
+        _MM_PARAMS = openff_retreive_mm_params.Openff_retreive_mm_params()
+    return _MM_PARAMS
+
+
+def _pyscfw():
+    """Lazy singleton for PySCF wrapper."""
+    global _PyscfW
+    if _PyscfW is None:
+        if not HAVE_PYSCF_WRAPPER:
+            raise ImportError("PySCF wrapper dependencies are not available")
+        _PyscfW = pyscf_wrapper.Pyscf_wrapper()
+    return _PyscfW
+
+
+def _sample():
+    """Lazy singleton for sampling utilities."""
+    global _SAMPLE
+    if _SAMPLE is None:
+        if not HAVE_SAMPLE:
+            raise ImportError("Sampling dependencies are not available")
+        _SAMPLE = sample_module.Sample()
+    return _SAMPLE
 
 
 #############################
@@ -61,7 +114,7 @@ class Wrapper:
                 # Otherwise, use AMBER14 as default
                 # Robust method works directly with OpenFF force fields from XYZ
                 # It fixes radicals in RDKit before conversion, avoiding RadicalsNotSupportedError
-                topology, openmm_system = mm_params.create_topology_from_xyz_robust(
+                topology, openmm_system = _mm_params().create_topology_from_xyz_robust(
                     start_xyz_file, ff_file=p.forcefield_file
                 )
                 print("Successfully created system using robust method (direct XYZ to OpenFF).")
@@ -90,12 +143,12 @@ class Wrapper:
             else:
                 print(f"SDF file not found. Creating SDF file from XYZ: {start_xyz_file}")
                 try:
-                    mm_params.openbabel_xyz2sdf(start_xyz_file, sdf_file)
+                    _mm_params().openbabel_xyz2sdf(start_xyz_file, sdf_file)
                 except Exception as e:
                     print(f"Warning: Failed to create SDF file with OpenBabel: {e}")
                     print("Trying RDKit method instead...")
                     try:
-                        mm_params.rdkit_xyz2sdf(start_xyz_file, sdf_file)
+                        _mm_params().rdkit_xyz2sdf(start_xyz_file, sdf_file)
                     except Exception as e2:
                         print(f"Error: RDKit SDF creation also failed: {e2}")
                         raise RuntimeError(
@@ -109,14 +162,14 @@ class Wrapper:
                 # Try robust SDF method first (applies same fixes as robust XYZ method)
                 print("Attempting robust SDF method (with radical fixing and bond simplification)...")
                 try:
-                    topology, openmm_system = mm_params.create_topology_from_sdf_robust(
+                    topology, openmm_system = _mm_params().create_topology_from_sdf_robust(
                         sdf_file, p.forcefield_file
                     )
                     print("Successfully created system using robust SDF method.")
                 except Exception as e_robust:
                     print(f"Robust SDF method failed: {e_robust}")
                     print("Trying original SDF method...")
-                    topology, openmm_system = mm_params.create_topology_from_sdf(
+                    topology, openmm_system = _mm_params().create_topology_from_sdf(
                         sdf_file, p.forcefield_file
                     )
             except Exception as e:
@@ -133,7 +186,7 @@ class Wrapper:
                 print("(This uses starting geometry as equilibrium values with generic force constants)")
                 try:
                     # Final fallback: extract parameters directly from geometry
-                    bond_param_array, angle_param_array, torsion_param_array = mm_params.extract_params_from_geometry(
+                    bond_param_array, angle_param_array, torsion_param_array = _mm_params().extract_params_from_geometry(
                         start_xyz_file, xyz_coords=xyz_start
                     )
                     print("Successfully extracted parameters from geometry!")
@@ -166,7 +219,7 @@ class Wrapper:
                     
                     # Torsions
                     if len(torsion_param_array) > 0:
-                        torsion_param_array = mm_params.update_torsion_deltas(torsion_param_array, xyz_start)
+                        torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
                         mask = np.ones(len(torsion_param_array), dtype=bool)
                         for i, j, k, l in p.torsion_ignore_array:
                             remove = (
@@ -220,7 +273,7 @@ class Wrapper:
             atom2_idx_array,
             length_angstrom_array,
             k_kcal_per_ang2_array,
-        ) = mm_params.retreive_bonds_k_values(topology, openmm_system)
+        ) = _mm_params().retreive_bonds_k_values(topology, openmm_system)
         bond_param_array = np.column_stack(
             (
                 atom1_idx_array,
@@ -247,7 +300,7 @@ class Wrapper:
             atom3_idx_array,
             angle_rad_array,
             k_kcal_per_rad2_array,
-        ) = mm_params.retreive_angles_k_values(topology, openmm_system)
+        ) = _mm_params().retreive_angles_k_values(topology, openmm_system)
         angle_param_array = np.column_stack(
             (
                 atom1_idx_array,
@@ -279,7 +332,7 @@ class Wrapper:
             atom4_idx_array,
             torsion_rad_array,
             k_kcal_per_rad2_array,
-        ) = mm_params.extract_periodic_torsions(openmm_system)
+        ) = _mm_params().extract_periodic_torsions(openmm_system)
         torsion_param_array = np.column_stack(
             (
                 atom1_idx_array,
@@ -295,7 +348,7 @@ class Wrapper:
         ## read the torsions from the starting coords...
         # loop over torsion_param_array
         ## alter the torsion param array with those.
-        torsion_param_array = mm_params.update_torsion_deltas(torsion_param_array, xyz_start)
+        torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
 
         # mask out chosen ignored torsions
         mask = np.ones(len(torsion_param_array), dtype=bool)
@@ -445,7 +498,7 @@ class Wrapper:
         ###### mode displacements ######
         if p.run_pyscf_modes_bool:
             print("Running PySCF normal modes calculation...")
-            displacements, freq_cm1 = pyscfw.xyz_calc_modes(
+            displacements, freq_cm1 = _pyscfw().xyz_calc_modes(
                 p.reference_xyz_file, save_to_npy=True, basis=p.pyscf_basis
             )
         else:
@@ -616,7 +669,7 @@ class Wrapper:
                     if p.sampling_bool:
                         # Boltzmann sample only in first restart
                         print("Boltzmann distribution sampling...")
-                        sampling_displacements = sample.generate_boltzmann_displacement(
+                        sampling_displacements = _sample().generate_boltzmann_displacement(
                             displacements, freqs_cm1, p.boltzmann_temperature
                         )
                         # add sampled displacements to xyz

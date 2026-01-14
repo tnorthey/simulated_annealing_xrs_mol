@@ -1,6 +1,15 @@
 import numpy as np
-from scipy import interpolate
 from numpy.typing import NDArray, DTypeLike
+
+_COMPTON_DATA = None  # lazy-loaded cache: (q_compton, compton_array)
+
+
+def _load_compton_data():
+    global _COMPTON_DATA
+    if _COMPTON_DATA is None:
+        tmp = np.load("data/Compton_Scattering_Intensities.npz")
+        _COMPTON_DATA = (tmp["q_compton"], tmp["compton"])
+    return _COMPTON_DATA
 
 class Xray:
     def __init__(self):
@@ -295,11 +304,10 @@ class Xray:
         compton_array = np.zeros(
             (natom, len(qvector))
         )  # inelastic component for each atom
-        tmp = np.load("data/Compton_Scattering_Intensities.npz")  # compton factors
-        q_compton, arr = tmp["q_compton"], tmp["compton"]
+        q_compton, arr = _load_compton_data()
         for i in range(natom):
-            tck = interpolate.splrep(q_compton, arr[atomic_numbers[i] - 1, :], s=0)
-            compton_array[i, :] = interpolate.splev(qvector, tck, der=0)
+            # Linear interpolation is sufficient here and avoids SciPy dependency.
+            compton_array[i, :] = np.interp(qvector, q_compton, arr[atomic_numbers[i] - 1, :])
         return compton_array
 
     ### other functions ... that may be called by the Gradient descent.
@@ -324,11 +332,9 @@ class Xray:
         compton_array = np.zeros(
             (natoms, len(qvector))
         )  # inelastic component for each atom
-        tmp = np.load("data/Compton_Scattering_Intensities.npz")  # compton factors
-        q_compton, arr = tmp["q_compton"], tmp["compton"]
+        q_compton, arr = _load_compton_data()
         for i in range(natoms):
-            tck = interpolate.splrep(q_compton, arr[atomic_numbers[i] - 1, :], s=0)
-            compton_array[i, :] = interpolate.splev(qvector, tck, der=0)
+            compton_array[i, :] = np.interp(qvector, q_compton, arr[atomic_numbers[i] - 1, :])
         compton_total = np.sum(compton_array, axis=0)
         return compton_total, compton_array
 

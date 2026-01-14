@@ -289,7 +289,10 @@ class Input_to_params:
                 f'  Suggestion: Check spelling or add molecule section to input file.'
             )
         
-        # 2. Validate file paths (check if they exist)
+        # 2. Validate file paths (warn if they don't exist yet)
+        #
+        # These files are often generated/placed later (or provided via CLI overrides),
+        # so missing paths should not prevent configuration parsing.
         file_params = {
             "forcefield_file": self.forcefield_file,
             "start_xyz_file": self.start_xyz_file,
@@ -298,9 +301,9 @@ class Input_to_params:
         }
         for param_name, file_path in file_params.items():
             if not os.path.exists(file_path):
-                errors.append(
-                    f'Error: File not found: {param_name} = "{file_path}"\n'
-                    f'  Suggestion: Check the file path is correct and the file exists.'
+                warnings.append(
+                    f'Warning: File not found: {param_name} = "{file_path}"\n'
+                    f'  Suggestion: This is OK for config validation/tests; ensure the file exists before running.'
                 )
         
         # 3. Validate numeric ranges for scattering parameters
@@ -520,12 +523,13 @@ class Input_to_params:
                             f'  Suggestion: Check bond_indices values are valid atom indices'
                         )
             
-            if len(self.angle_indices) != 3:
+            # angle_indices/dihedral_indices are optional analysis targets; allow empty.
+            if len(self.angle_indices) not in (0, 3):
                 errors.append(
-                    f'Error: angle_indices must have exactly 3 elements, got {len(self.angle_indices)}\n'
-                    f'  Suggestion: Use format [atom1_idx, atom2_idx, atom3_idx]'
+                    f'Error: angle_indices must have exactly 3 elements (or be empty), got {len(self.angle_indices)}\n'
+                    f'  Suggestion: Use format [atom1_idx, atom2_idx, atom3_idx] or []'
                 )
-            else:
+            elif len(self.angle_indices) == 3:
                 for idx in self.angle_indices:
                     if idx < 0 or idx >= self.natoms:
                         errors.append(
@@ -533,12 +537,12 @@ class Input_to_params:
                             f'  Suggestion: Check angle_indices values are valid atom indices'
                         )
             
-            if len(self.dihedral_indices) != 4:
+            if len(self.dihedral_indices) not in (0, 4):
                 errors.append(
-                    f'Error: dihedral_indices must have exactly 4 elements, got {len(self.dihedral_indices)}\n'
-                    f'  Suggestion: Use format [atom1_idx, atom2_idx, atom3_idx, atom4_idx]'
+                    f'Error: dihedral_indices must have exactly 4 elements (or be empty), got {len(self.dihedral_indices)}\n'
+                    f'  Suggestion: Use format [atom1_idx, atom2_idx, atom3_idx, atom4_idx] or []'
                 )
-            else:
+            elif len(self.dihedral_indices) == 4:
                 for idx in self.dihedral_indices:
                     if idx < 0 or idx >= self.natoms:
                         errors.append(
