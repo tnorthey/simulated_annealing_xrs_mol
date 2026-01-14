@@ -300,17 +300,14 @@ class Xray:
 
     def compton_spline(self, atomic_numbers, qvector):
         """spline the compton factors to correct qvector, outputs array (atoms, qvector)"""
-        # Only import SciPy if this method is used (improves startup time)
-        from scipy import interpolate
-
         natom = len(atomic_numbers)
         compton_array = np.zeros(
             (natom, len(qvector))
         )  # inelastic component for each atom
         q_compton, arr = _load_compton_data()
         for i in range(natom):
-            tck = interpolate.splrep(q_compton, arr[atomic_numbers[i] - 1, :], s=0)
-            compton_array[i, :] = interpolate.splev(qvector, tck, der=0)
+            # Linear interpolation is sufficient here and avoids SciPy dependency.
+            compton_array[i, :] = np.interp(qvector, q_compton, arr[atomic_numbers[i] - 1, :])
         return compton_array
 
     ### other functions ... that may be called by the Gradient descent.
@@ -331,17 +328,13 @@ class Xray:
 
     def compton_spline_calc(self, atomic_numbers, qvector):
         """spline the compton factors to correct qvector, outputs array (atoms, qvector)"""
-        # Only import SciPy if this method is used (improves startup time)
-        from scipy import interpolate
-
         natoms = len(atomic_numbers)
         compton_array = np.zeros(
             (natoms, len(qvector))
         )  # inelastic component for each atom
         q_compton, arr = _load_compton_data()
         for i in range(natoms):
-            tck = interpolate.splrep(q_compton, arr[atomic_numbers[i] - 1, :], s=0)
-            compton_array[i, :] = interpolate.splev(qvector, tck, der=0)
+            compton_array[i, :] = np.interp(qvector, q_compton, arr[atomic_numbers[i] - 1, :])
         compton_total = np.sum(compton_array, axis=0)
         return compton_total, compton_array
 

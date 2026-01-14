@@ -86,18 +86,25 @@ class Xyz:
 
     def rmsd_kabsch(self, xyz, xyz_, indices):
         """RMSD between xyz and xyz_ for atom indices"""
-        # Only import SciPy if this method is used (improves startup time)
-        from scipy.spatial.transform import Rotation as R
         # take the indices for xyz
         xyz = xyz[indices, :]
         xyz_ = xyz_[indices, :]
         # centre them (remove effect of translations)
         xyz -= xyz.mean(axis=0)
         xyz_ -= xyz_.mean(axis=0)
-        # rotate xyz to have max coincidence with xyz_
-        rot, rmsd = R.align_vectors(xyz, xyz_)  # gives rotation matrix and post-rotation rmsd
-        # xyz = rot.apply(xyz)  # apply rotation
-        return rmsd, rot
+        # Kabsch algorithm (no SciPy dependency)
+        # Compute optimal rotation R that minimizes ||xyz R - xyz_||_F
+        H = xyz.T @ xyz_
+        U, S, Vt = np.linalg.svd(H)
+        Rmat = Vt.T @ U.T
+        # Correct for right-handed coordinate system
+        if np.linalg.det(Rmat) < 0:
+            Vt[-1, :] *= -1.0
+            Rmat = Vt.T @ U.T
+        xyz_rot = xyz @ Rmat
+        diff = xyz_rot - xyz_
+        rmsd = np.sqrt(np.sum(diff * diff) / xyz.shape[0])
+        return rmsd, Rmat
 
     def mapd_function(self, xyz, xyz_, indices, bond_print=False):
         """calculate MAPD as defined in Yong et al. Faraday Disc. (2021)"""
