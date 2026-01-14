@@ -78,8 +78,6 @@ class Annealing:
         qmin, qmax, qlen = qvector[0], qvector[-1], len(qvector)
         tmin, tmax, tlen = th[0], th[-1], len(th)
         pmin, pmax, plen = ph[0], ph[-1], len(ph)
-        if not inelastic:
-            compton = 0
         ##=#=#=# END DEFINITIONS #=#=#=#
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
@@ -97,7 +95,10 @@ class Annealing:
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Ensure predicted_start has the right shape/type (avoid int sentinel inside njit)
         if isinstance(predicted_start, (int, float)) and predicted_start == 0:
-            predicted_start = np.zeros(qlen, dtype=np.float64)
+            if ewald_mode:
+                predicted_start = np.zeros((qlen, tlen, plen), dtype=np.float64)
+            else:
+                predicted_start = np.zeros(qlen, dtype=np.float64)
 
         @njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
         def run_annealing(nsteps):
@@ -198,12 +199,12 @@ class Annealing:
                                     / qd
                                 )
                             k += 1
-                    if compton == 0:
-                        for qi in range(qlen):
-                            iam[qi] = atomic_total[qi] + molecular[qi]
-                    else:
+                    if inelastic:
                         for qi in range(qlen):
                             iam[qi] = atomic_total[qi] + molecular[qi] + compton[qi]
+                    else:
+                        for qi in range(qlen):
+                            iam[qi] = atomic_total[qi] + molecular[qi]
                 ##=#=#=# END IAM CALCULATION #=#=#=##
 
                 ##=#=#=# PCD & DSIGNAL CALCULATIONS #=#=#=##
