@@ -886,17 +886,32 @@ class Wrapper:
             print("################")
             # also write final xyz as "result.xyz"
             # m.write_xyz("%s/%s_result.xyz" % (p.results_dir, run_id), "result", atomlist, xyz_best)
-            # predicted data
+            # predicted data (add constant IAM offsets back for output)
+            if p.inelastic:
+                iam_offset = atomic + compton
+            else:
+                iam_offset = atomic
+            if p.pcd_mode:
+                predicted_best_output = predicted_best + 100.0 * (
+                    iam_offset / reference_iam - 1.0
+                )
+            else:
+                predicted_best_output = predicted_best + iam_offset
             if p.ewald_mode:
                 if npy_save:
-                    np.save("%s/predicted_function.npy" % p.results_dir, predicted_best)
-                predicted_best_r = x.spherical_rotavg(predicted_best, p.th, p.ph)
-                predicted_best = predicted_best_r
+                    np.save(
+                        "%s/predicted_function.npy" % p.results_dir,
+                        predicted_best_output,
+                    )
+                predicted_best_r = x.spherical_rotavg(
+                    predicted_best_output, p.th, p.ph
+                )
+                predicted_best_output = predicted_best_r
             ### write predicted data to file
             if p.write_dat_file_bool:
                 np.savetxt(
                     "%s/%s_%s.dat" % (p.results_dir, run_id, f_best_str),
-                    np.column_stack((p.qvector, predicted_best)),
+                    np.column_stack((p.qvector, predicted_best_output)),
                 )
         return  # end function
 

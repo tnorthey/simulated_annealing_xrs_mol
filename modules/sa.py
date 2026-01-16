@@ -92,6 +92,16 @@ class Annealing:
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Pre-compute abs(target_function) to avoid repeated abs() calls in loop
         abs_target_function = np.abs(target_function)
+        # Shift target function to remove constant IAM terms outside the SA loop
+        if inelastic:
+            iam_offset = atomic_total + compton
+        else:
+            iam_offset = atomic_total
+        if pcd_mode:
+            pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
+            target_function = target_function - pcd_offset
+        else:
+            target_function = target_function - iam_offset
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Ensure predicted_start has the right shape/type (avoid int sentinel inside njit)
         if isinstance(predicted_start, (int, float)) and predicted_start == 0:
@@ -199,12 +209,8 @@ class Annealing:
                                     / qd
                                 )
                             k += 1
-                    if inelastic:
-                        for qi in range(qlen):
-                            iam[qi] = atomic_total[qi] + molecular[qi] + compton[qi]
-                    else:
-                        for qi in range(qlen):
-                            iam[qi] = atomic_total[qi] + molecular[qi]
+                    for qi in range(qlen):
+                        iam[qi] = molecular[qi]
                 ##=#=#=# END IAM CALCULATION #=#=#=##
 
                 ##=#=#=# PCD & DSIGNAL CALCULATIONS #=#=#=##
@@ -212,7 +218,7 @@ class Annealing:
                     inv_qlen = 1.0 / qlen
                     sse = 0.0
                     for qi in range(qlen):
-                        predicted_function_[qi] = 100.0 * (iam[qi] / reference_iam[qi] - 1.0)
+                        predicted_function_[qi] = 100.0 * (iam[qi] / reference_iam[qi])
                         diff = predicted_function_[qi] - target_function[qi]
                         sse += diff * diff
                     xray_contrib = sse * inv_qlen
