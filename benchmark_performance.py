@@ -94,7 +94,7 @@ def create_test_data(natoms=3, nmodes=3, qlen=20):
     }
 
 
-def benchmark_single_run(data, nsteps=1000, warmup=True, use_pre_molecular=True):
+def benchmark_single_run(data, nsteps=1000, warmup=True, use_pre_molecular=False):
     """Benchmark a single annealing run"""
     sa = sa_module.Annealing()
     
@@ -168,7 +168,7 @@ def benchmark_single_run(data, nsteps=1000, warmup=True, use_pre_molecular=True)
 
 
 def benchmark_restart_loop(
-    data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warmup=True, use_pre_molecular=True
+    data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warmup=True, use_pre_molecular=False
 ):
     """Benchmark restart loop (simulating wrap.py behavior)"""
     sa = sa_module.Annealing()
@@ -297,9 +297,14 @@ def main():
         '--qlen', type=int, default=20,
         help='Length of q vector (default: 20)'
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        '--pre-molecular', action='store_true',
+        help='Use pre_molecular pair products (legacy behavior)'
+    )
+    mode_group.add_argument(
         '--on-the-fly', action='store_true',
-        help='Compute f_i f_j inside the annealing loop (skip pre_molecular)'
+        help='Compute f_i f_j inside the annealing loop (default)'
     )
     parser.add_argument(
         '--seed', type=int, default=None,
@@ -313,13 +318,14 @@ def main():
     print("=" * 70)
     print("Performance Benchmark: Simulated Annealing")
     print("=" * 70)
+    use_pre_molecular = args.pre_molecular
     print(f"\nConfiguration:")
     print(f"  Atoms: {args.natoms}")
     print(f"  Q vector length: {args.qlen}")
     print(f"  Restarts: {args.nrestarts}")
     print(f"  Steps per restart: {args.nsteps}")
     print(f"  Iterations: {args.iterations}")
-    print(f"  Mode: {'on-the-fly' if args.on_the_fly else 'pre_molecular'}")
+    print(f"  Mode: {'pre_molecular' if use_pre_molecular else 'on-the-fly'}")
     print()
     
     # Create test data
@@ -336,7 +342,7 @@ def main():
             data,
             nsteps=args.nsteps,
             warmup=(i == 0),
-            use_pre_molecular=not args.on_the_fly,
+            use_pre_molecular=use_pre_molecular,
         )
         single_times.append(elapsed)
         print(f"  Run {i+1}: {elapsed:.4f} s ({elapsed/args.nsteps*1000:.4f} ms/step)")
@@ -358,7 +364,7 @@ def main():
             sa_nsteps=args.nsteps,
             ga_nsteps=args.nsteps,
             warmup=(i == 0),
-            use_pre_molecular=not args.on_the_fly,
+            use_pre_molecular=use_pre_molecular,
         )
         restart_times.append(elapsed)
         total_steps = args.nrestarts * args.nsteps
@@ -393,7 +399,7 @@ def main():
             sa_nsteps=args.nsteps,
             ga_nsteps=args.nsteps,
             warmup=(nr == scaling_restarts[0]),
-            use_pre_molecular=not args.on_the_fly,
+            use_pre_molecular=use_pre_molecular,
         )
         scaling_times.append(elapsed)
         print(f"    {nr} restarts: {elapsed:.4f} s ({elapsed/nr:.4f} s/restart)")

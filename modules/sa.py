@@ -34,7 +34,7 @@ class Annealing:
         inelastic=True,
         pcd_mode=False,
         ewald_mode=False,
-        use_pre_molecular: bool = True,
+        use_pre_molecular: bool = False,
         bonds_bool=True,
         angles_bool=True,
         torsions_bool=True,

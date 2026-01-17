@@ -49,7 +49,7 @@ verbose_bool = false
 write_dat_file_bool = true
 # MM parameter retrieval method: "sdf" (try SDF method first, fallback to basic) or "basic" (use basic method directly)
 mm_param_method = "basic"
-# Precompute pair products outside the annealing loop
+# Precompute pair products outside the annealing loop (set true to disable on-the-fly)
 use_pre_molecular = false
 
 # ============================================================================
