@@ -134,6 +134,7 @@ class Xray:
         electron_mode=False,
         inelastic=False,
         compton_array=np.zeros(0),
+        return_pre_molecular: bool = True,
     ):
         """calculate IAM molecular scattering curve for atoms, xyz, qvector"""
         natoms = len(atomic_numbers)
@@ -155,9 +156,12 @@ class Xray:
             if inelastic:
                 compton += compton_array[i, :]
         nij = int(natoms * (natoms - 1) / 2)
-        pre_molecular = np.zeros(
-            (nij, qlen)
-        )  # pre_molecular array for speed in other functions
+        if return_pre_molecular:
+            pre_molecular = np.zeros(
+                (nij, qlen)
+            )  # pre_molecular array for speed in other functions
+        else:
+            pre_molecular = np.empty((0, qlen))
         k = 0  # begin counter
         for n in range(natoms - 1):
             for m in range(n + 1, natoms):  # j > i
@@ -165,9 +169,10 @@ class Xray:
                     zfactor[n] + e_mode_int * atomic_factor_array[n, :],
                     zfactor[m] + e_mode_int * atomic_factor_array[m, :],
                 )
-                pre_molecular[k, :] = (
-                    fnm  # store in array for speed in other functions later
-                )
+                if return_pre_molecular:
+                    pre_molecular[k, :] = (
+                        fnm  # store in array for speed in other functions later
+                    )
                 k += 1  # count iterations
                 molecular += (
                     2
@@ -206,6 +211,7 @@ class Xray:
         ph,
         inelastic=False,
         compton_array=np.zeros(0),
+        return_pre_molecular: bool = True,
     ):
         """
         calculate IAM function in the Ewald sphere
@@ -239,18 +245,22 @@ class Xray:
         # molecular
         molecular = np.zeros((qlen, tlen, plen))  # total molecular factor
         nij = int(natoms * (natoms - 1) / 2)
-        pre_molecular = np.zeros(
-            (nij, qlen, tlen, plen)
-        )  # pre_molecular array for speed in other functions
+        if return_pre_molecular:
+            pre_molecular = np.zeros(
+                (nij, qlen, tlen, plen)
+            )  # pre_molecular array for speed in other functions
+        else:
+            pre_molecular = np.empty((0, qlen, tlen, plen))
         k = 0  # begin counter
         for n in range(natoms - 1):
             for m in range(n + 1, natoms):  # j > i
                 fnm = np.multiply(
                     atomic_factor_array[n, :, :, :], atomic_factor_array[m, :, :, :]
                 )
-                pre_molecular[k, :, :, :] = (
-                    fnm  # store in array for speed in other functions later
-                )
+                if return_pre_molecular:
+                    pre_molecular[k, :, :, :] = (
+                        fnm  # store in array for speed in other functions later
+                    )
                 k += 1  # count iterations
                 xnm = xyz[n, 0] - xyz[m, 0]
                 ynm = xyz[n, 1] - xyz[m, 1]

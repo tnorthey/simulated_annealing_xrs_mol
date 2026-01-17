@@ -102,6 +102,7 @@ class Input_to_params:
         self.verbose_bool = bool(data["options"]["verbose_bool"])
         self.write_dat_file_bool = bool(data["options"]["write_dat_file_bool"])
         self.mm_param_method = str(data["options"]["mm_param_method"]).lower()
+        self.use_pre_molecular = bool(data["options"].get("use_pre_molecular", False))
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")

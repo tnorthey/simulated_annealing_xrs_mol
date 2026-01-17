@@ -54,9 +54,15 @@ def create_test_data(natoms=3, nmodes=3, qlen=20):
     compton = np.random.rand(qlen) * 10
     atomic_total = np.random.rand(qlen) * 50
     
-    # Pre-molecular (for isotropic mode: pairs x qlen)
+    # Atomic factors and pre-molecular products (pairs x qlen)
+    atomic_factor_array = np.random.rand(natoms, qlen) * 5
     npairs = natoms * (natoms - 1) // 2
-    pre_molecular = np.random.rand(npairs, qlen) * 5
+    pre_molecular = np.zeros((npairs, qlen), dtype=np.float64)
+    k = 0
+    for ii in range(natoms - 1):
+        for jj in range(ii + 1, natoms):
+            pre_molecular[k, :] = atomic_factor_array[ii, :] * atomic_factor_array[jj, :]
+            k += 1
     
     # Bond/angle/torsion parameters (minimal)
     if natoms >= 2:
@@ -81,13 +87,14 @@ def create_test_data(natoms=3, nmodes=3, qlen=20):
         'compton': compton,
         'atomic_total': atomic_total,
         'pre_molecular': pre_molecular,
+        'atomic_factor_array': atomic_factor_array,
         'bond_param_array': bond_param_array,
         'angle_param_array': angle_param_array,
         'torsion_param_array': torsion_param_array,
     }
 
 
-def benchmark_single_run(data, nsteps=1000, warmup=True):
+def benchmark_single_run(data, nsteps=1000, warmup=True, use_pre_molecular=True):
     """Benchmark a single annealing run"""
     sa = sa_module.Annealing()
     
@@ -108,6 +115,7 @@ def benchmark_single_run(data, nsteps=1000, warmup=True):
             data['compton'],
             data['atomic_total'],
             data['pre_molecular'],
+            data['atomic_factor_array'],
             data['step_size_array'],
             data['bond_param_array'],
             data['angle_param_array'],
@@ -117,6 +125,7 @@ def benchmark_single_run(data, nsteps=1000, warmup=True):
             inelastic=True,
             pcd_mode=False,
             ewald_mode=False,
+            use_pre_molecular=use_pre_molecular,
             bonds_bool=True,
             angles_bool=False,
             torsions_bool=False,
@@ -137,6 +146,7 @@ def benchmark_single_run(data, nsteps=1000, warmup=True):
         data['compton'],
         data['atomic_total'],
         data['pre_molecular'],
+        data['atomic_factor_array'],
         data['step_size_array'],
         data['bond_param_array'],
         data['angle_param_array'],
@@ -146,6 +156,7 @@ def benchmark_single_run(data, nsteps=1000, warmup=True):
         inelastic=True,
         pcd_mode=False,
         ewald_mode=False,
+        use_pre_molecular=use_pre_molecular,
         bonds_bool=True,
         angles_bool=False,
         torsions_bool=False,
@@ -156,7 +167,9 @@ def benchmark_single_run(data, nsteps=1000, warmup=True):
     return elapsed, result
 
 
-def benchmark_restart_loop(data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warmup=True):
+def benchmark_restart_loop(
+    data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warmup=True, use_pre_molecular=True
+):
     """Benchmark restart loop (simulating wrap.py behavior)"""
     sa = sa_module.Annealing()
     
@@ -183,6 +196,7 @@ def benchmark_restart_loop(data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warm
             data['compton'],
             data['atomic_total'],
             data['pre_molecular'],
+            data['atomic_factor_array'],
             data['step_size_array'],
             data['bond_param_array'],
             data['angle_param_array'],
@@ -192,6 +206,7 @@ def benchmark_restart_loop(data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warm
             inelastic=True,
             pcd_mode=False,
             ewald_mode=False,
+            use_pre_molecular=use_pre_molecular,
             bonds_bool=True,
             angles_bool=False,
             torsions_bool=False,
@@ -232,6 +247,7 @@ def benchmark_restart_loop(data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warm
             data['compton'],
             data['atomic_total'],
             data['pre_molecular'],
+            data['atomic_factor_array'],
             data['step_size_array'],
             data['bond_param_array'],
             data['angle_param_array'],
@@ -241,6 +257,7 @@ def benchmark_restart_loop(data, nrestarts=3, sa_nsteps=500, ga_nsteps=500, warm
             inelastic=True,
             pcd_mode=False,
             ewald_mode=False,
+            use_pre_molecular=use_pre_molecular,
             bonds_bool=True,
             angles_bool=False,
             torsions_bool=False,
@@ -280,9 +297,19 @@ def main():
         '--qlen', type=int, default=20,
         help='Length of q vector (default: 20)'
     )
+    parser.add_argument(
+        '--on-the-fly', action='store_true',
+        help='Compute f_i f_j inside the annealing loop (skip pre_molecular)'
+    )
+    parser.add_argument(
+        '--seed', type=int, default=None,
+        help='Random seed for reproducible benchmarks (default: None)'
+    )
     
     args = parser.parse_args()
     
+    if args.seed is not None:
+        np.random.seed(args.seed)
     print("=" * 70)
     print("Performance Benchmark: Simulated Annealing")
     print("=" * 70)
@@ -292,6 +319,7 @@ def main():
     print(f"  Restarts: {args.nrestarts}")
     print(f"  Steps per restart: {args.nsteps}")
     print(f"  Iterations: {args.iterations}")
+    print(f"  Mode: {'on-the-fly' if args.on_the_fly else 'pre_molecular'}")
     print()
     
     # Create test data
@@ -305,7 +333,10 @@ def main():
     single_times = []
     for i in range(args.iterations):
         elapsed, _ = benchmark_single_run(
-            data, nsteps=args.nsteps, warmup=(i == 0)
+            data,
+            nsteps=args.nsteps,
+            warmup=(i == 0),
+            use_pre_molecular=not args.on_the_fly,
         )
         single_times.append(elapsed)
         print(f"  Run {i+1}: {elapsed:.4f} s ({elapsed/args.nsteps*1000:.4f} ms/step)")
@@ -326,7 +357,8 @@ def main():
             nrestarts=args.nrestarts,
             sa_nsteps=args.nsteps,
             ga_nsteps=args.nsteps,
-            warmup=(i == 0)
+            warmup=(i == 0),
+            use_pre_molecular=not args.on_the_fly,
         )
         restart_times.append(elapsed)
         total_steps = args.nrestarts * args.nsteps
@@ -360,7 +392,8 @@ def main():
             nrestarts=nr,
             sa_nsteps=args.nsteps,
             ga_nsteps=args.nsteps,
-            warmup=(nr == scaling_restarts[0])
+            warmup=(nr == scaling_restarts[0]),
+            use_pre_molecular=not args.on_the_fly,
         )
         scaling_times.append(elapsed)
         print(f"    {nr} restarts: {elapsed:.4f} s ({elapsed/nr:.4f} s/restart)")

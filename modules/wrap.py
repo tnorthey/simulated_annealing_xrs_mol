@@ -501,6 +501,7 @@ class Wrapper:
                     p.ph,
                     p.inelastic,
                     compton_array,
+                    return_pre_molecular=use_pre_molecular,
                 )
             else:
                 iam, atomic, molecular, compton, pre_molecular = x.iam_calc(
@@ -510,6 +511,7 @@ class Wrapper:
                     electron_mode,
                     p.inelastic,
                     compton_array,
+                    return_pre_molecular=use_pre_molecular,
                 )
             return iam, atomic, compton, pre_molecular
 
@@ -520,6 +522,18 @@ class Wrapper:
         _, _, atomlist, reference_xyz = m.read_xyz(p.reference_xyz_file)
         atomic_numbers = [m.periodic_table(symbol) for symbol in atomlist]
         compton_array = x.compton_spline(atomic_numbers, p.qvector)
+        use_pre_molecular = getattr(p, "use_pre_molecular", False)
+        if p.ewald_mode and not use_pre_molecular:
+            print("Ewald mode requires pre_molecular; overriding to True.")
+            use_pre_molecular = True
+        if p.ewald_mode:
+            atomic_factor_array = np.zeros(
+                (len(atomic_numbers), p.qlen), dtype=np.float64
+            )
+        else:
+            _, atomic_factor_array = x.jq_atomic_factors_calc(
+                atomic_numbers, p.qvector
+            )
         starting_iam, atomic, compton, pre_molecular = xyz2iam(
             xyz_start, atomic_numbers, compton_array, p.ewald_mode
         )
@@ -779,6 +793,7 @@ class Wrapper:
                     compton,
                     atomic,
                     pre_molecular,
+                    atomic_factor_array,
                     p.sa_step_size_array,
                     bond_param_array,
                     angle_param_array,
@@ -788,6 +803,7 @@ class Wrapper:
                     p.inelastic,
                     p.pcd_mode,
                     p.ewald_mode,
+                    use_pre_molecular,
                     p.bonds_bool,
                     p.angles_bool,
                     p.torsions_bool,

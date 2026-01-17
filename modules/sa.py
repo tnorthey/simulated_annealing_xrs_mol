@@ -24,6 +24,7 @@ class Annealing:
         compton: NDArray,
         atomic_total: NDArray,
         pre_molecular: NDArray,
+        atomic_factor_array: NDArray,
         step_size_array: NDArray,
         bond_param_array: NDArray,
         angle_param_array: NDArray,
@@ -33,6 +34,7 @@ class Annealing:
         inelastic=True,
         pcd_mode=False,
         ewald_mode=False,
+        use_pre_molecular: bool = True,
         bonds_bool=True,
         angles_bool=True,
         torsions_bool=True,
@@ -89,6 +91,10 @@ class Annealing:
             qx = r_grid * np.sin(th_grid) * np.cos(ph_grid)
             qy = r_grid * np.sin(th_grid) * np.sin(ph_grid)
             qz = r_grid * np.cos(th_grid)
+        if ewald_mode and not use_pre_molecular:
+            raise ValueError(
+                "On-the-fly molecular factors are not supported in Ewald mode."
+            )
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Pre-compute abs(target_function) to avoid repeated abs() calls in loop
         abs_target_function = np.abs(target_function)
@@ -200,14 +206,27 @@ class Annealing:
                             dy = xyz_trial[ii, 1] - xyz_trial[jj, 1]
                             dz = xyz_trial[ii, 2] - xyz_trial[jj, 2]
                             r = np.sqrt(dx * dx + dy * dy + dz * dz)
-                            for qi in range(qlen):
-                                qd = qvector[qi] * r
-                                molecular[qi] += (
-                                    2.0
-                                    * pre_molecular[k, qi]
-                                    * np.sin(qd)
-                                    / qd
-                                )
+                            if use_pre_molecular:
+                                for qi in range(qlen):
+                                    qd = qvector[qi] * r
+                                    molecular[qi] += (
+                                        2.0
+                                        * pre_molecular[k, qi]
+                                        * np.sin(qd)
+                                        / qd
+                                    )
+                            else:
+                                fi = atomic_factor_array[ii, :]
+                                fj = atomic_factor_array[jj, :]
+                                for qi in range(qlen):
+                                    qd = qvector[qi] * r
+                                    molecular[qi] += (
+                                        2.0
+                                        * fi[qi]
+                                        * fj[qi]
+                                        * np.sin(qd)
+                                        / qd
+                                    )
                             k += 1
                     for qi in range(qlen):
                         iam[qi] = molecular[qi]

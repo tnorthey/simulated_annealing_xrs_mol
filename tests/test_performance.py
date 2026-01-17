@@ -46,9 +46,15 @@ def small_test_data():
     compton = np.random.rand(qlen) * 10
     atomic_total = np.random.rand(qlen) * 50
     
-    # Pre-molecular (for isotropic mode: pairs x qlen)
+    # Atomic factors and pre-molecular products (pairs x qlen)
+    atomic_factor_array = np.random.rand(natoms, qlen) * 5
     npairs = natoms * (natoms - 1) // 2
-    pre_molecular = np.random.rand(npairs, qlen) * 5
+    pre_molecular = np.zeros((npairs, qlen), dtype=np.float64)
+    k = 0
+    for ii in range(natoms - 1):
+        for jj in range(ii + 1, natoms):
+            pre_molecular[k, :] = atomic_factor_array[ii, :] * atomic_factor_array[jj, :]
+            k += 1
     
     # Bond/angle/torsion parameters (minimal)
     bond_param_array = np.array([
@@ -75,6 +81,7 @@ def small_test_data():
         'compton': compton,
         'atomic_total': atomic_total,
         'pre_molecular': pre_molecular,
+        'atomic_factor_array': atomic_factor_array,
         'bond_param_array': bond_param_array,
         'angle_param_array': angle_param_array,
         'torsion_param_array': torsion_param_array,
@@ -107,6 +114,7 @@ class TestPerformance:
             data['compton'],
             data['atomic_total'],
             data['pre_molecular'],
+            data['atomic_factor_array'],
             data['step_size_array'],
             data['bond_param_array'],
             data['angle_param_array'],
@@ -116,6 +124,7 @@ class TestPerformance:
             inelastic=True,
             pcd_mode=False,
             ewald_mode=False,
+            use_pre_molecular=True,
             bonds_bool=True,
             angles_bool=True,
             torsions_bool=False,
@@ -136,6 +145,7 @@ class TestPerformance:
             data['compton'],
             data['atomic_total'],
             data['pre_molecular'],
+            data['atomic_factor_array'],
             data['step_size_array'],
             data['bond_param_array'],
             data['angle_param_array'],
@@ -145,6 +155,7 @@ class TestPerformance:
             inelastic=True,
             pcd_mode=False,
             ewald_mode=False,
+            use_pre_molecular=True,
             bonds_bool=True,
             angles_bool=True,
             torsions_bool=False,
@@ -196,6 +207,7 @@ class TestPerformance:
             data['compton'],
             data['atomic_total'],
             data['pre_molecular'],
+            data['atomic_factor_array'],
             data['step_size_array'],
             data['bond_param_array'],
             data['angle_param_array'],
@@ -205,6 +217,7 @@ class TestPerformance:
             inelastic=True,
             pcd_mode=False,
             ewald_mode=False,
+            use_pre_molecular=True,
             bonds_bool=True,
             angles_bool=True,
             torsions_bool=False,
@@ -245,6 +258,7 @@ class TestPerformance:
                 data['compton'],
                 data['atomic_total'],
                 data['pre_molecular'],
+            data['atomic_factor_array'],
                 data['step_size_array'],
                 data['bond_param_array'],
                 data['angle_param_array'],
@@ -254,6 +268,7 @@ class TestPerformance:
                 inelastic=True,
                 pcd_mode=False,
                 ewald_mode=False,
+            use_pre_molecular=True,
                 bonds_bool=True,
                 angles_bool=True,
                 torsions_bool=False,
@@ -312,6 +327,7 @@ class TestPerformance:
                     data['compton'],
                     data['atomic_total'],
                     data['pre_molecular'],
+                    data['atomic_factor_array'],
                     data['step_size_array'],
                     data['bond_param_array'],
                     data['angle_param_array'],
@@ -321,6 +337,7 @@ class TestPerformance:
                     inelastic=True,
                     pcd_mode=False,
                     ewald_mode=False,
+                    use_pre_molecular=True,
                     bonds_bool=True,
                     angles_bool=True,
                     torsions_bool=False,
@@ -353,6 +370,7 @@ class TestPerformance:
                     data['compton'],
                     data['atomic_total'],
                     data['pre_molecular'],
+                    data['atomic_factor_array'],
                     data['step_size_array'],
                     data['bond_param_array'],
                     data['angle_param_array'],
@@ -362,6 +380,7 @@ class TestPerformance:
                     inelastic=True,
                     pcd_mode=False,
                     ewald_mode=False,
+                    use_pre_molecular=True,
                     bonds_bool=True,
                     angles_bool=True,
                     torsions_bool=False,
