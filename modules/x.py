@@ -131,6 +131,7 @@ class Xray:
         atomic_numbers,
         xyz,
         qvector,
+        ion: bool = False,
         electron_mode=False,
         inelastic=False,
         compton_array=np.zeros(0),
@@ -149,7 +150,7 @@ class Xray:
             zfactor = np.multiply(0.0, atomic_numbers)
             e_mode_int = 1
         for i in range(natoms):
-            tmp = self.atomic_factor(atomic_numbers[i], qvector)
+            tmp = self.atomic_factor(atomic_numbers[i], qvector, ion=ion)
             atomic_factor_array[i, :] = tmp
             atomic += (zfactor[i] - tmp) ** 2
             if inelastic:
@@ -204,6 +205,7 @@ class Xray:
         qvector,
         th,
         ph,
+        ion: bool = False,
         inelastic=False,
         compton_array=np.zeros(0),
     ):
@@ -231,7 +233,7 @@ class Xray:
             for i in range(plen):
                 for j in range(tlen):
                     atomic_factor_array[n, :, j, i] = self.atomic_factor(
-                        atomic_numbers[n], qvector
+                        atomic_numbers[n], qvector, ion=ion
                     )
                     if inelastic:
                         compton[:, j, i] += compton_array[n, :]
@@ -275,7 +277,7 @@ class Xray:
             compton_rotavg,
         )
 
-    def atomic_factor(self, atom_number, qvector):
+    def atomic_factor(self, atom_number, qvector, ion: bool = False):
         """returns atomic x-ray scattering factor for atom_number, and qvector"""
         aa, bb, cc, dd, ee = self.aa, self.bb, self.cc, self.dd, self.ee
         if isinstance(qvector, float):
@@ -288,14 +290,13 @@ class Xray:
                     -bb[atom_number - 1, i] * (0.25 * qvector[j] / np.pi) ** 2
                 )
         atomfactor += cc[atom_number - 1]
-        eirik=True
-        if eirik:
-            # Apply Eirik's custom ion edit: subtract dd*exp(-ee*q^2) from atomic factors
+        if ion:
+            # Apply ion correction: subtract dd*exp(-ee*q^2) from atomic factors
             # Only apply if atom_number is within bounds of dd and ee arrays
             idx = atom_number - 1
             if idx < len(dd) and idx < len(ee):
                 if dd[idx] != 0.0:  # Only subtract if non-zero
-                    atomfactor -= dd[idx] * np.exp(-ee[idx] * qvector ** 2)
+                    atomfactor -= dd[idx] * np.exp(-ee[idx] * qvector**2)
         return atomfactor
 
     def compton_spline(self, atomic_numbers, qvector):

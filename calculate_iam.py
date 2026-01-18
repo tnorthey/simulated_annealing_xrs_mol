@@ -81,6 +81,7 @@ def read_xyz_trajectory(filename):
 
 
 def calculate_iam_for_structure(xyz, atomic_numbers, qvector, xray_obj, 
+                                 ion=False,
                                  inelastic=False, ewald_mode=False, 
                                  th=None, ph=None, compton_array=None):
     """
@@ -100,6 +101,7 @@ def calculate_iam_for_structure(xyz, atomic_numbers, qvector, xray_obj,
          iam_total_rotavg, atomic_rotavg, molecular_rotavg, compton_rotavg
         ) = xray_obj.iam_calc_ewald(
             atomic_numbers, xyz, qvector, th, ph,
+            ion=ion,
             inelastic=inelastic, compton_array=compton_array
         )
         # Return rotational average for output
@@ -107,6 +109,7 @@ def calculate_iam_for_structure(xyz, atomic_numbers, qvector, xray_obj,
     else:
         iam, atomic, molecular, compton, pre_molecular = xray_obj.iam_calc(
             atomic_numbers, xyz, qvector,
+            ion=ion,
             electron_mode=False, inelastic=inelastic, compton_array=compton_array
         )
         return iam, atomic, molecular, compton
@@ -155,6 +158,8 @@ def main():
     # Scattering options
     parser.add_argument('--inelastic', action='store_true',
                        help='Include inelastic (Compton) scattering')
+    parser.add_argument('--ion', action='store_true',
+                       help='Include ion correction factors (dd/ee) in the atomic form factor')
     parser.add_argument('--ewald', action='store_true',
                        help='Use Ewald sphere mode (3D scattering)')
     
@@ -257,6 +262,7 @@ def main():
         print("Calculating reference IAM signal...")
         reference_iam, _, _, _ = calculate_iam_for_structure(
             ref_xyz, ref_atomic_numbers, qvector, x,
+            ion=args.ion,
             inelastic=args.inelastic, ewald_mode=args.ewald,
             th=th, ph=ph, compton_array=compton_array
         )
@@ -271,6 +277,7 @@ def main():
         
         iam, atomic, molecular, compton = calculate_iam_for_structure(
             xyz, atomic_numbers, qvector, x,
+            ion=args.ion,
             inelastic=args.inelastic, ewald_mode=args.ewald,
             th=th, ph=ph, compton_array=compton_array
         )

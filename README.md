@@ -358,6 +358,34 @@ This will:
 3. Write the selected trajectory to `optimal_trajectory.xyz`
 4. Print the chosen path and statistics
 
+### Random Sampling
+
+**Randomly sample files per timestep before pruning** (useful for testing or exploring subsets):
+
+```bash
+python3 optimal_path.py results/ --random-sample 500
+```
+
+This randomly selects up to 500 files **per timestep** before applying topM/delta pruning. Useful for:
+- Testing with smaller datasets
+- Reducing computational cost
+- Exploring different random subsets
+- Quick prototyping
+- Ensuring consistent coverage across all timesteps
+
+**Note**: Sampling happens **per timestep** after grouping, so each timestep gets up to N files. If a timestep has fewer than N files, all files are kept. The same `--seed` is used for reproducibility.
+
+**Combine with other options**:
+```bash
+python3 optimal_path.py results/ --random-sample 1000 --topM 50 --delta 0.1
+```
+
+This will:
+1. Group files by timestep
+2. Randomly sample up to 1000 files per timestep (seed from `--seed`)
+3. Apply delta pruning (fit <= best_fit + 0.1)
+4. Apply topM pruning (keep top 50)
+
 ### Pruning Options
 
 Limit the number of candidates considered per timestep:
@@ -436,6 +464,7 @@ python3 optimal_path.py results/ \
 
 ```bash
 python3 optimal_path.py results/ \
+    --random-sample 2000 \
     --topM 100 \
     --delta 0.2 \
     --fit-weight 1.0 \
@@ -464,6 +493,7 @@ The script provides:
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
 | `directory` | required | - | Directory containing `*.dat` and `*.xyz` files |
+| `--random-sample` | int | None | Randomly sample N files before pruning (uses `--seed` for reproducibility) |
 | `--topM` | int | 100 | Number of lowest-fit candidates to keep per timestep |
 | `--delta` | float | None | Fit window: keep candidates with `fit <= best_fit + delta` |
 | `--fit-weight` | float | 1.0 | Weight for fit factor term |
@@ -473,7 +503,7 @@ The script provides:
 | `--rmsd-indices` | str | None | Comma-separated atom indices (0-based) for RMSD calculation |
 | `--xyz-out` | str | optimal_trajectory.xyz | Output XYZ trajectory filename |
 | `--edge-sample-cap` | int | 3000 | Number of edges sampled for auto-scaling |
-| `--seed` | int | 0 | RNG seed for auto-scale edge sampling |
+| `--seed` | int | 0 | RNG seed for random sampling and auto-scale edge sampling |
 
 ### Help
 
@@ -613,6 +643,244 @@ View all available options:
 python3 analyze_geometry.py --help
 ```
 
+## Random Subset Comparison Tool
+
+The `compare_random_subsets.py` script automates the process of comparing multiple random subsets from your results directory. It:
+
+1. Runs `optimal_path.py` multiple times with different random seeds
+2. Analyzes specified geometric parameters (bonds, angles, dihedrals) from each optimal trajectory
+3. Creates a comparison plot showing all subsets together
+
+This is useful for:
+- **Evaluating robustness**: See how different random subsets affect the optimal path
+- **Statistical analysis**: Compare multiple trajectories from different data subsets
+- **Quick comparisons**: Automate the workflow of running optimal_path → analyze → plot
+
+### Basic Usage
+
+Compare 5 random subsets (default) with dihedral 2-3-4-5 and random sample size 500:
+```bash
+python3 compare_random_subsets.py results/ --dihedral 2 3 4 5
+```
+
+Compare 10 random subsets:
+```bash
+python3 compare_random_subsets.py results/ --n-subsets 10 --dihedral 2 3 4 5
+```
+
+### Bonds, Angles, and Dihedrals
+
+You can analyze bonds, angles, and/or dihedrals. At least one must be specified:
+
+**Bond length**:
+```bash
+python3 compare_random_subsets.py results/ --bond 0 1
+```
+
+**Angle**:
+```bash
+python3 compare_random_subsets.py results/ --angle 0 1 2
+```
+
+**Dihedral angle**:
+```bash
+python3 compare_random_subsets.py results/ --dihedral 2 3 4 5
+```
+
+**Multiple calculations** (all will be plotted):
+```bash
+python3 compare_random_subsets.py results/ \
+    --bond 0 1 \
+    --angle 0 1 2 \
+    --dihedral 2 3 4 5
+```
+
+### Aggregate (mean ± std) Plot
+
+If you plan to run many subsets (e.g. 100s) and want a **single summary curve** instead of plotting every subset, use `--aggregate`.
+
+This computes the **mean** and **standard deviation** across subsets at each timepoint and plots **mean ± 1σ** as a shaded band.
+
+```bash
+python3 compare_random_subsets.py results/ \
+    --n-subsets 200 \
+    --random-sample 500 \
+    --topM 50 \
+    --dihedral 2 3 4 5 \
+    --aggregate \
+    --output-plot dihedral_mean_std.png
+```
+
+After plotting, the script also selects a **representative subset**: the subset whose dihedral trajectory is closest (smallest RMS difference) to the mean trajectory. The corresponding optimal-path XYZ is saved to:
+
+- `subset_comparison/representative_trajectory.xyz` (or your chosen `--output-dir`)
+
+### Custom Random Sample Size
+
+Use a different random sample size (default is 500):
+```bash
+python3 compare_random_subsets.py results/ --random-sample 1000 --dihedral 2 3 4 5
+```
+
+### Custom Output
+
+Specify output directory and plot filename:
+```bash
+python3 compare_random_subsets.py results/ \
+    --output-dir my_comparison \
+    --output-plot my_plot.png
+```
+
+If you **do not** set `--output-plot` (i.e. you leave it as the default), the script will auto-generate a descriptive filename based on your settings (e.g. `n-subsets`, `random-sample`, `topM`, geometry indices, `seed-start`, and whether `--aggregate` is enabled).
+
+### Seed Control
+
+Control the starting seed for reproducibility:
+```bash
+python3 compare_random_subsets.py results/ \
+    --n-subsets 5 \
+    --seed-start 42
+```
+
+Each subset uses `seed_start + subset_index` (e.g., 42, 43, 44, 45, 46).
+
+### Complete Example
+
+```bash
+python3 compare_random_subsets.py results/ \
+    --n-subsets 8 \
+    --random-sample 500 \
+    --topM 50 \
+    --seed-start 0 \
+    --bond 0 1 \
+    --angle 0 1 2 \
+    --dihedral 2 3 4 5 \
+    --output-dir subset_analysis \
+    --output-plot geometry_comparison.png
+```
+
+### What It Does
+
+1. **Runs optimal_path.py** for each subset with:
+   - `--random-sample N` (configurable via `--random-sample`, default: 500)
+   - `--topM M` (configurable via `--topM`, default: 50)
+   - `--fit-weight 0`
+   - `--rmsd-weight 1`
+   - `--signal-weight 1`
+   - `--no-autoscale`
+   - Different seed for each subset
+
+2. **Analyzes geometry** using `analyze_geometry.py`:
+   - Extracts the specified bonds, angles, and/or dihedrals from each trajectory
+   - Saves results as CSV files (one column per calculation)
+
+3. **Creates comparison plot** using `plot_geometry.py`:
+   - Plots all subsets on the same graph
+   - If multiple calculations are specified, plots each calculation type separately
+   - Labels each subset with its seed and calculation type
+   - Saves as PNG
+
+### Output
+
+- **Trajectory files**: `optimal_trajectory_subset_0.xyz`, `optimal_trajectory_subset_1.xyz`, ...
+- **Analysis files**: `geometry_subset_0.csv`, `geometry_subset_1.csv`, ... (contains one column per calculation)
+- **Comparison plot**: `geometry_comparison.png` (or custom filename)
+
+All files are saved in the output directory (default: `subset_comparison/`).
+
+### Command-Line Arguments
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `directory` | required | - | Directory containing `*.dat` and `*.xyz` files |
+| `--n-subsets` | int | 5 | Number of random subsets to compare |
+| `--random-sample` | int | 500 | Number of files to randomly sample for each subset |
+| `--topM` | int | 50 | Number of lowest-fit candidates to keep per timestep |
+| `--seed-start` | int | 0 | Starting seed (each subset uses seed_start + index) |
+| `--output-dir` | str | subset_comparison | Output directory for intermediate files |
+| `--output-plot` | str | geometry_comparison.png | Output plot filename |
+| `--bond` | int, int | None | Bond atom indices (I J). At least one of --bond, --angle, or --dihedral must be specified. |
+| `--angle` | int, int, int | None | Angle atom indices (I J K). At least one of --bond, --angle, or --dihedral must be specified. |
+| `--dihedral` | int, int, int, int | None | Dihedral atom indices (I J K L). At least one of --bond, --angle, or --dihedral must be specified. |
+
+### Help
+
+View all available options:
+```bash
+python3 compare_random_subsets.py --help
+```
+
+## Fit Value Histogram Tool
+
+The `plot_fit_histograms.py` script creates histograms of fit values from filenames for each timestep separately. This helps you:
+
+- **Visualize fit distributions** across timesteps
+- **Identify converged regions** where most good runs fall
+- **Determine outlier thresholds** for filtering
+- **Compare fit distributions** between timesteps
+
+### Basic Usage
+
+Plot histograms for all timesteps:
+```bash
+python3 plot_fit_histograms.py results/
+```
+
+### Custom Output
+
+Specify output filename:
+```bash
+python3 plot_fit_histograms.py results/ --output my_histograms.png
+```
+
+### Adjust Bin Count
+
+Change the number of histogram bins:
+```bash
+python3 plot_fit_histograms.py results/ --bins 100
+```
+
+### Output
+
+The script creates:
+1. **Histogram plot**: A grid of histograms, one per timestep, showing:
+   - Distribution of fit values
+   - Statistics box (min, Q25, median, mean, Q75, max)
+   - Number of files per timestep
+
+2. **Summary statistics**: Printed to console with:
+   - Count of files per timestep
+   - Min, Q25, median, Q75, max fit values per timestep
+
+### Example Output
+
+```
+Summary Statistics (across 20 timesteps):
+============================================================
+Timestep     Count      Min          Q25          Median       Q75          Max         
+------------------------------------------------------------
+01           1500       0.123456     0.234567     0.345678     0.456789     0.987654
+02           1500       0.112345     0.223456     0.334567     0.445678     0.876543
+...
+```
+
+### Command-Line Arguments
+
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `directory` | required | - | Directory containing `*.dat` and `*.xyz` files |
+| `--output` | str | fit_histograms.png | Output plot filename |
+| `--bins` | int | 50 | Number of bins for histograms |
+| `--dat-ext` | str | .dat | Extension for DAT files |
+| `--xyz-ext` | str | .xyz | Extension for XYZ files |
+
+### Help
+
+View all available options:
+```bash
+python3 plot_fit_histograms.py --help
+```
+
 ## Geometry Plotting Tool
 
 The `plot_geometry.py` script creates plots from CSV files generated by `analyze_geometry.py`. It can visualize geometric parameters over time (or frame number) and supports multiple customization options. **It can plot multiple files simultaneously for comparison.**
@@ -654,10 +922,12 @@ python3 plot_geometry.py run1.csv run2.csv run3.csv output.png \
 ```bash
 python3 plot_geometry.py data.csv output.png \
     --title "Bond Length Evolution" \
-    --xlabel "Frame" \
+    --xlabel "time (fs)" \
     --ylabel "Bond Length (Å)" \
     --labels "C-C bond" "C-H bond"
 ```
+
+**Note**: The x-axis defaults to "time (fs)" where each frame represents 20 fs, with the first frame at 10 fs. The plot starts at 0 fs to show blank space before the first data point. You can override the x-axis label with `--xlabel` if needed.
 
 **Axis limits**:
 ```bash
@@ -703,7 +973,7 @@ python3 analyze_geometry.py trajectory.xyz \
 # Step 2: Plot the results
 python3 plot_geometry.py geometry_data.csv geometry_plot.png \
     --title "Molecular Geometry Evolution" \
-    --xlabel "Frame" \
+    --xlabel "time (fs)" \
     --ylabel "Value" \
     --labels "Bond 0-1 (Å)" "Angle 0-1-2 (°)" \
     --grid \
@@ -732,7 +1002,7 @@ python3 plot_geometry.py traj1.csv traj2.csv traj3.csv comparison.png \
 | `input_csv` | required | Input CSV file(s) (from analyze_geometry.py, no header). Can specify multiple files for comparison. |
 | `output_png` | required | Output PNG file |
 | `--columns` | int+ | Column indices to plot (0-indexed). Applies to all files. If not specified, plots column 0 from each file. |
-| `--xlabel` | str | X-axis label (default: "Frame") |
+| `--xlabel` | str | X-axis label (default: "time (fs)") |
 | `--ylabel` | str | Y-axis label (default: "Value") |
 | `--labels` | str+ | Labels for each column (legend). Number should match number of columns plotted. |
 | `--title` | str | Plot title |

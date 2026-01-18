@@ -666,9 +666,9 @@ class Openff_retreive_mm_params:
                 print(f"Warning: Error creating OpenFF molecule ({type(e).__name__}). Attempting fix...")
                 rdkit_mol = self.fix_molecule_issues(rdkit_mol)
                 try:
-                    off_mol = Molecule.from_rdkit(
-                        rdkit_mol, allow_undefined_stereo=True, hydrogens_are_explicit=True
-                    )
+        off_mol = Molecule.from_rdkit(
+            rdkit_mol, allow_undefined_stereo=True, hydrogens_are_explicit=True
+        )
                     print("Successfully fixed molecule and created OpenFF molecule.")
                 except Exception as e2:
                     last_error = e2

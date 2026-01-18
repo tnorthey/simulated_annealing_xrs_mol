@@ -154,6 +154,8 @@ def load_candidates(
     xyz_ext=".xyz",
     prune_topM=100,
     prune_delta=None,
+    random_sample=None,
+    seed=0,
 ):
     dats = glob.glob(os.path.join(directory, f"*{dat_ext}"))
     xyzs = glob.glob(os.path.join(directory, f"*{xyz_ext}"))
@@ -178,7 +180,7 @@ def load_candidates(
             "Expected names like 01_0.12345678.dat and 01_0.12345678.xyz"
         )
 
-    # Group by timestep
+    # Group by timestep first
     by_t = {}
     for (t, fit) in keys:
         by_t.setdefault(t, []).append(
@@ -191,6 +193,27 @@ def load_candidates(
         )
 
     timesteps = sorted(by_t.keys())
+    
+    # Random sampling per timestep (if requested) - happens after grouping by timestep
+    if random_sample is not None:
+        n_sample = int(random_sample)
+        if n_sample < 1:
+            raise ValueError(f"random_sample must be >= 1, got {n_sample}")
+        
+        rng = np.random.default_rng(seed)
+        total_before = sum(len(layer) for layer in by_t.values())
+        
+        # Sample per timestep
+        for t in timesteps:
+            layer = by_t[t]
+            if len(layer) > n_sample:
+                # Randomly sample n_sample files from this timestep
+                indices = rng.choice(len(layer), size=n_sample, replace=False)
+                by_t[t] = [layer[i] for i in indices]
+        
+        total_after = sum(len(layer) for layer in by_t.values())
+        print(f"Randomly sampled up to {n_sample} files per timestep (seed={seed}): "
+              f"{total_before} -> {total_after} total files across {len(timesteps)} timesteps")
 
     # Fit-only pruning per timestep
     pruned_layers = []
@@ -259,11 +282,14 @@ def solve_optimal_path(
     edge_sample_cap=3000,
     seed=0,
     rmsd_indices=None,
+    random_sample=None,
 ):
     timesteps, layers = load_candidates(
         directory=directory,
         prune_topM=prune_topM,
         prune_delta=prune_delta,
+        random_sample=random_sample,
+        seed=seed,
     )
 
     T = len(layers)
@@ -502,6 +528,15 @@ def main():
         help="Comma-separated list of atom indices (0-based) to include in RMSD calculation. "
              "Example: '0,1,2,5' or '3,5,6,10,12'. If not specified, all atoms are used.",
     )
+    parser.add_argument(
+        "--random-sample",
+        type=int,
+        default=None,
+        help="Randomly sample up to N files per timestep before applying topM/delta pruning. "
+             "Useful for testing with smaller datasets or exploring different subsets. "
+             "Sampling happens after grouping by timestep, so each timestep gets up to N files. "
+             "Uses the same seed as --seed for reproducibility.",
+    )
 
     args = parser.parse_args()
     
@@ -529,6 +564,7 @@ def main():
         edge_sample_cap=args.edge_sample_cap,
         seed=args.seed,
         rmsd_indices=rmsd_indices,
+        random_sample=args.random_sample,
     )
 
     write_xyz_trajectory(result["path"], args.xyz_out)

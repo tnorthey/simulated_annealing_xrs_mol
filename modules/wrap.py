@@ -105,6 +105,56 @@ class Wrapper:
         mm_method = p.mm_param_method.lower()
         topology = None
         openmm_system = None
+
+        def _postprocess_param_arrays(bond_param_array, angle_param_array, torsion_param_array):
+            """
+            Apply ignore masks and update torsion deltas.
+
+            This is shared by the "basic" geometry method and the SDF->geometry fallback.
+            """
+            # Bonds
+            mask = np.ones(len(bond_param_array), dtype=bool)
+            for i, j in p.bond_ignore_array:
+                remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
+                    (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
+                )
+                mask &= ~remove
+            bond_param_array = bond_param_array[mask]
+
+            # Angles
+            if len(angle_param_array) > 0:
+                mask = np.ones(len(angle_param_array), dtype=bool)
+                for i, j, k in p.angle_ignore_array:
+                    remove = (
+                        (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
+                    ) & (angle_param_array[:, 2] == k) | (
+                        (angle_param_array[:, 0] == k) & (angle_param_array[:, 1] == j)
+                    ) & (
+                        angle_param_array[:, 2] == i
+                    )
+                    mask &= ~remove
+                angle_param_array = angle_param_array[mask]
+
+            # Torsions
+            if len(torsion_param_array) > 0:
+                torsion_param_array = _mm_params().update_torsion_deltas(
+                    torsion_param_array, xyz_start
+                )
+                mask = np.ones(len(torsion_param_array), dtype=bool)
+                for i, j, k, l in p.torsion_ignore_array:
+                    remove = (
+                        ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
+                        & (torsion_param_array[:, 2] == k)
+                    ) & (torsion_param_array[:, 3] == l) | (
+                        ((torsion_param_array[:, 0] == l) & (torsion_param_array[:, 1] == k))
+                        & (torsion_param_array[:, 2] == j)
+                    ) & (
+                        torsion_param_array[:, 3] == i
+                    )
+                    mask &= ~remove
+                torsion_param_array = torsion_param_array[mask]
+
+            return bond_param_array, angle_param_array, torsion_param_array
         
         if mm_method == "basic":
             # Go straight to basic method (geometry extraction)
@@ -117,47 +167,10 @@ class Wrapper:
                 print("Successfully extracted parameters from geometry!")
                 print(f"Found {len(bond_param_array)} bonds, {len(angle_param_array)} angles, {len(torsion_param_array)} torsions")
                 print("Note: Using generic force constants and starting geometry as equilibrium values.")
-                
-                # Mask out ignored bonds/angles/torsions
-                # Bonds
-                mask = np.ones(len(bond_param_array), dtype=bool)
-                for i, j in p.bond_ignore_array:
-                    remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
-                        (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
-                    )
-                    mask &= ~remove
-                bond_param_array = bond_param_array[mask]
-                
-                # Angles
-                if len(angle_param_array) > 0:
-                    mask = np.ones(len(angle_param_array), dtype=bool)
-                    for i, j, k in p.angle_ignore_array:
-                        remove = (
-                            (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
-                        ) & (angle_param_array[:, 2] == k) | (
-                            (angle_param_array[:, 0] == k) & (angle_param_array[:, 1] == j)
-                        ) & (
-                            angle_param_array[:, 2] == i
-                        )
-                        mask &= ~remove
-                    angle_param_array = angle_param_array[mask]
-                
-                # Torsions
-                if len(torsion_param_array) > 0:
-                    torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
-                    mask = np.ones(len(torsion_param_array), dtype=bool)
-                    for i, j, k, l in p.torsion_ignore_array:
-                        remove = (
-                            ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
-                            & (torsion_param_array[:, 2] == k)
-                        ) & (torsion_param_array[:, 3] == l) | (
-                            ((torsion_param_array[:, 0] == l) & (torsion_param_array[:, 1] == k))
-                            & (torsion_param_array[:, 2] == j)
-                        ) & (
-                            torsion_param_array[:, 3] == i
-                        )
-                        mask &= ~remove
-                    torsion_param_array = torsion_param_array[mask]
+
+                bond_param_array, angle_param_array, torsion_param_array = _postprocess_param_arrays(
+                    bond_param_array, angle_param_array, torsion_param_array
+                )
                 
                 # Print and assign
                 print(bond_param_array)
@@ -187,36 +200,31 @@ class Wrapper:
                 ) from e
         
         elif mm_method == "sdf":
-            # Try SDF method first (with fallback to basic)
-            # Original SDF-based method (fallback)
-            # Remove path
-            filename = os.path.basename(start_xyz_file)
-            filename_without_ext = os.path.splitext(filename)[0]
+            # Try SDF method first (with fallback to basic geometry-based extraction)
             sdf_file = p.start_sdf_file
-            # sdf_file = f"{p.results_dir}/{filename_without_ext}.sdf"
-            # Default action: If SDF file exists, use it instead of recreating from XYZ
+
+            # If SDF file doesn't exist, create one from the XYZ
             if os.path.exists(sdf_file):
                 print(f"Using existing SDF file: {sdf_file}")
             else:
                 print(f"SDF file not found. Creating SDF file from XYZ: {start_xyz_file}")
                 try:
                     _mm_params().openbabel_xyz2sdf(start_xyz_file, sdf_file)
-                except Exception as e:
-                    print(f"Warning: Failed to create SDF file with OpenBabel: {e}")
+                except Exception as e_ob:
+                    print(f"Warning: Failed to create SDF file with OpenBabel: {e_ob}")
                     print("Trying RDKit method instead...")
                     try:
                         _mm_params().rdkit_xyz2sdf(start_xyz_file, sdf_file)
-                    except Exception as e2:
-                        print(f"Error: RDKit SDF creation also failed: {e2}")
+                    except Exception as e_rd:
                         raise RuntimeError(
-                            f"Failed to create SDF file from XYZ. Both OpenBabel and RDKit methods failed.\n"
-                            f"OpenBabel error: {e}\n"
-                            f"RDKit error: {e2}\n"
-                            f"Please check your XYZ file: {start_xyz_file}"
-                        ) from e2
-            # Now read the SDF file...
+                            "Failed to create SDF file from XYZ (OpenBabel and RDKit both failed).\n"
+                            f"OpenBabel error: {e_ob}\n"
+                            f"RDKit error: {e_rd}\n"
+                            f"XYZ: {start_xyz_file}"
+                        ) from e_rd
+
+            # Now build topology/system from SDF (robust -> basic) with final fallback
             try:
-                # Try robust SDF method first (applies same fixes as robust XYZ method)
                 print("Attempting robust SDF method (with radical fixing and bond simplification)...")
                 try:
                     topology, openmm_system = _mm_params().create_topology_from_sdf_robust(
@@ -225,104 +233,32 @@ class Wrapper:
                     print("Successfully created system using robust SDF method.")
                 except Exception as e_robust:
                     print(f"Robust SDF method failed: {e_robust}")
-                    print("Trying original SDF method...")
+                    print("Trying basic SDF method...")
                     topology, openmm_system = _mm_params().create_topology_from_sdf(
                         sdf_file, p.forcefield_file
                     )
-            except Exception as e:
+                    print("Successfully created system using basic SDF method.")
+            except Exception as e_sdf:
                 import traceback
+
                 print(f"\n{'='*60}")
-                print("SDF method also failed with error:")
-                print(f"Error type: {type(e).__name__}")
-                print(f"Error message: {e}")
-                print(f"\nFull traceback:")
+                print("SDF method failed; falling back to geometry extraction.")
+                print(f"Error type: {type(e_sdf).__name__}")
+                print(f"Error message: {e_sdf}")
+                print("\nFull traceback:")
                 traceback.print_exc()
                 print(f"{'='*60}\n")
-                print("\nBoth robust method and SDF method failed!")
-                print("\nAttempting final fallback: extracting parameters directly from geometry...")
-                print("(This uses starting geometry as equilibrium values with generic force constants)")
-                try:
-                    # Final fallback: extract parameters directly from geometry
-                    bond_param_array, angle_param_array, torsion_param_array = _mm_params().extract_params_from_geometry(
-                        start_xyz_file, xyz_coords=xyz_start
-                    )
-                    print("Successfully extracted parameters from geometry!")
-                    print(f"Found {len(bond_param_array)} bonds, {len(angle_param_array)} angles, {len(torsion_param_array)} torsions")
-                    print("Note: Using generic force constants and starting geometry as equilibrium values.")
-                    
-                    # Mask out ignored bonds/angles/torsions
-                    # Bonds
-                    mask = np.ones(len(bond_param_array), dtype=bool)
-                    for i, j in p.bond_ignore_array:
-                        remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
-                            (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
-                        )
-                        mask &= ~remove
-                    bond_param_array = bond_param_array[mask]
-                    
-                    # Angles
-                    if len(angle_param_array) > 0:
-                        mask = np.ones(len(angle_param_array), dtype=bool)
-                        for i, j, k in p.angle_ignore_array:
-                            remove = (
-                                (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
-                            ) & (angle_param_array[:, 2] == k) | (
-                                (angle_param_array[:, 0] == k) & (angle_param_array[:, 1] == j)
-                            ) & (
-                                angle_param_array[:, 2] == i
-                            )
-                            mask &= ~remove
-                        angle_param_array = angle_param_array[mask]
-                    
-                    # Torsions
-                    if len(torsion_param_array) > 0:
-                        torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
-                        mask = np.ones(len(torsion_param_array), dtype=bool)
-                        for i, j, k, l in p.torsion_ignore_array:
-                            remove = (
-                                ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
-                                & (torsion_param_array[:, 2] == k)
-                            ) & (torsion_param_array[:, 3] == l) | (
-                                ((torsion_param_array[:, 0] == l) & (torsion_param_array[:, 1] == k))
-                                & (torsion_param_array[:, 2] == j)
-                            ) & (
-                                torsion_param_array[:, 3] == i
-                            )
-                            mask &= ~remove
-                        torsion_param_array = torsion_param_array[mask]
-                    
-                    # Print and assign
-                    print(bond_param_array)
-                    print(angle_param_array)
-                    print(torsion_param_array)
-                    p.bond_param_array = bond_param_array
-                    p.angle_param_array = angle_param_array
-                    p.torsion_param_array = torsion_param_array
-                    return p
-                    
-                except Exception as e_final:
-                    import traceback
-                    print(f"\n{'='*60}")
-                    print("Final fallback (geometry extraction) also failed:")
-                    print(f"Error type: {type(e_final).__name__}")
-                    print(f"Error message: {e_final}")
-                    print(f"\nFull traceback:")
-                    traceback.print_exc()
-                    print(f"{'='*60}\n")
-                    print("\nTroubleshooting suggestions:")
-                    print("1. Check that your XYZ file has correct atom symbols and coordinates")
-                    print("2. Verify the molecule structure is chemically sensible")
-                    print("3. Try manually creating/fixing the SDF file:")
-                    print(f"   - SDF file path: {sdf_file}")
-                    print("4. Check if the force field file exists and is valid:")
-                    print(f"   - Force field: {p.forcefield_file}")
-                    print("5. Consider using a molecular editor to fix bond orders and remove radicals")
-                    raise RuntimeError(
-                        f"Failed to create OpenMM system. All methods failed:\n"
-                        f"  - SDF method failed: {type(e).__name__}: {e}\n"
-                        f"  - Geometry extraction failed: {type(e_final).__name__}: {e_final}\n"
-                        f"Please check your input files and molecule structure."
-                    ) from e_final
+
+                bond_param_array, angle_param_array, torsion_param_array = _mm_params().extract_params_from_geometry(
+                    start_xyz_file, xyz_coords=xyz_start
+                )
+                bond_param_array, angle_param_array, torsion_param_array = _postprocess_param_arrays(
+                    bond_param_array, angle_param_array, torsion_param_array
+                )
+                p.bond_param_array = bond_param_array
+                p.angle_param_array = angle_param_array
+                p.torsion_param_array = torsion_param_array
+                return p
         else:
             raise ValueError(
                 f"Invalid mm_param_method: {mm_method}. Must be 'sdf' or 'basic'."
@@ -886,32 +822,17 @@ class Wrapper:
             print("################")
             # also write final xyz as "result.xyz"
             # m.write_xyz("%s/%s_result.xyz" % (p.results_dir, run_id), "result", atomlist, xyz_best)
-            # predicted data (add constant IAM offsets back for output)
-            if p.inelastic:
-                iam_offset = atomic + compton
-            else:
-                iam_offset = atomic
-            if p.pcd_mode:
-                predicted_best_output = predicted_best + 100.0 * (
-                    iam_offset / reference_iam - 1.0
-                )
-            else:
-                predicted_best_output = predicted_best + iam_offset
+            # predicted data
             if p.ewald_mode:
                 if npy_save:
-                    np.save(
-                        "%s/predicted_function.npy" % p.results_dir,
-                        predicted_best_output,
-                    )
-                predicted_best_r = x.spherical_rotavg(
-                    predicted_best_output, p.th, p.ph
-                )
-                predicted_best_output = predicted_best_r
+                    np.save("%s/predicted_function.npy" % p.results_dir, predicted_best)
+                predicted_best_r = x.spherical_rotavg(predicted_best, p.th, p.ph)
+                predicted_best = predicted_best_r
             ### write predicted data to file
             if p.write_dat_file_bool:
                 np.savetxt(
                     "%s/%s_%s.dat" % (p.results_dir, run_id, f_best_str),
-                    np.column_stack((p.qvector, predicted_best_output)),
+                    np.column_stack((p.qvector, predicted_best)),
                 )
         return  # end function
 

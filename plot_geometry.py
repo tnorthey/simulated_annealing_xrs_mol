@@ -71,8 +71,8 @@ def main():
     parser.add_argument(
         '--xlabel',
         type=str,
-        default='Frame',
-        help='X-axis label (default: "Frame")'
+        default='time (fs)',
+        help='X-axis label (default: "time (fs)")'
     )
     
     parser.add_argument(
@@ -219,7 +219,8 @@ def main():
     plot_idx = 0
     for file_idx, data in enumerate(all_data):
         n_frames = data.shape[0]
-        x = np.arange(n_frames)
+        # Convert frame numbers to time in fs (each frame = 20 fs, first frame at 10 fs)
+        x = np.arange(n_frames) * 20.0 + 10.0
         
         for col_idx in columns_to_plot:
             y = data[:, col_idx]
@@ -246,8 +247,17 @@ def main():
         ax.set_title(args.title)
     
     # Set axis limits
-    if args.xmin is not None or args.xmax is not None:
-        ax.set_xlim(left=args.xmin, right=args.xmax)
+    # Default xmin to 0 to show blank space before first frame (which starts at 10 fs)
+    if args.xmin is not None:
+        xmin = args.xmin
+    else:
+        xmin = 0.0
+    if args.xmax is not None:
+        xmax = args.xmax
+    else:
+        xmax = None
+    ax.set_xlim(left=xmin, right=xmax)
+    
     if args.ymin is not None or args.ymax is not None:
         ax.set_ylim(bottom=args.ymin, top=args.ymax)
     
