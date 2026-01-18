@@ -79,6 +79,9 @@ def create_parser():
     scatter_group.add_argument('--inelastic', action='store_true',
                               dest='scattering_params.inelastic_bool',
                               help='Inelastic scattering')
+    scatter_group.add_argument('--ion-mode', action='store_true',
+                              dest='scattering_params.ion_mode_bool',
+                              help='Use ion-corrected atomic scattering factors')
     scatter_group.add_argument('--pcd-mode', action='store_true',
                               dest='scattering_params.pcd_mode_bool', help='PCD mode')
     scatter_group.add_argument('--excitation-factor', type=float,

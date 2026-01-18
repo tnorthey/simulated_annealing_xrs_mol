@@ -29,8 +29,8 @@ class Input_to_params:
         ###################################
         # Load input TOML
         try:
-        with open(input_toml_file, "rb") as f:
-            data = tomllib.load(f)
+            with open(input_toml_file, "rb") as f:
+                data = tomllib.load(f)
         except FileNotFoundError:
             print(f"\n{'='*60}")
             print("ERROR: Input file not found")
@@ -62,7 +62,7 @@ class Input_to_params:
         ### Parameters
         # mode
         try:
-        self.mode = str(data["mode"])
+            self.mode = str(data["mode"])
         except KeyError:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
@@ -85,9 +85,9 @@ class Input_to_params:
         
         # run params
         try:
-        self.run_id = str(data["run_params"]["run_id"])
-        self.molecule = str(data["run_params"]["molecule"])
-        self.results_dir = str(data["run_params"]["results_dir"])
+            self.run_id = str(data["run_params"]["run_id"])
+            self.molecule = str(data["run_params"]["molecule"])
+            self.results_dir = str(data["run_params"]["results_dir"])
         except KeyError as e:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
@@ -101,13 +101,14 @@ class Input_to_params:
         self.pyscf_basis = str(data["options"]["pyscf_basis"])
         self.verbose_bool = bool(data["options"]["verbose_bool"])
         self.write_dat_file_bool = bool(data["options"]["write_dat_file_bool"])
-        self.mm_param_method = str(data["options"]["mm_param_method"]).lower()
+        # Optional; defaults to "basic" for backwards compatibility with older configs/tests
+        self.mm_param_method = str(data.get("options", {}).get("mm_param_method", "basic")).lower()
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")
             print("ERROR: Invalid mm_param_method value")
             print(f"{'='*60}")
-            print(f"  Value: {data['options']['mm_param_method']}")
+            print(f"  Value: {self.mm_param_method}")
             print(f"  Allowed values: 'sdf' or 'basic'")
             print(f"  Suggestion: Set mm_param_method = 'sdf' or 'basic' in [options] section")
             print(f"{'='*60}\n")
@@ -131,6 +132,8 @@ class Input_to_params:
         self.target_file = str(data["files"]["target_file"])
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])
+        # Optional; when True, use ion-corrected atomic scattering factors
+        self.ion_mode = bool(data.get("scattering_params", {}).get("ion_mode_bool", False))
         self.pcd_mode = bool(data["scattering_params"]["pcd_mode_bool"])
         self.excitation_factor = float(data["scattering_params"]["excitation_factor"])
         # ewald params
@@ -191,34 +194,38 @@ class Input_to_params:
         # molecule params
         molecule = self.molecule
         try:
-        self.natoms = int(data["molecule_params"][molecule]["natoms"])
-        self.nmodes = int(data["molecule_params"][molecule]["nmodes"])
-        self.hydrogen_mode_range = np.array(
-            data["molecule_params"][molecule]["hydrogen_mode_range"]
-        )
-        self.sa_mode_range = np.array(
-            data["molecule_params"][molecule]["sa_mode_range"]
-        )
-        self.ga_mode_range = np.array(
-            data["molecule_params"][molecule]["ga_mode_range"]
-        )
-        self.bond_ignore_array = np.array(
-            data["molecule_params"][molecule]["bond_ignore_array"]
-        )
-        self.angle_ignore_array = np.array(
-            data["molecule_params"][molecule]["angle_ignore_array"]
-        )
-        self.torsion_ignore_array = np.array(
-            data["molecule_params"][molecule]["torsion_ignore_array"]
-        )
-        self.rmsd_indices = np.array(data["molecule_params"][molecule]["rmsd_indices"])
-        self.bond_indices = np.array(data["molecule_params"][molecule]["bond_indices"])
-        self.angle_indices = np.array(
-            data["molecule_params"][molecule]["angle_indices"]
-        )
-        self.dihedral_indices = np.array(
-            data["molecule_params"][molecule]["dihedral_indices"]
-        )
+            self.natoms = int(data["molecule_params"][molecule]["natoms"])
+            self.nmodes = int(data["molecule_params"][molecule]["nmodes"])
+            self.hydrogen_mode_range = np.array(
+                data["molecule_params"][molecule]["hydrogen_mode_range"]
+            )
+            self.sa_mode_range = np.array(
+                data["molecule_params"][molecule]["sa_mode_range"]
+            )
+            self.ga_mode_range = np.array(
+                data["molecule_params"][molecule]["ga_mode_range"]
+            )
+            self.bond_ignore_array = np.array(
+                data["molecule_params"][molecule]["bond_ignore_array"]
+            )
+            self.angle_ignore_array = np.array(
+                data["molecule_params"][molecule]["angle_ignore_array"]
+            )
+            self.torsion_ignore_array = np.array(
+                data["molecule_params"][molecule]["torsion_ignore_array"]
+            )
+            self.rmsd_indices = np.array(
+                data["molecule_params"][molecule]["rmsd_indices"]
+            )
+            self.bond_indices = np.array(
+                data["molecule_params"][molecule]["bond_indices"]
+            )
+            self.angle_indices = np.array(
+                data["molecule_params"][molecule]["angle_indices"]
+            )
+            self.dihedral_indices = np.array(
+                data["molecule_params"][molecule]["dihedral_indices"]
+            )
         except KeyError as e:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")

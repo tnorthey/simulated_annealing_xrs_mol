@@ -23,7 +23,7 @@ try:
     import modules.openff_retreive_mm_params as openff_retreive_mm_params
 
     HAVE_OPENFF = True
-except ImportError:
+except Exception:
     HAVE_OPENFF = False
     openff_retreive_mm_params = None
 
@@ -31,7 +31,7 @@ try:
     import modules.sample as sample_module
 
     HAVE_SAMPLE = True
-except ImportError:
+except Exception:
     HAVE_SAMPLE = False
     sample_module = None
 
@@ -39,7 +39,7 @@ try:
     import modules.pyscf_wrapper as pyscf_wrapper
 
     HAVE_PYSCF_WRAPPER = True
-except ImportError:
+except Exception:
     HAVE_PYSCF_WRAPPER = False
     pyscf_wrapper = None
 
@@ -418,6 +418,7 @@ class Wrapper:
 
         def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode):
             """convert xyz file to IAM signal"""
+            ion_mode = getattr(p, "ion_mode", False)
             if ewald_mode:
                 (
                     iam,
@@ -430,22 +431,24 @@ class Wrapper:
                     molecular_rotavg,
                     compton_rotavg,
                 ) = x.iam_calc_ewald(
-                    atomic_numbers,
-                    xyz,
-                    p.qvector,
-                    p.th,
-                    p.ph,
-                    p.inelastic,
-                    compton_array,
+                    atomic_numbers=atomic_numbers,
+                    xyz=xyz,
+                    qvector=p.qvector,
+                    th=p.th,
+                    ph=p.ph,
+                    ion=ion_mode,
+                    inelastic=p.inelastic,
+                    compton_array=compton_array,
                 )
             else:
                 iam, atomic, molecular, compton, pre_molecular = x.iam_calc(
-                    atomic_numbers,
-                    xyz,
-                    p.qvector,
-                    electron_mode,
-                    p.inelastic,
-                    compton_array,
+                    atomic_numbers=atomic_numbers,
+                    xyz=xyz,
+                    qvector=p.qvector,
+                    ion=ion_mode,
+                    electron_mode=electron_mode,
+                    inelastic=p.inelastic,
+                    compton_array=compton_array,
                 )
             return iam, atomic, compton, pre_molecular
 

@@ -22,6 +22,8 @@ class TestInputToParams:
         assert p.run_id == "test_run"
         assert p.molecule == "test"
         assert p.inelastic is True
+        assert hasattr(p, "ion_mode")
+        assert p.ion_mode is False
         assert p.qmin == 0.1
         assert p.qmax == 10.0
         assert p.qlen == 50

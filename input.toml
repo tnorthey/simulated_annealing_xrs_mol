@@ -65,6 +65,10 @@ boltzmann_temperature = 300.0
 [scattering_params]
 # Include inelastic (Compton) scattering contribution
 inelastic_bool = true
+# Use ion-corrected atomic scattering factors (see `modules/x.py`)
+# - false: neutral atom factors (default)
+# - true: apply per-element ion correction term (currently defined for a subset, e.g. C+)
+ion_mode_bool = false
 # Use PCD (Percent Change Difference) mode for target function
 pcd_mode_bool = true
 # Excitation factor for scaling target function (used in "normal" mode)

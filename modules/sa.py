@@ -218,9 +218,19 @@ class Annealing:
                     inv_qlen = 1.0 / qlen
                     sse = 0.0
                     for qi in range(qlen):
-                        predicted_function_[qi] = 100.0 * (iam[qi] / reference_iam[qi])
-                        diff = predicted_function_[qi] - target_function[qi]
+                        # Objective compares *molecular-only* contribution because
+                        # `target_function` was pre-shifted outside the SA loop.
+                        pred_mol = 100.0 * (iam[qi] / reference_iam[qi])
+                        diff = pred_mol - target_function[qi]
                         sse += diff * diff
+                        # For output, store the full PCD curve (incl. constant atomic/compton term)
+                        if inelastic:
+                            offset = atomic_total[qi] + compton[qi]
+                        else:
+                            offset = atomic_total[qi]
+                        predicted_function_[qi] = pred_mol + 100.0 * (
+                            offset / reference_iam[qi] - 1.0
+                        )
                     xray_contrib = sse * inv_qlen
                 else:
                     ### x-ray part of objective function
@@ -233,9 +243,16 @@ class Annealing:
                     inv_n = 1.0 / n
                     sse = 0.0
                     for qi in range(qlen):
-                        predicted_function_[qi] = iam[qi]
-                        diff = predicted_function_[qi] - target_function[qi]
+                        # Objective compares *molecular-only* contribution because
+                        # `target_function` was pre-shifted outside the SA loop.
+                        pred_mol = iam[qi]
+                        diff = pred_mol - target_function[qi]
                         sse += (diff * diff) / abs_target_function[qi]
+                        # For output, store the full IAM curve (incl. constant atomic/compton term)
+                        if inelastic:
+                            predicted_function_[qi] = pred_mol + atomic_total[qi] + compton[qi]
+                        else:
+                            predicted_function_[qi] = pred_mol + atomic_total[qi]
                     xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
