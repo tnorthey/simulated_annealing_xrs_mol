@@ -83,6 +83,120 @@ def _sample():
     return _SAMPLE
 
 
+_COVALENT_RADII_ANGSTROM = {
+    # A small set of common covalent radii (Å). Falls back to 0.77 Å if unknown.
+    "H": 0.31,
+    "C": 0.76,
+    "N": 0.71,
+    "O": 0.66,
+    "F": 0.57,
+    "P": 1.07,
+    "S": 1.05,
+    "Cl": 1.02,
+    "Si": 1.11,
+}
+
+
+def _infer_bonds_from_geometry(atomlist, xyz: np.ndarray, scale: float = 1.25):
+    """
+    Infer a simple bond list from interatomic distances using covalent radii.
+
+    Returns:
+        list[(i, j)] where i < j
+    """
+    natoms = xyz.shape[0]
+    dist = m.distances_array(xyz)
+    bonds = []
+    for i in range(natoms - 1):
+        ri = _COVALENT_RADII_ANGSTROM.get(str(atomlist[i]), 0.77)
+        for j in range(i + 1, natoms):
+            rj = _COVALENT_RADII_ANGSTROM.get(str(atomlist[j]), 0.77)
+            cutoff = scale * (ri + rj)
+            if dist[i, j] > 0.0 and dist[i, j] <= cutoff:
+                bonds.append((i, j))
+    return bonds
+
+
+def _angle_rad(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
+    """Return angle at p1 for points (p0-p1-p2) in radians."""
+    v1 = p0 - p1
+    v2 = p2 - p1
+    n1 = np.linalg.norm(v1)
+    n2 = np.linalg.norm(v2)
+    if n1 == 0.0 or n2 == 0.0:
+        return 0.0
+    c = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+    return float(np.arccos(c))
+
+
+def _extract_params_from_geometry_light(atomlist, xyz: np.ndarray):
+    """
+    OpenFF-free parameter extraction from geometry.
+
+    - Bonds inferred via covalent radii cutoff
+    - Angles inferred from connectivity
+    - Torsions inferred from connectivity
+    - Equilibrium values taken from starting geometry
+    - Force constants set to generic values (reasonable defaults)
+    """
+    natoms = xyz.shape[0]
+    bonds = _infer_bonds_from_geometry(atomlist, xyz)
+
+    # Generic force constants (units match what SA expects)
+    K_BOND = 100.0  # kcal/mol/Å^2 (approx)
+    K_ANGLE = 50.0  # kcal/mol/rad^2 (approx)
+    K_TORSION = 1.0  # kcal/mol (amplitude in 1+cos term)
+
+    neighbors = [[] for _ in range(natoms)]
+    for i, j in bonds:
+        neighbors[i].append(j)
+        neighbors[j].append(i)
+
+    bond_params = []
+    for i, j in bonds:
+        r0 = float(np.linalg.norm(xyz[i] - xyz[j]))
+        bond_params.append((i, j, r0, K_BOND))
+    bond_param_array = np.asarray(bond_params, dtype=np.float64).reshape((-1, 4))
+
+    angle_set = set()
+    angle_params = []
+    for j in range(natoms):
+        nbrs = neighbors[j]
+        for a_idx in range(len(nbrs)):
+            for b_idx in range(a_idx + 1, len(nbrs)):
+                i = nbrs[a_idx]
+                k = nbrs[b_idx]
+                key = (min(i, k), j, max(i, k))
+                if key in angle_set:
+                    continue
+                angle_set.add(key)
+                theta0 = _angle_rad(xyz[i], xyz[j], xyz[k])
+                angle_params.append((i, j, k, theta0, K_ANGLE))
+    angle_param_array = np.asarray(angle_params, dtype=np.float64).reshape((-1, 5))
+
+    torsion_set = set()
+    torsion_params = []
+    for j, k in bonds:
+        for i in neighbors[j]:
+            if i == k:
+                continue
+            for l in neighbors[k]:
+                if l == j:
+                    continue
+                key = (i, j, k, l)
+                key_rev = (l, k, j, i)
+                if key in torsion_set or key_rev in torsion_set:
+                    continue
+                torsion_set.add(key)
+                # analysis.new_dihedral returns degrees; SA expects radians
+                delta0_deg = analysis.new_dihedral((xyz[i], xyz[j], xyz[k], xyz[l]))
+                delta0 = float(np.deg2rad(delta0_deg))
+                torsion_params.append((i, j, k, l, delta0, K_TORSION))
+    torsion_param_array = np.asarray(torsion_params, dtype=np.float64).reshape((-1, 6))
+
+    return bond_param_array, angle_param_array, torsion_param_array
+
+
 #############################
 class Wrapper:
     """wrapper functions for simulated annealing strategies"""
@@ -137,9 +251,13 @@ class Wrapper:
 
             # Torsions
             if len(torsion_param_array) > 0:
-                torsion_param_array = _mm_params().update_torsion_deltas(
-                    torsion_param_array, xyz_start
-                )
+                # If OpenFF is available, keep the previous behavior of updating torsion
+                # equilibrium deltas based on the starting geometry. Otherwise, the
+                # lightweight extraction already uses the starting geometry.
+                if HAVE_OPENFF:
+                    torsion_param_array = _mm_params().update_torsion_deltas(
+                        torsion_param_array, xyz_start
+                    )
                 mask = np.ones(len(torsion_param_array), dtype=bool)
                 for i, j, k, l in p.torsion_ignore_array:
                     remove = (
@@ -161,9 +279,14 @@ class Wrapper:
             print("Using basic method: extracting parameters directly from geometry...")
             print("(This uses starting geometry as equilibrium values with generic force constants)")
             try:
-                bond_param_array, angle_param_array, torsion_param_array = _mm_params().extract_params_from_geometry(
-                    start_xyz_file, xyz_coords=xyz_start
-                )
+                if HAVE_OPENFF:
+                    bond_param_array, angle_param_array, torsion_param_array = _mm_params().extract_params_from_geometry(
+                        start_xyz_file, xyz_coords=xyz_start
+                    )
+                else:
+                    bond_param_array, angle_param_array, torsion_param_array = _extract_params_from_geometry_light(
+                        atomlist, xyz_start
+                    )
                 print("Successfully extracted parameters from geometry!")
                 print(f"Found {len(bond_param_array)} bonds, {len(angle_param_array)} angles, {len(torsion_param_array)} torsions")
                 print("Note: Using generic force constants and starting geometry as equilibrium values.")
@@ -200,6 +323,18 @@ class Wrapper:
                 ) from e
         
         elif mm_method == "sdf":
+            if not HAVE_OPENFF:
+                print("OpenFF dependencies are not available; falling back to basic geometry extraction.")
+                bond_param_array, angle_param_array, torsion_param_array = _extract_params_from_geometry_light(
+                    atomlist, xyz_start
+                )
+                bond_param_array, angle_param_array, torsion_param_array = _postprocess_param_arrays(
+                    bond_param_array, angle_param_array, torsion_param_array
+                )
+                p.bond_param_array = bond_param_array
+                p.angle_param_array = angle_param_array
+                p.torsion_param_array = torsion_param_array
+                return p
             # Try SDF method first (with fallback to basic geometry-based extraction)
             sdf_file = p.start_sdf_file
 
