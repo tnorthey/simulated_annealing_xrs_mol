@@ -12,7 +12,8 @@ This script reads an XYZ file (or XYZ trajectory) and calculates the IAM
 Usage:
     python3 calculate_iam.py input.xyz output.dat
     python3 calculate_iam.py input.xyz output.dat --reference reference.xyz --pcd
-    python3 calculate_iam.py input.xyz output.dat --inelastic --ewald
+    python3 calculate_iam.py input.xyz output.dat --ewald
+    python3 calculate_iam.py input.xyz output.dat --elastic
 """
 
 import argparse
@@ -82,7 +83,7 @@ def read_xyz_trajectory(filename):
 
 def calculate_iam_for_structure(xyz, atomic_numbers, qvector, xray_obj, 
                                  ion=False,
-                                 inelastic=False, ewald_mode=False, 
+                                 inelastic=True, ewald_mode=False,
                                  th=None, ph=None, compton_array=None):
     """
     Calculate IAM signal for a single structure.
@@ -156,8 +157,21 @@ def main():
                        help='Calculate PCD (percentage difference) instead of IAM')
     
     # Scattering options
-    parser.add_argument('--inelastic', action='store_true',
-                       help='Include inelastic (Compton) scattering')
+    #
+    # To avoid user error / ambiguity, require explicitly choosing elastic vs inelastic.
+    scatter_mode = parser.add_mutually_exclusive_group(required=True)
+    scatter_mode.add_argument(
+        "--inelastic",
+        dest="inelastic",
+        action="store_true",
+        help="Include inelastic (Compton) scattering",
+    )
+    scatter_mode.add_argument(
+        "--elastic",
+        dest="inelastic",
+        action="store_false",
+        help="Elastic-only scattering (disable Compton)",
+    )
     parser.add_argument('--ion', action='store_true',
                        help='Include ion correction factors (dd/ee) in the atomic form factor')
     parser.add_argument('--ewald', action='store_true',

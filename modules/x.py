@@ -133,8 +133,8 @@ class Xray:
         qvector,
         ion: bool = False,
         electron_mode=False,
-        inelastic=False,
-        compton_array=np.zeros(0),
+        inelastic: bool = True,
+        compton_array=None,
     ):
         """calculate IAM molecular scattering curve for atoms, xyz, qvector"""
         natoms = len(atomic_numbers)
@@ -143,6 +143,19 @@ class Xray:
         molecular = np.zeros(qlen)  # total molecular factor
         compton = np.zeros(qlen)  # total compton factor
         atomic_factor_array = np.zeros((natoms, qlen))  # array of atomic factors
+        # Auto-provide Compton array when inelastic scattering is requested
+        if inelastic:
+            needs_compton = (
+                compton_array is None
+                or (hasattr(compton_array, "size") and compton_array.size == 0)
+            )
+            if needs_compton:
+                try:
+                    compton_array = self.compton_spline(atomic_numbers, qvector)
+                except Exception:
+                    # If Compton data isn't available, fall back to elastic-only.
+                    inelastic = False
+                    compton_array = None
         if electron_mode:  # electron mode
             zfactor = atomic_numbers
             e_mode_int = -1
@@ -206,8 +219,8 @@ class Xray:
         th,
         ph,
         ion: bool = False,
-        inelastic=False,
-        compton_array=np.zeros(0),
+        inelastic: bool = True,
+        compton_array=None,
     ):
         """
         calculate IAM function in the Ewald sphere
@@ -224,6 +237,18 @@ class Xray:
         qz = r_grid * np.cos(th_grid)
         # inelastic effects
         compton = np.zeros((qlen, tlen, plen))  # total compton factor
+        # Auto-provide Compton array when inelastic scattering is requested
+        if inelastic:
+            needs_compton = (
+                compton_array is None
+                or (hasattr(compton_array, "size") and compton_array.size == 0)
+            )
+            if needs_compton:
+                try:
+                    compton_array = self.compton_spline(atomic_numbers, qvector)
+                except Exception:
+                    inelastic = False
+                    compton_array = None
         # atomic
         atomic = np.zeros((qlen, tlen, plen))  # total atomic factor
         atomic_factor_array = np.zeros(
