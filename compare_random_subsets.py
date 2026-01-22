@@ -91,6 +91,143 @@ def average_optimal_trajectories(
     return True
 
 
+def _read_xyz_trajectory_frames(path: str):
+    """
+    Read a multi-frame XYZ trajectory file.
+
+    Returns: list of dicts with keys:
+      - natoms (int)
+      - comment (str)
+      - body_lines (list[str])  # natoms lines including trailing newlines
+      - coords (np.ndarray)     # (natoms, 3) float64
+    """
+    frames = []
+    with open(path, "r") as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                natoms = int(line)
+            except ValueError:
+                break
+            comment = f.readline().rstrip("\n")
+            body = []
+            coords = np.zeros((natoms, 3), dtype=np.float64)
+            for i in range(natoms):
+                row = f.readline()
+                if not row:
+                    break
+                body.append(row)  # preserve exact formatting
+                parts = row.split()
+                coords[i, 0] = float(parts[1])
+                coords[i, 1] = float(parts[2])
+                coords[i, 2] = float(parts[3])
+            if len(body) != natoms:
+                break
+            frames.append(
+                {
+                    "natoms": natoms,
+                    "comment": comment,
+                    "body_lines": body,
+                    "coords": coords,
+                }
+            )
+    if not frames:
+        raise ValueError(f"No frames found in XYZ trajectory: {path}")
+    return frames
+
+
+def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+    """Kabsch-aligned RMSD between two structures P and Q (N,3)."""
+    Pc = P - P.mean(axis=0, keepdims=True)
+    Qc = Q - Q.mean(axis=0, keepdims=True)
+    H = Pc.T @ Qc
+    U, _S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1.0
+        R = Vt.T @ U.T
+    Pr = Pc @ R
+    d = Pr - Qc
+    return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
+
+
+def write_median_trajectory_as_medoid(
+    xyz_files: Sequence[str],
+    output_xyz: str,
+    *,
+    label_suffix: str = "median=medoid",
+) -> bool:
+    """
+    Write a "median" trajectory where each frame is an ACTUAL frame chosen from the inputs.
+
+    For each frame index, we select the medoid across subsets: the input frame whose
+    sum of Kabsch-RMSD distances to all other subset frames is minimal.
+
+    This guarantees every output frame corresponds exactly to one of the subset trajectories
+    (and therefore to an actual candidate chosen by optimal_path).
+    """
+    if len(xyz_files) < 1:
+        raise ValueError("No XYZ files provided for median/medoid selection.")
+
+    # Read all trajectories
+    trajs = [_read_xyz_trajectory_frames(p) for p in xyz_files]
+    min_frames = min(len(t) for t in trajs)
+    if any(len(t) != min_frames for t in trajs):
+        print(
+            f"Warning: Not all subset trajectories have the same number of frames. "
+            f"Truncating to min_frames={min_frames}."
+        )
+
+    # Validate natoms consistency
+    natoms0 = trajs[0][0]["natoms"]
+    for ti, tr in enumerate(trajs):
+        for fi in range(min_frames):
+            if tr[fi]["natoms"] != natoms0:
+                raise ValueError(
+                    f"Subset {ti} frame {fi} natoms={tr[fi]['natoms']} differs from first natoms={natoms0}"
+                )
+
+    # Select medoid per frame
+    chosen_subset_indices = []
+    with open(output_xyz, "w") as out:
+        for fi in range(min_frames):
+            coords_list = [tr[fi]["coords"] for tr in trajs]
+            K = len(coords_list)
+            # Compute sum distances for each candidate frame
+            sums = np.zeros(K, dtype=np.float64)
+            for i in range(K):
+                si = 0.0
+                Pi = coords_list[i]
+                for j in range(K):
+                    if i == j:
+                        continue
+                    si += _kabsch_rmsd(Pi, coords_list[j])
+                sums[i] = si
+            best_i = int(np.argmin(sums))
+            chosen_subset_indices.append(best_i)
+
+            frame = trajs[best_i][fi]
+            comment = frame["comment"]
+            if label_suffix:
+                comment = f"{comment} | {label_suffix} | medoid_subset={best_i}"
+
+            out.write(f"{frame['natoms']}\n")
+            out.write(f"{comment}\n")
+            for line in frame["body_lines"]:
+                out.write(line)
+
+    print(
+        f"Medoid-median trajectory written to {output_xyz} "
+        f"(frames={min_frames}, subsets={len(trajs)})."
+    )
+    return True
+
+
 def analyze_geometry(xyz_file, output_csv, bond=None, angle=None, dihedral=None):
     """Run analyze_geometry.py to extract specified geometric parameters."""
     cmd = ["python3", "analyze_geometry.py", xyz_file]
@@ -716,11 +853,11 @@ def main():
             try:
                 median_out = os.path.splitext(args.output_plot)[0] + "_median.xyz"
                 xyz_files = [r["xyz_file"] for r in records]
-                print("Computing median optimal-path trajectory across subsets...")
-                if average_optimal_trajectories(xyz_files, median_out, align="kabsch", stat="median"):
-                    print(f"Median optimal-path XYZ: {median_out}")
+                print("Computing 'median' trajectory as a per-frame medoid (must be an actual subset frame)...")
+                if write_median_trajectory_as_medoid(xyz_files, median_out):
+                    print(f"Median (medoid) optimal-path XYZ: {median_out}")
                 else:
-                    print("Warning: Failed to write median optimal-path XYZ.")
+                    print("Warning: Failed to write median (medoid) optimal-path XYZ.")
             except Exception as e:
                 print(f"\nWarning: Failed to create median optimal-path trajectory: {type(e).__name__}: {e}")
     else:
