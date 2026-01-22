@@ -29,6 +29,7 @@ def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, top
         "python3", "optimal_path.py", directory,
         "--random-sample", str(random_sample),
         "--topM", str(topM),
+        "--sample-after-prune",
         "--fit-weight", "1",
         "--rmsd-weight", "1",
         "--rmsd-indices", "0,1,2,3,4,5",

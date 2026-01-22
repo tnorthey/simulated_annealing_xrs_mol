@@ -25,6 +25,7 @@ import re
 import glob
 import argparse
 import numpy as np
+import heapq
 
 # -----------------------------
 # Filename parsing
@@ -156,6 +157,7 @@ def load_candidates(
     prune_delta=None,
     random_sample=None,
     seed=0,
+    sample_after_prune: bool = False,
 ):
     dats = glob.glob(os.path.join(directory, f"*{dat_ext}"))
     xyzs = glob.glob(os.path.join(directory, f"*{xyz_ext}"))
@@ -193,40 +195,66 @@ def load_candidates(
         )
 
     timesteps = sorted(by_t.keys())
-    
-    # Random sampling per timestep (if requested) - happens after grouping by timestep
-    if random_sample is not None:
+
+    # Choose sampling order.
+    # - Default (historical): sample BEFORE pruning to reduce work.
+    # - Requested mode: prune BEFORE sampling so random subsets are drawn only from the top pool.
+    source_by_t = by_t
+    if random_sample is not None and not sample_after_prune:
         n_sample = int(random_sample)
         if n_sample < 1:
             raise ValueError(f"random_sample must be >= 1, got {n_sample}")
-        
         rng = np.random.default_rng(seed)
         total_before = sum(len(layer) for layer in by_t.values())
-        
-        # Sample per timestep
+        sampled_by_t = {}
         for t in timesteps:
             layer = by_t[t]
             if len(layer) > n_sample:
-                # Randomly sample n_sample files from this timestep
                 indices = rng.choice(len(layer), size=n_sample, replace=False)
-                by_t[t] = [layer[i] for i in indices]
-        
-        total_after = sum(len(layer) for layer in by_t.values())
-        print(f"Randomly sampled up to {n_sample} files per timestep (seed={seed}): "
-              f"{total_before} -> {total_after} total files across {len(timesteps)} timesteps")
+                sampled_by_t[t] = [layer[i] for i in indices]
+            else:
+                sampled_by_t[t] = list(layer)
+        total_after = sum(len(layer) for layer in sampled_by_t.values())
+        print(
+            f"Randomly sampled up to {n_sample} files per timestep (seed={seed}) BEFORE pruning: "
+            f"{total_before} -> {total_after} total files across {len(timesteps)} timesteps"
+        )
+        source_by_t = sampled_by_t
 
-    # Fit-only pruning per timestep
+    # Fit-only pruning per timestep (optionally followed by sampling)
     pruned_layers = []
     for t in timesteps:
-        layer = sorted(by_t[t], key=lambda c: c["fit"])
-        best = layer[0]["fit"]
+        layer = list(source_by_t[t])
+        if len(layer) < 1:
+            raise RuntimeError(f"Timestep {t} has no candidates.")
+
+        # best fit without sorting whole layer
+        best_fit = min(c["fit"] for c in layer)
 
         if prune_delta is not None:
             delta = float(prune_delta)
-            layer = [c for c in layer if c["fit"] <= best + delta]
+            layer = [c for c in layer if c["fit"] <= best_fit + delta]
 
+        # topM without sorting whole layer
         if prune_topM is not None:
-            layer = layer[: int(prune_topM)]
+            M = int(prune_topM)
+            if M < 1:
+                raise ValueError(f"topM must be >= 1, got {M}")
+            if len(layer) > M:
+                layer = heapq.nsmallest(M, layer, key=lambda c: c["fit"])
+            else:
+                layer = sorted(layer, key=lambda c: c["fit"])
+
+        # Sampling after prune (requested mode)
+        if random_sample is not None and sample_after_prune:
+            n_sample = int(random_sample)
+            if n_sample < 1:
+                raise ValueError(f"random_sample must be >= 1, got {n_sample}")
+            if len(layer) > n_sample:
+                # stable per-timestep, but different per run because compare_random_subsets varies --seed
+                rng = np.random.default_rng(seed + int(t))
+                indices = rng.choice(len(layer), size=n_sample, replace=False)
+                layer = [layer[i] for i in indices]
 
         if len(layer) < 1:
             raise RuntimeError(f"Timestep {t} has no candidates after pruning.")
@@ -283,6 +311,7 @@ def solve_optimal_path(
     seed=0,
     rmsd_indices=None,
     random_sample=None,
+    sample_after_prune: bool = False,
 ):
     timesteps, layers = load_candidates(
         directory=directory,
@@ -290,6 +319,7 @@ def solve_optimal_path(
         prune_delta=prune_delta,
         random_sample=random_sample,
         seed=seed,
+        sample_after_prune=sample_after_prune,
     )
 
     T = len(layers)
@@ -537,6 +567,15 @@ def main():
              "Sampling happens after grouping by timestep, so each timestep gets up to N files. "
              "Uses the same seed as --seed for reproducibility.",
     )
+    parser.add_argument(
+        "--sample-after-prune",
+        action="store_true",
+        help=(
+            "Apply topM/delta pruning first, then randomly sample up to N files per timestep "
+            "from the pruned pool. This is useful when you want subsets drawn only from the "
+            "top candidates (ignore everything outside topM immediately)."
+        ),
+    )
 
     args = parser.parse_args()
     
@@ -565,6 +604,7 @@ def main():
         seed=args.seed,
         rmsd_indices=rmsd_indices,
         random_sample=args.random_sample,
+        sample_after_prune=bool(args.sample_after_prune),
     )
 
     write_xyz_trajectory(result["path"], args.xyz_out)

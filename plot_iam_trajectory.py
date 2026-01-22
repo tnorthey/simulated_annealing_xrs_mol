@@ -11,11 +11,11 @@ reference scattering file). You can override with --qmin/--qmax/--qlen.
 Examples:
     python3 plot_iam_trajectory.py path/to/trajectory.xyz \
         --q-dat data/chd_reference.dat \
-        --output-plot iam_heatmap.png
+        --inelastic --ion-mode --output-plot iam_heatmap.png
 
     python3 plot_iam_trajectory.py path/to/trajectory.xyz \
         --qmin 0.4 --qmax 8.0 --qlen 200 \
-        --log --output-plot iam_log.png --output-npz iam.npz
+        --elastic --log --output-plot iam_log.png --output-npz iam.npz
 """
 
 from __future__ import annotations
@@ -235,7 +235,9 @@ def find_first_peak_q(
     return None
 
 
-def compute_iam_trajectory(structures, qvector: np.ndarray, include_inelastic: bool) -> np.ndarray:
+def compute_iam_trajectory(
+    structures, qvector: np.ndarray, include_inelastic: bool, *, ion_mode: bool
+) -> np.ndarray:
     """Return IAM(q,t) with shape (n_frames, len(qvector))."""
     m = mol.Xyz()
     x = xray.Xray()
@@ -266,6 +268,7 @@ def compute_iam_trajectory(structures, qvector: np.ndarray, include_inelastic: b
             atomic_numbers,
             xyz,
             qvector,
+            ion=ion_mode,
             electron_mode=False,
             inelastic=include_inelastic,
             compton_array=compton_array if compton_array is not None else np.zeros(0),
@@ -285,6 +288,7 @@ def plot_iam_heatmap(
     vmax: float | None,
     title: str | None,
     cbar_label: str | None,
+    zero_centered: bool,
     figsize: tuple[float, float],
     dpi: int,
 ):
@@ -294,11 +298,15 @@ def plot_iam_heatmap(
     import matplotlib.pyplot as plt
 
     from matplotlib.colors import LogNorm
+    from matplotlib.colors import TwoSlopeNorm
 
     fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
     # imshow expects rows=y, cols=x. We'll map x=q and y=time.
     extent = [float(np.min(qvector)), float(np.max(qvector)), float(np.min(time_fs)), float(np.max(time_fs))]
+
+    if log_scale and zero_centered:
+        raise ValueError("Cannot use zero-centered colormap with log scale.")
 
     if log_scale:
         # Avoid log(0) by clipping to small positive values.
@@ -307,7 +315,33 @@ def plot_iam_heatmap(
         im = ax.imshow(arr, aspect="auto", origin="lower", extent=extent, cmap=cmap, norm=norm)
         default_cbar_label = "IAM (log scale)"
     else:
-        im = ax.imshow(iam_tq, aspect="auto", origin="lower", extent=extent, cmap=cmap, vmin=vmin, vmax=vmax)
+        if zero_centered:
+            data_min = float(np.nanmin(iam_tq))
+            data_max = float(np.nanmax(iam_tq))
+            if vmin is None and vmax is None:
+                bound = max(abs(data_min), abs(data_max))
+                if bound == 0.0:
+                    bound = 1.0
+                vmin_ = -bound
+                vmax_ = bound
+            elif vmin is None and vmax is not None:
+                vmax_ = float(vmax)
+                vmin_ = -abs(vmax_)
+            elif vmax is None and vmin is not None:
+                vmin_ = float(vmin)
+                vmax_ = abs(vmin_)
+            else:
+                vmin_ = float(vmin)
+                vmax_ = float(vmax)
+
+            if not (vmin_ < 0.0 < vmax_):
+                raise ValueError(
+                    f"Zero-centered colormap requires vmin < 0 < vmax, got vmin={vmin_}, vmax={vmax_}."
+                )
+            norm = TwoSlopeNorm(vmin=vmin_, vcenter=0.0, vmax=vmax_)
+            im = ax.imshow(iam_tq, aspect="auto", origin="lower", extent=extent, cmap=cmap, norm=norm)
+        else:
+            im = ax.imshow(iam_tq, aspect="auto", origin="lower", extent=extent, cmap=cmap, vmin=vmin, vmax=vmax)
         default_cbar_label = "IAM"
 
     ax.set_xlabel(r"$q$ ($\mathrm{\AA}^{-1}$)")
@@ -339,6 +373,8 @@ def plot_iam_frame(
     mark_first_peak: str,
     peak_min_q: float | None,
     peak_mode: str,
+    frame_xlim: tuple[float, float] | None,
+    frame_ylim: tuple[float, float] | None,
     figsize: tuple[float, float],
     dpi: int,
 ):
@@ -353,6 +389,10 @@ def plot_iam_frame(
     ax.set_ylabel(ylabel)
     if logy:
         ax.set_yscale("log")
+    if frame_xlim is not None:
+        ax.set_xlim(frame_xlim[0], frame_xlim[1])
+    if frame_ylim is not None:
+        ax.set_ylim(frame_ylim[0], frame_ylim[1])
 
     if exp_q is not None and exp_y is not None:
         # If the experimental file has the same number of points as the calculated curve,
@@ -441,7 +481,33 @@ def main():
     parser.add_argument("--qmin", type=float, default=None, help="Override q-grid: min q (A^-1).")
     parser.add_argument("--qmax", type=float, default=None, help="Override q-grid: max q (A^-1).")
     parser.add_argument("--qlen", type=int, default=None, help="Override q-grid: number of q points.")
-    parser.add_argument("--inelastic", action="store_true", help="Include inelastic (Compton) scattering (if available).")
+    # To avoid user error / ambiguity, require explicitly choosing elastic vs inelastic.
+    scatter_mode = parser.add_mutually_exclusive_group(required=True)
+    scatter_mode.add_argument(
+        "--inelastic",
+        dest="inelastic",
+        action="store_true",
+        help="Include inelastic (Compton) scattering (if available).",
+    )
+    scatter_mode.add_argument(
+        "--elastic",
+        dest="inelastic",
+        action="store_false",
+        help="Elastic-only scattering (disable Compton).",
+    )
+    parser.add_argument(
+        "--ion-mode",
+        dest="ion_mode",
+        action="store_true",
+        help="Use ion-corrected atomic scattering factors (see modules/x.py).",
+    )
+    # Backwards-compatible alias
+    parser.add_argument(
+        "--ion",
+        dest="ion_mode",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--dt-fs", type=float, default=20.0, help="Time per frame in fs. Default: 20")
     parser.add_argument("--t0-fs", type=float, default=10.0, help="Time of first frame in fs. Default: 10")
     parser.add_argument("--log", action="store_true", help="Use log color scale for IAM (useful for dynamic range).")
@@ -482,6 +548,15 @@ def main():
         "--output-npz",
         default=None,
         help="Optional output NPZ containing q, time_fs, iam (t,q).",
+    )
+    parser.add_argument(
+        "--output-first-peak-dat",
+        default=None,
+        help=(
+            "Optional output DAT with 2 columns: time_fs, q_first_peak. "
+            "Peak is computed from the calculated curve for each frame using the same "
+            "--peak-min-q/--peak-mode logic. Uses PCD curve if --pcd is set, else IAM."
+        ),
     )
     parser.add_argument(
         "--write-frame-pngs",
@@ -601,6 +676,22 @@ def main():
         action="store_true",
         help="Use log y-axis for per-frame IAM line plots.",
     )
+    parser.add_argument(
+        "--frame-xlim",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("XMIN", "XMAX"),
+        help="Per-frame PNG x-axis limits as two numbers (e.g. --frame-xlim 0.4 8.0). Default: auto.",
+    )
+    parser.add_argument(
+        "--frame-ylim",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("YMIN", "YMAX"),
+        help="Per-frame PNG y-axis limits as two numbers (e.g. --frame-ylim -10 10). Default: auto.",
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.input_xyz):
@@ -628,6 +719,22 @@ def main():
             raise ValueError("--log is only supported for IAM heatmaps; disable --log when using --pcd.")
         if args.frame_logy:
             raise ValueError("--frame-logy is not supported for PCD (PCD can be negative).")
+
+    def _validate_pair(arg, *, name: str) -> tuple[float, float] | None:
+        if arg is None:
+            return None
+        a = float(arg[0])
+        b = float(arg[1])
+        if not np.isfinite(a) or not np.isfinite(b):
+            raise ValueError(f"{name} values must be finite numbers.")
+        if b <= a:
+            raise ValueError(f"{name} must satisfy max > min; got {a},{b}")
+        return (a, b)
+
+    frame_xlim = _validate_pair(args.frame_xlim, name="--frame-xlim")
+    frame_ylim = _validate_pair(args.frame_ylim, name="--frame-ylim")
+    if args.frame_logy and frame_ylim is not None and frame_ylim[0] <= 0:
+        raise ValueError("--frame-ylim lower bound must be > 0 when using --frame-logy.")
 
     if args.exp_dat is not None and args.exp_dat_template is not None:
         raise ValueError("Use only one of --exp-dat or --exp-dat-template (not both).")
@@ -666,7 +773,9 @@ def main():
     n_frames = len(structures)
     time_fs = sel_indices.astype(float) * float(args.dt_fs) + float(args.t0_fs)
 
-    iam_tq = compute_iam_trajectory(structures, qvector, include_inelastic=args.inelastic)
+    iam_tq = compute_iam_trajectory(
+        structures, qvector, include_inelastic=args.inelastic, ion_mode=bool(args.ion_mode)
+    )
 
     ref_q = ref_I = None
     pcd_tq = None
@@ -706,16 +815,38 @@ def main():
         iam_tq=pcd_tq if args.pcd else iam_tq,
         output_plot=output_plot,
         log_scale=bool(args.log) if not args.pcd else False,
-        cmap=str(args.cmap),
+        cmap=("bwr" if args.pcd and str(args.cmap) == "viridis" else str(args.cmap)),
         vmin=args.vmin,
         vmax=args.vmax,
         title=args.title,
         cbar_label=(pcd_label if args.pcd else None),
+        zero_centered=bool(args.pcd),
         figsize=figsize,
         dpi=int(args.dpi),
     )
 
     print(f"Wrote plot: {output_plot}")
+
+    # Optional: write first-peak q position vs time (uses calculated curve per frame)
+    if args.output_first_peak_dat is not None:
+        y_tq = pcd_tq if args.pcd else iam_tq
+        q_peaks = np.full((n_frames,), np.nan, dtype=float)
+        for i in range(n_frames):
+            q_peak = find_first_peak_q(
+                qvector,
+                y_tq[i, :],
+                min_q=args.peak_min_q,
+                mode=str(args.peak_mode),
+            )
+            q_peaks[i] = np.nan if q_peak is None else float(q_peak)
+        out = np.column_stack([time_fs, q_peaks])
+        np.savetxt(
+            args.output_first_peak_dat,
+            out,
+            fmt="%.6e",
+            header="time_fs  q_first_peak_A^-1",
+        )
+        print(f"Wrote first-peak DAT: {args.output_first_peak_dat}")
 
     if args.write_frame_pngs or args.write_frame_dats or args.write_frame_xyzs:
         out_dir = args.frames_dir
@@ -786,6 +917,8 @@ def main():
                     mark_first_peak=str(args.mark_first_peak),
                     peak_min_q=args.peak_min_q,
                     peak_mode=str(args.peak_mode),
+                    frame_xlim=frame_xlim,
+                    frame_ylim=frame_ylim,
                     figsize=figsize,
                     dpi=int(args.dpi),
                 )
