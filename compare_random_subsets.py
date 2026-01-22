@@ -276,6 +276,74 @@ def write_median_trajectory_as_medoid(
     return True
 
 
+def write_closest_to_mean_trajectory_per_frame(
+    xyz_files: Sequence[str],
+    mean_xyz: str,
+    output_xyz: str,
+    *,
+    label_suffix: str = "closest_to_mean",
+) -> bool:
+    """
+    Write a "closest-to-mean" trajectory where each frame is an ACTUAL frame chosen from the inputs.
+
+    For each frame index, select the subset frame (from xyz_files) that minimizes Kabsch-RMSD
+    to the mean trajectory frame (from mean_xyz).
+
+    This allows choosing different subsets per frame (unlike the representative-subset method).
+    """
+    if len(xyz_files) < 1:
+        raise ValueError("No XYZ files provided for closest-to-mean selection.")
+
+    trajs = [_read_xyz_trajectory_frames(p) for p in xyz_files]
+    mean_traj = _read_xyz_trajectory_frames(mean_xyz)
+
+    min_frames = min(min(len(t) for t in trajs), len(mean_traj))
+    if any(len(t) != min_frames for t in trajs) or len(mean_traj) != min_frames:
+        print(
+            "Warning: Not all trajectories have the same number of frames. "
+            f"Truncating to min_frames={min_frames}."
+        )
+
+    natoms0 = trajs[0][0]["natoms"]
+    for ti, tr in enumerate(trajs):
+        for fi in range(min_frames):
+            if tr[fi]["natoms"] != natoms0:
+                raise ValueError(
+                    f"Subset {ti} frame {fi} natoms={tr[fi]['natoms']} differs from first natoms={natoms0}"
+                )
+    for fi in range(min_frames):
+        if mean_traj[fi]["natoms"] != natoms0:
+            raise ValueError(
+                f"Mean trajectory frame {fi} natoms={mean_traj[fi]['natoms']} differs from subsets natoms={natoms0}"
+            )
+
+    with open(output_xyz, "w") as out:
+        for fi in range(min_frames):
+            target = mean_traj[fi]["coords"]
+            best_i = -1
+            best_d = float("inf")
+            for si, tr in enumerate(trajs):
+                d = _kabsch_rmsd(tr[fi]["coords"], target)
+                if d < best_d:
+                    best_d = d
+                    best_i = si
+
+            frame = trajs[best_i][fi]
+            comment = frame["comment"]
+            if label_suffix:
+                comment = f"{comment} | {label_suffix} | closest_subset={best_i} | rmsd_to_mean={best_d:.6g}"
+            out.write(f"{frame['natoms']}\n")
+            out.write(f"{comment}\n")
+            for line in frame["body_lines"]:
+                out.write(line)
+
+    print(
+        f"Closest-to-mean trajectory written to {output_xyz} "
+        f"(frames={min_frames}, subsets={len(trajs)})."
+    )
+    return True
+
+
 def analyze_geometry(xyz_file, output_csv, bond=None, angle=None, dihedral=None):
     """Run analyze_geometry.py to extract specified geometric parameters."""
     cmd = ["python3", "analyze_geometry.py", xyz_file]
@@ -705,6 +773,14 @@ def main():
         help="Also write a frame-wise median optimal-path trajectory across subsets (aligned), named like the plot but with '_median.xyz'.",
     )
     parser.add_argument(
+        "--write-closest-to-mean-trajectory",
+        action="store_true",
+        help=(
+            "Also write a frame-wise closest-to-mean trajectory across subsets (must be an actual subset frame), "
+            "named like the plot but with '_closest_mean.xyz'. This can pick different subsets per frame."
+        ),
+    )
+    parser.add_argument(
         "--median-smooth-weight",
         type=float,
         default=0.0,
@@ -974,6 +1050,28 @@ def main():
                 print("Warning: Failed to write mean optimal-path XYZ.")
         except Exception as e:
             print(f"\nWarning: Failed to create mean optimal-path trajectory: {type(e).__name__}: {e}")
+
+        # Closest-to-mean trajectory across subsets (per-frame, chooses actual subset frame)
+        if args.write_closest_to_mean_trajectory:
+            try:
+                closest_out = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
+                xyz_files = [r["xyz_file"] for r in records]
+                mean_out = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
+                if not os.path.exists(mean_out):
+                    raise FileNotFoundError(
+                        f"Mean trajectory not found at {mean_out}. "
+                        "It is required for closest-to-mean selection."
+                    )
+                print("Computing closest-to-mean trajectory (per-frame selection from subset trajectories)...")
+                if write_closest_to_mean_trajectory_per_frame(xyz_files, mean_out, closest_out):
+                    print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
+                else:
+                    print("Warning: Failed to write closest-to-mean optimal-path XYZ.")
+            except Exception as e:
+                print(
+                    f"\nWarning: Failed to create closest-to-mean optimal-path trajectory: "
+                    f"{type(e).__name__}: {e}"
+                )
 
         # Median optimal-path trajectory across subsets (frame-by-frame median)
         if args.write_median_trajectory:
