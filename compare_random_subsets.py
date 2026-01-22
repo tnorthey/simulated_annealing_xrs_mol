@@ -21,7 +21,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, topM, *, no_autoscale: bool):
+def run_optimal_path(
+    directory,
+    seed,
+    output_dir,
+    subset_idx,
+    random_sample,
+    topM,
+    *,
+    no_autoscale: bool,
+    sample_after_prune: bool,
+):
     """Run optimal_path.py with specified parameters."""
     output_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_idx}.xyz")
     
@@ -29,7 +39,6 @@ def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, top
         "python3", "optimal_path.py", directory,
         "--random-sample", str(random_sample),
         "--topM", str(topM),
-        "--sample-after-prune",
         "--fit-weight", "1",
         "--rmsd-weight", "1",
         "--rmsd-indices", "0,1,2,3,4,5",
@@ -37,6 +46,10 @@ def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, top
         "--seed", str(seed),
         "--xyz-out", output_xyz,
     ]
+    # Default behavior (historical): random-sample first, then topM.
+    # Optionally allow the alternative: topM first, then random-sample from that pool.
+    if sample_after_prune:
+        cmd.append("--sample-after-prune")
     if no_autoscale:
         cmd.append("--no-autoscale")
     
@@ -738,6 +751,15 @@ def main():
         help="Number of lowest-fit candidates to keep per timestep (default: 50)",
     )
     parser.add_argument(
+        "--sample-after-prune",
+        action="store_true",
+        help=(
+            "Change candidate selection order for optimal_path: apply topM/delta pruning first, "
+            "then randomly sample from that pool. Default is the historical behavior "
+            "(random subset first, then topM)."
+        ),
+    )
+    parser.add_argument(
         "--no-autoscale",
         action="store_true",
         help="Disable optimal_path.py automatic scaling of fit/signal/RMSD cost terms.",
@@ -810,6 +832,7 @@ def main():
                 args.random_sample,
                 args.topM,
                 no_autoscale=bool(args.no_autoscale),
+                sample_after_prune=bool(args.sample_after_prune),
             )
         
         if xyz_file is None:
