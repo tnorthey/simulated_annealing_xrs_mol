@@ -160,6 +160,7 @@ def write_median_trajectory_as_medoid(
     xyz_files: Sequence[str],
     output_xyz: str,
     *,
+    smooth_weight: float = 0.0,
     label_suffix: str = "median=medoid",
 ) -> bool:
     """
@@ -192,29 +193,63 @@ def write_median_trajectory_as_medoid(
                     f"Subset {ti} frame {fi} natoms={tr[fi]['natoms']} differs from first natoms={natoms0}"
                 )
 
-    # Select medoid per frame
-    chosen_subset_indices = []
-    with open(output_xyz, "w") as out:
-        for fi in range(min_frames):
-            coords_list = [tr[fi]["coords"] for tr in trajs]
-            K = len(coords_list)
-            # Compute sum distances for each candidate frame
-            sums = np.zeros(K, dtype=np.float64)
-            for i in range(K):
-                si = 0.0
-                Pi = coords_list[i]
-                for j in range(K):
-                    if i == j:
-                        continue
-                    si += _kabsch_rmsd(Pi, coords_list[j])
-                sums[i] = si
-            best_i = int(np.argmin(sums))
-            chosen_subset_indices.append(best_i)
+    # Precompute node costs: sum RMSD to all other subsets at the same frame
+    K = len(trajs)
+    node_cost = np.zeros((min_frames, K), dtype=np.float64)
+    coords_by_frame = [[trajs[k][fi]["coords"] for k in range(K)] for fi in range(min_frames)]
+    for fi in range(min_frames):
+        coords_list = coords_by_frame[fi]
+        for i in range(K):
+            si = 0.0
+            Pi = coords_list[i]
+            for j in range(K):
+                if i == j:
+                    continue
+                si += _kabsch_rmsd(Pi, coords_list[j])
+            node_cost[fi, i] = si
 
+    # If smooth_weight == 0, pick per-frame medoid (historical behavior)
+    if smooth_weight <= 0.0:
+        chosen_subset_indices = [int(np.argmin(node_cost[fi, :])) for fi in range(min_frames)]
+    else:
+        # DP: choose sequence minimizing node_cost + smooth_weight * transition_rmsd
+        dp = np.full((min_frames, K), np.inf, dtype=np.float64)
+        prev = np.full((min_frames, K), -1, dtype=np.int32)
+        dp[0, :] = node_cost[0, :]
+
+        for fi in range(1, min_frames):
+            curr_coords = coords_by_frame[fi]
+            prev_coords = coords_by_frame[fi - 1]
+            for j in range(K):
+                best_val = np.inf
+                best_i = -1
+                Pj = curr_coords[j]
+                for i in range(K):
+                    trans = smooth_weight * _kabsch_rmsd(prev_coords[i], Pj)
+                    val = dp[fi - 1, i] + trans + node_cost[fi, j]
+                    if val < best_val:
+                        best_val = val
+                        best_i = i
+                dp[fi, j] = best_val
+                prev[fi, j] = best_i
+
+        # backtrack
+        last = int(np.argmin(dp[min_frames - 1, :]))
+        chosen_subset_indices = [last]
+        for fi in range(min_frames - 1, 0, -1):
+            last = int(prev[fi, last])
+            chosen_subset_indices.append(last)
+        chosen_subset_indices.reverse()
+
+    # Write selected frames
+    with open(output_xyz, "w") as out:
+        for fi, best_i in enumerate(chosen_subset_indices):
             frame = trajs[best_i][fi]
             comment = frame["comment"]
             if label_suffix:
                 comment = f"{comment} | {label_suffix} | medoid_subset={best_i}"
+            if smooth_weight > 0.0:
+                comment = f"{comment} | smooth_weight={smooth_weight:g}"
 
             out.write(f"{frame['natoms']}\n")
             out.write(f"{comment}\n")
@@ -616,6 +651,16 @@ def main():
         help="Also write a frame-wise median optimal-path trajectory across subsets (aligned), named like the plot but with '_median.xyz'.",
     )
     parser.add_argument(
+        "--median-smooth-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "When writing the 'median' trajectory, add a smoothness penalty so the chosen subset "
+            "doesn't flicker frame-to-frame. Objective is: sum(node_cost) + weight * sum(RMSD between consecutive chosen frames). "
+            "0.0 means per-frame medoid (no smoothing)."
+        ),
+    )
+    parser.add_argument(
         "--bond",
         type=int,
         nargs=2,
@@ -854,7 +899,9 @@ def main():
                 median_out = os.path.splitext(args.output_plot)[0] + "_median.xyz"
                 xyz_files = [r["xyz_file"] for r in records]
                 print("Computing 'median' trajectory as a per-frame medoid (must be an actual subset frame)...")
-                if write_median_trajectory_as_medoid(xyz_files, median_out):
+                if write_median_trajectory_as_medoid(
+                    xyz_files, median_out, smooth_weight=float(args.median_smooth_weight)
+                ):
                     print(f"Median (medoid) optimal-path XYZ: {median_out}")
                 else:
                     print("Warning: Failed to write median (medoid) optimal-path XYZ.")
