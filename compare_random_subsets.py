@@ -319,6 +319,8 @@ def plot_aggregate_mean_std(
     xmax: float | None = None,
     ymin: float | None = None,
     ymax: float | None = None,
+    *,
+    medoid_csv: str | None = None,
 ):
     """
     Plot mean ± std-dev across all subsets, per frame, for each requested column.
@@ -349,10 +351,31 @@ def plot_aggregate_mean_std(
         # Fallback if something unexpected happens
         col_labels = [f"Column {i}" for i in range(n_cols)]
 
+    # Optional: overlay medoid trajectory curve(s) (must match columns requested).
+    medoid_arr = None
+    if medoid_csv is not None:
+        medoid_arr = _read_csv_no_header(medoid_csv)
+        if medoid_arr.shape[1] != n_cols:
+            raise ValueError(
+                f"Medoid CSV has {medoid_arr.shape[1]} columns but expected {n_cols} "
+                f"(must match analyze_geometry.py output for requested bond/angle/dihedral)."
+            )
+        if medoid_arr.shape[0] < min_frames:
+            min_frames = medoid_arr.shape[0]
+            Y = Y[:, :min_frames, :]
+            mean = mean[:min_frames, :]
+            std = std[:min_frames, :]
+            x = np.arange(min_frames, dtype=np.float64) * 20.0 + 10.0
+        medoid_arr = medoid_arr[:min_frames, :]
+
     if n_cols == 1:
         fig, ax = plt.subplots(figsize=(10, 6))
-        ax.plot(x, mean[:, 0], linewidth=2, label="mean")
-        ax.fill_between(x, mean[:, 0] - std[:, 0], mean[:, 0] + std[:, 0], alpha=0.25, label="±1σ")
+        if medoid_arr is not None:
+            ax.plot(x, medoid_arr[:, 0], linewidth=2.5, label="smooth-medoid")
+            ax.fill_between(x, mean[:, 0] - std[:, 0], mean[:, 0] + std[:, 0], alpha=0.20, label="±1σ (subsets)")
+        else:
+            ax.plot(x, mean[:, 0], linewidth=2, label="mean")
+            ax.fill_between(x, mean[:, 0] - std[:, 0], mean[:, 0] + std[:, 0], alpha=0.25, label="±1σ")
         ax.set_ylabel(col_labels[0])
         ax.legend()
         axes = [ax]
@@ -362,8 +385,12 @@ def plot_aggregate_mean_std(
             axes = [axes]
         for i in range(n_cols):
             ax = axes[i]
-            ax.plot(x, mean[:, i], linewidth=2, label="mean")
-            ax.fill_between(x, mean[:, i] - std[:, i], mean[:, i] + std[:, i], alpha=0.25, label="±1σ")
+            if medoid_arr is not None:
+                ax.plot(x, medoid_arr[:, i], linewidth=2.5, label="smooth-medoid")
+                ax.fill_between(x, mean[:, i] - std[:, i], mean[:, i] + std[:, i], alpha=0.20, label="±1σ (subsets)")
+            else:
+                ax.plot(x, mean[:, i], linewidth=2, label="mean")
+                ax.fill_between(x, mean[:, i] - std[:, i], mean[:, i] + std[:, i], alpha=0.25, label="±1σ")
             ax.set_ylabel(col_labels[i])
             ax.grid(True, alpha=0.3)
             if i == 0:
@@ -378,7 +405,12 @@ def plot_aggregate_mean_std(
         title_parts.append(f"Dihedral {dihedral[0]}-{dihedral[1]}-{dihedral[2]}-{dihedral[3]}")
     title = " / ".join(title_parts) if title_parts else "Geometry"
     fig.suptitle(
-        f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
+        (
+            f"{title} — smooth-medoid + ±std across {len(csv_files)} subsets "
+            f"(random-sample={random_sample}, topM={topM})"
+            if medoid_arr is not None
+            else f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
+        )
     )
 
     # X axis
@@ -646,6 +678,15 @@ def main():
         help="Plot mean ± std-dev across all subsets instead of plotting every subset curve.",
     )
     parser.add_argument(
+        "--aggregate-plot-medoid",
+        action="store_true",
+        help=(
+            "In --aggregate mode, plot the smooth-medoid trajectory curve(s) (from the median/medoid XYZ) "
+            "instead of the mean curve. Still shows ±1σ envelope across subsets for context. "
+            "Requires --write-median-trajectory."
+        ),
+    )
+    parser.add_argument(
         "--write-median-trajectory",
         action="store_true",
         help="Also write a frame-wise median optimal-path trajectory across subsets (aligned), named like the plot but with '_median.xyz'.",
@@ -713,6 +754,8 @@ def main():
     # Validate that at least one calculation type is specified
     if args.bond is None and args.angle is None and args.dihedral is None:
         parser.error("At least one of --bond, --angle, or --dihedral must be specified")
+    if args.aggregate_plot_medoid and not args.write_median_trajectory:
+        parser.error("--aggregate-plot-medoid requires --write-median-trajectory")
     
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
@@ -822,6 +865,21 @@ def main():
     print(f"Creating comparison plot...")
     if args.aggregate:
         try:
+            medoid_csv = None
+            if args.aggregate_plot_medoid:
+                # Ensure the smooth-medoid trajectory exists and analyze it to get a matching CSV.
+                median_out = os.path.splitext(args.output_plot)[0] + "_median.xyz"
+                xyz_files_for_medoid = [r["xyz_file"] for r in records]
+                print("Preparing smooth-medoid trajectory for aggregate plot overlay...")
+                write_median_trajectory_as_medoid(
+                    xyz_files_for_medoid,
+                    median_out,
+                    smooth_weight=float(args.median_smooth_weight),
+                )
+                medoid_csv = os.path.join(args.output_dir, "geometry_smooth_medoid.csv")
+                if not analyze_geometry(median_out, medoid_csv, args.bond, args.angle, args.dihedral):
+                    raise RuntimeError("Failed to analyze geometry for smooth-medoid trajectory.")
+
             plot_aggregate_mean_std(
                 csv_files,
                 args.output_plot,
@@ -834,6 +892,7 @@ def main():
                 xmax=args.xmax,
                 ymin=args.ymin,
                 ymax=args.ymax,
+                medoid_csv=medoid_csv,
             )
             ok = True
         except Exception as e:
