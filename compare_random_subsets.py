@@ -21,7 +21,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, topM):
+def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, topM, *, no_autoscale: bool):
     """Run optimal_path.py with specified parameters."""
     output_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_idx}.xyz")
     
@@ -34,10 +34,11 @@ def run_optimal_path(directory, seed, output_dir, subset_idx, random_sample, top
         "--rmsd-weight", "1",
         "--rmsd-indices", "0,1,2,3,4,5",
         "--signal-weight", "1",
-        "--no-autoscale",
         "--seed", str(seed),
         "--xyz-out", output_xyz,
     ]
+    if no_autoscale:
+        cmd.append("--no-autoscale")
     
     print(f"\n{'='*60}")
     print(f"Running subset {subset_idx} with seed {seed}...")
@@ -513,6 +514,11 @@ def main():
         default=50,
         help="Number of lowest-fit candidates to keep per timestep (default: 50)",
     )
+    parser.add_argument(
+        "--no-autoscale",
+        action="store_true",
+        help="Disable optimal_path.py automatic scaling of fit/signal/RMSD cost terms.",
+    )
 
     # Plot axis limits (applies to both aggregate and non-aggregate plots)
     parser.add_argument("--xmin", type=float, default=None, help="Minimum x-axis value (time in fs). Default: 0")
@@ -571,7 +577,15 @@ def main():
             reused = True
             print(f"\nReusing existing trajectory for subset {i}: {xyz_file}")
         else:
-            xyz_file = run_optimal_path(args.directory, seed, args.output_dir, i, args.random_sample, args.topM)
+            xyz_file = run_optimal_path(
+                args.directory,
+                seed,
+                args.output_dir,
+                i,
+                args.random_sample,
+                args.topM,
+                no_autoscale=bool(args.no_autoscale),
+            )
         
         if xyz_file is None:
             print(f"Warning: Failed to generate trajectory for subset {i}, skipping...")
