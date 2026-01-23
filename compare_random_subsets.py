@@ -571,6 +571,8 @@ def plot_aggregate_mean_std(
     ymax: float | None = None,
     *,
     medoid_csv: str | None = None,
+    rep_csv: str | None = None,
+    rep_label: str = "representative (closest-to-mean subset)",
 ):
     """
     Plot mean ± std-dev across all subsets, per frame, for each requested column.
@@ -618,6 +620,25 @@ def plot_aggregate_mean_std(
             x = np.arange(min_frames, dtype=np.float64) * 20.0 + 10.0
         medoid_arr = medoid_arr[:min_frames, :]
 
+    # Optional: overlay representative subset curve(s) (must match columns requested).
+    rep_arr = None
+    if rep_csv is not None:
+        rep_arr = _read_csv_no_header(rep_csv)
+        if rep_arr.shape[1] != n_cols:
+            raise ValueError(
+                f"Representative CSV has {rep_arr.shape[1]} columns but expected {n_cols} "
+                f"(must match analyze_geometry.py output for requested bond/angle/dihedral)."
+            )
+        if rep_arr.shape[0] < min_frames:
+            min_frames = rep_arr.shape[0]
+            Y = Y[:, :min_frames, :]
+            mean = mean[:min_frames, :]
+            std = std[:min_frames, :]
+            x = np.arange(min_frames, dtype=np.float64) * 20.0 + 10.0
+            if medoid_arr is not None:
+                medoid_arr = medoid_arr[:min_frames, :]
+        rep_arr = rep_arr[:min_frames, :]
+
     if n_cols == 1:
         fig, ax = plt.subplots(figsize=(10, 6))
         if medoid_arr is not None:
@@ -626,6 +647,8 @@ def plot_aggregate_mean_std(
         else:
             ax.plot(x, mean[:, 0], linewidth=2, label="mean")
             ax.fill_between(x, mean[:, 0] - std[:, 0], mean[:, 0] + std[:, 0], alpha=0.25, label="±1σ")
+        if rep_arr is not None:
+            ax.plot(x, rep_arr[:, 0], linewidth=2.5, linestyle="--", label=rep_label)
         ax.set_ylabel(col_labels[0])
         ax.legend()
         axes = [ax]
@@ -641,6 +664,8 @@ def plot_aggregate_mean_std(
             else:
                 ax.plot(x, mean[:, i], linewidth=2, label="mean")
                 ax.fill_between(x, mean[:, i] - std[:, i], mean[:, i] + std[:, i], alpha=0.25, label="±1σ")
+            if rep_arr is not None:
+                ax.plot(x, rep_arr[:, i], linewidth=2.5, linestyle="--", label=rep_label)
             ax.set_ylabel(col_labels[i])
             ax.grid(True, alpha=0.3)
             if i == 0:
@@ -656,10 +681,10 @@ def plot_aggregate_mean_std(
     title = " / ".join(title_parts) if title_parts else "Geometry"
     fig.suptitle(
         (
-            f"{title} — smooth-medoid + ±std across {len(csv_files)} subsets "
+            f"{title} — smooth-medoid/representative + ±std across {len(csv_files)} subsets "
             f"(random-sample={random_sample}, topM={topM})"
             if medoid_arr is not None
-            else f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
+            else f"{title} — mean/representative ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
         )
     )
 
@@ -1254,6 +1279,19 @@ def main():
     print(f"\n{'='*60}")
     print(f"Generated {len(csv_files)} valid subsets")
     print(f"{'='*60}\n")
+
+    # Representative subset selection (closest to mean dihedral if requested,
+    # otherwise closest to mean across all selected columns).
+    rep = None
+    try:
+        rep = select_representative_subset(records, bond=args.bond, angle=args.angle, dihedral=args.dihedral)
+        # Mark representative in legend labels (non-aggregate mode plots all curves).
+        for i, r in enumerate(records):
+            if r["subset_index"] == rep["subset_index"]:
+                labels[i] = f"{labels[i]} (representative)"
+                break
+    except Exception as e:
+        print(f"\nWarning: Failed to select representative subset: {type(e).__name__}: {e}")
     
     # Create comparison plot
     print(f"Creating comparison plot...")
@@ -1288,6 +1326,7 @@ def main():
                 ymin=args.ymin,
                 ymax=args.ymax,
                 medoid_csv=medoid_csv,
+                rep_csv=None if rep is None else rep["csv_file"],
             )
             ok = True
         except Exception as e:
@@ -1314,26 +1353,25 @@ def main():
         print(f"Intermediate files saved in: {args.output_dir}")
         print(f"{'='*60}\n")
 
-        # Representative subset selection: closest to mean dihedral (if requested),
-        # otherwise closest to mean across all selected columns.
-        try:
-            rep = select_representative_subset(
-                records, bond=args.bond, angle=args.angle, dihedral=args.dihedral
-            )
-            rep_xyz = rep["xyz_file"]
-            rep_out = os.path.splitext(args.output_plot)[0] + ".xyz"
-            shutil.copyfile(rep_xyz, rep_out)
+        # Copy representative subset XYZ next to plot stem (if selection succeeded)
+        if rep is not None:
+            try:
+                rep_xyz = rep["xyz_file"]
+                rep_out = os.path.splitext(args.output_plot)[0] + ".xyz"
+                shutil.copyfile(rep_xyz, rep_out)
 
-            print(f"\n{'='*60}")
-            print("Representative subset (closest to mean):")
-            print(f"  Subset index: {rep['subset_index']}")
-            print(f"  Seed: {rep['seed']}")
-            print(f"  RMS to mean: {rep['representative_rms_to_mean']:.6g} "
-                  f"(frames used: {rep['representative_min_frames_used']})")
-            print(f"  Representative XYZ: {rep_out}")
-            print(f"{'='*60}\n")
-        except Exception as e:
-            print(f"\nWarning: Failed to select representative subset: {type(e).__name__}: {e}")
+                print(f"\n{'='*60}")
+                print("Representative subset (closest to mean):")
+                print(f"  Subset index: {rep['subset_index']}")
+                print(f"  Seed: {rep['seed']}")
+                print(
+                    f"  RMS to mean: {rep['representative_rms_to_mean']:.6g} "
+                    f"(frames used: {rep['representative_min_frames_used']})"
+                )
+                print(f"  Representative XYZ: {rep_out}")
+                print(f"{'='*60}\n")
+            except Exception as e:
+                print(f"\nWarning: Failed to write representative XYZ copy: {type(e).__name__}: {e}")
 
         # Mean optimal-path trajectory across subsets (frame-by-frame average)
         mean_out = None
