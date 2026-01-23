@@ -569,6 +569,9 @@ def plot_aggregate_mean_std(
     xmax: float | None = None,
     ymin: float | None = None,
     ymax: float | None = None,
+    *,
+    overlay_csv: str | None = None,
+    overlay_label: str = "closest-to-mean",
 ):
     """
     Plot mean ± std-dev across all subsets, per frame, for each requested column.
@@ -599,10 +602,28 @@ def plot_aggregate_mean_std(
         # Fallback if something unexpected happens
         col_labels = [f"Column {i}" for i in range(n_cols)]
 
+    overlay_arr = None
+    if overlay_csv is not None:
+        overlay_arr = _read_csv_no_header(overlay_csv)
+        if overlay_arr.shape[1] != n_cols:
+            raise ValueError(
+                f"Overlay CSV has {overlay_arr.shape[1]} columns but expected {n_cols} "
+                f"(must match analyze_geometry.py output for requested bond/angle/dihedral)."
+            )
+        if overlay_arr.shape[0] < min_frames:
+            min_frames = overlay_arr.shape[0]
+            Y = Y[:, :min_frames, :]
+            mean = mean[:min_frames, :]
+            std = std[:min_frames, :]
+            x = np.arange(min_frames, dtype=np.float64) * 20.0 + 10.0
+        overlay_arr = overlay_arr[:min_frames, :]
+
     if n_cols == 1:
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(x, mean[:, 0], linewidth=2, label="mean")
         ax.fill_between(x, mean[:, 0] - std[:, 0], mean[:, 0] + std[:, 0], alpha=0.25, label="±1σ")
+        if overlay_arr is not None:
+            ax.plot(x, overlay_arr[:, 0], linewidth=2.5, label=overlay_label)
         ax.set_ylabel(col_labels[0])
         ax.legend()
         axes = [ax]
@@ -614,6 +635,8 @@ def plot_aggregate_mean_std(
             ax = axes[i]
             ax.plot(x, mean[:, i], linewidth=2, label="mean")
             ax.fill_between(x, mean[:, i] - std[:, i], mean[:, i] + std[:, i], alpha=0.25, label="±1σ")
+            if overlay_arr is not None:
+                ax.plot(x, overlay_arr[:, i], linewidth=2.5, label=overlay_label)
             ax.set_ylabel(col_labels[i])
             ax.grid(True, alpha=0.3)
             if i == 0:
@@ -628,7 +651,11 @@ def plot_aggregate_mean_std(
         title_parts.append(f"Dihedral {dihedral[0]}-{dihedral[1]}-{dihedral[2]}-{dihedral[3]}")
     title = " / ".join(title_parts) if title_parts else "Geometry"
     fig.suptitle(
-        f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
+        (
+            f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
+            if overlay_arr is None
+            else f"{title} — mean ± std + {overlay_label} (random-sample={random_sample}, topM={topM})"
+        )
     )
 
     # X axis
@@ -1229,6 +1256,36 @@ def main():
         try:
             if args.aggregate_plot_medoid:
                 print("Note: --aggregate-plot-medoid is currently ignored (aggregate plot shows mean ± std only).")
+            # Overlay closest-to-mean (by geometry) curve (e.g., dihedral) on top of mean ± σ.
+            overlay_csv = None
+            overlay_label = "closest-to-mean"
+            try:
+                xyz_files_for_closest = [r["xyz_file"] for r in records]
+                subset_csv_files_for_closest = [r["csv_file"] for r in records]
+                with tempfile.TemporaryDirectory(prefix="closest_overlay_", dir=args.output_dir) as tmpdir:
+                    closest_xyz_tmp = os.path.join(tmpdir, "closest_to_mean.xyz")
+                    if write_closest_to_mean_trajectory_by_geometry(
+                        xyz_files=xyz_files_for_closest,
+                        subset_geometry_csv_files=subset_csv_files_for_closest,
+                        output_xyz=closest_xyz_tmp,
+                        bond=args.bond,
+                        angle=args.angle,
+                        dihedral=args.dihedral,
+                        smooth_weight=float(args.closest_smooth_weight),
+                        rmsd_indices=smooth_rmsd_indices,
+                    ):
+                        overlay_csv = os.path.join(tmpdir, "geometry_closest_to_mean.csv")
+                        if not analyze_geometry(closest_xyz_tmp, overlay_csv, args.bond, args.angle, args.dihedral):
+                            overlay_csv = None
+                    else:
+                        overlay_csv = None
+            except Exception as e:
+                print(
+                    f"\nWarning: Failed to generate closest-to-mean overlay for aggregate plot: "
+                    f"{type(e).__name__}: {e}"
+                )
+                overlay_csv = None
+
             plot_aggregate_mean_std(
                 csv_files,
                 args.output_plot,
@@ -1241,6 +1298,8 @@ def main():
                 xmax=args.xmax,
                 ymin=args.ymin,
                 ymax=args.ymax,
+                overlay_csv=overlay_csv,
+                overlay_label=overlay_label,
             )
             ok = True
         except Exception as e:
@@ -1349,75 +1408,7 @@ def main():
             except Exception as e:
                 print(f"\nWarning: Failed to create median optimal-path trajectory: {type(e).__name__}: {e}")
 
-        # Plot: smooth-medoid vs mean vs closest-to-mean (requires all three)
-        try:
-            if mean_out is None or not os.path.exists(mean_out):
-                raise FileNotFoundError("Mean trajectory is missing; cannot create triplet comparison plot.")
-
-            triplet_png = os.path.splitext(args.output_plot)[0] + "_path_comparison.png"
-            xyz_files = [r["xyz_file"] for r in records]
-            subset_csv_files = [r["csv_file"] for r in records]
-
-            # Use persisted outputs if requested; otherwise generate temporary trajectories just for plotting.
-            with tempfile.TemporaryDirectory(prefix="path_triplet_", dir=args.output_dir) as tmpdir:
-                mean_xyz = mean_out
-
-                if median_out is not None and os.path.exists(median_out):
-                    medoid_xyz = median_out
-                else:
-                    medoid_xyz = os.path.join(tmpdir, "smooth_medoid.xyz")
-                    if not write_median_trajectory_as_medoid(
-                        xyz_files,
-                        medoid_xyz,
-                        smooth_weight=float(args.median_smooth_weight),
-                    ):
-                        raise RuntimeError("Failed to create smooth-medoid trajectory for plotting.")
-
-                if closest_out is not None and os.path.exists(closest_out):
-                    closest_xyz = closest_out
-                else:
-                    closest_xyz = os.path.join(tmpdir, "closest_to_mean.xyz")
-                    if not write_closest_to_mean_trajectory_by_geometry(
-                        xyz_files=xyz_files,
-                        subset_geometry_csv_files=subset_csv_files,
-                        output_xyz=closest_xyz,
-                        bond=args.bond,
-                        angle=args.angle,
-                        dihedral=args.dihedral,
-                        smooth_weight=float(args.closest_smooth_weight),
-                        rmsd_indices=smooth_rmsd_indices,
-                    ):
-                        raise RuntimeError("Failed to create closest-to-mean trajectory for plotting.")
-
-                mean_csv = os.path.join(tmpdir, "geometry_mean.csv")
-                medoid_csv = os.path.join(tmpdir, "geometry_smooth_medoid.csv")
-                closest_csv = os.path.join(tmpdir, "geometry_closest_to_mean.csv")
-
-                print("Analyzing geometry for mean/medoid/closest paths (for triplet comparison plot)...")
-                if not analyze_geometry(mean_xyz, mean_csv, args.bond, args.angle, args.dihedral):
-                    raise RuntimeError("Failed to analyze geometry for mean path.")
-                if not analyze_geometry(medoid_xyz, medoid_csv, args.bond, args.angle, args.dihedral):
-                    raise RuntimeError("Failed to analyze geometry for smooth-medoid path.")
-                if not analyze_geometry(closest_xyz, closest_csv, args.bond, args.angle, args.dihedral):
-                    raise RuntimeError("Failed to analyze geometry for closest-to-mean path.")
-
-                plot_path_triplet_comparison(
-                    mean_csv=mean_csv,
-                    medoid_csv=medoid_csv,
-                    closest_csv=closest_csv,
-                    output_png=triplet_png,
-                    random_sample=args.random_sample,
-                    topM=args.topM,
-                    bond=args.bond,
-                    angle=args.angle,
-                    dihedral=args.dihedral,
-                    xmin=args.xmin,
-                    xmax=args.xmax,
-                    ymin=args.ymin,
-                    ymax=args.ymax,
-                )
-        except Exception as e:
-            print(f"\nWarning: Failed to create path triplet comparison plot: {type(e).__name__}: {e}")
+        # No extra *_path_comparison.png plot; in --aggregate mode we overlay closest-to-mean on mean ± σ.
     else:
         print("\nError: Failed to create comparison plot.")
         sys.exit(1)
