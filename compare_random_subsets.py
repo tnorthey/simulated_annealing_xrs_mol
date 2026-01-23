@@ -1250,6 +1250,10 @@ def main():
     print(f"Generated {len(csv_files)} valid subsets")
     print(f"{'='*60}\n")
     
+    # If we compute closest-to-mean early (e.g., for aggregate overlay), store it here to avoid
+    # recomputing later and confusing log order.
+    closest_out_precomputed: str | None = None
+
     # Create comparison plot
     print(f"Creating comparison plot...")
     if args.aggregate:
@@ -1264,11 +1268,18 @@ def main():
                 try:
                     xyz_files_for_closest = [r["xyz_file"] for r in records]
                     subset_csv_files_for_closest = [r["csv_file"] for r in records]
-                    closest_xyz_tmp = os.path.join(tmpdir, "closest_to_mean.xyz")
+                    # If user asked to write closest-to-mean, compute that file here and reuse it for overlay.
+                    # Otherwise, compute a temporary closest-to-mean XYZ just for overlay.
+                    if args.write_closest_to_mean_trajectory:
+                        closest_out_precomputed = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
+                        closest_xyz_for_overlay = closest_out_precomputed
+                    else:
+                        closest_xyz_for_overlay = os.path.join(tmpdir, "closest_to_mean.xyz")
+
                     if write_closest_to_mean_trajectory_by_geometry(
                         xyz_files=xyz_files_for_closest,
                         subset_geometry_csv_files=subset_csv_files_for_closest,
-                        output_xyz=closest_xyz_tmp,
+                        output_xyz=closest_xyz_for_overlay,
                         bond=args.bond,
                         angle=args.angle,
                         dihedral=args.dihedral,
@@ -1276,7 +1287,9 @@ def main():
                         rmsd_indices=smooth_rmsd_indices,
                     ):
                         overlay_csv = os.path.join(tmpdir, "geometry_closest_to_mean.csv")
-                        if not analyze_geometry(closest_xyz_tmp, overlay_csv, args.bond, args.angle, args.dihedral):
+                        if not analyze_geometry(
+                            closest_xyz_for_overlay, overlay_csv, args.bond, args.angle, args.dihedral
+                        ):
                             overlay_csv = None
                     else:
                         overlay_csv = None
@@ -1364,26 +1377,31 @@ def main():
         closest_out = None
         if args.write_closest_to_mean_trajectory:
             try:
-                closest_out = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
-                xyz_files = [r["xyz_file"] for r in records]
-                subset_csv_files = [r["csv_file"] for r in records]
-                print(
-                    "Computing closest-to-mean trajectory (per-frame selection from subset trajectories, "
-                    "based on mean geometry across subsets)..."
-                )
-                if write_closest_to_mean_trajectory_by_geometry(
-                    xyz_files=xyz_files,
-                    subset_geometry_csv_files=subset_csv_files,
-                    output_xyz=closest_out,
-                    bond=args.bond,
-                    angle=args.angle,
-                    dihedral=args.dihedral,
-                    smooth_weight=float(args.closest_smooth_weight),
-                    rmsd_indices=smooth_rmsd_indices,
-                ):
-                    print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
+                # If we already computed it (e.g., for aggregate overlay), reuse and skip recomputation.
+                if closest_out_precomputed is not None and os.path.exists(closest_out_precomputed):
+                    closest_out = closest_out_precomputed
+                    print(f"Closest-to-mean optimal-path XYZ: {closest_out} (reused)")
                 else:
-                    print("Warning: Failed to write closest-to-mean optimal-path XYZ.")
+                    closest_out = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
+                    xyz_files = [r["xyz_file"] for r in records]
+                    subset_csv_files = [r["csv_file"] for r in records]
+                    print(
+                        "Computing closest-to-mean trajectory (per-frame selection from subset trajectories, "
+                        "based on mean geometry across subsets)..."
+                    )
+                    if write_closest_to_mean_trajectory_by_geometry(
+                        xyz_files=xyz_files,
+                        subset_geometry_csv_files=subset_csv_files,
+                        output_xyz=closest_out,
+                        bond=args.bond,
+                        angle=args.angle,
+                        dihedral=args.dihedral,
+                        smooth_weight=float(args.closest_smooth_weight),
+                        rmsd_indices=smooth_rmsd_indices,
+                    ):
+                        print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
+                    else:
+                        print("Warning: Failed to write closest-to-mean optimal-path XYZ.")
             except Exception as e:
                 print(
                     f"\nWarning: Failed to create closest-to-mean optimal-path trajectory: "
