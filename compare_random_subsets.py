@@ -344,6 +344,116 @@ def write_closest_to_mean_trajectory_per_frame(
     return True
 
 
+def _wrapped_angle_diff_deg(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """
+    Smallest signed difference a-b in degrees, wrapped to [-180, 180].
+    Works elementwise on numpy arrays.
+    """
+    d = np.deg2rad(a - b)
+    return np.rad2deg(np.arctan2(np.sin(d), np.cos(d)))
+
+
+def write_closest_to_mean_trajectory_by_geometry(
+    *,
+    xyz_files: Sequence[str],
+    subset_geometry_csv_files: Sequence[str],
+    output_xyz: str,
+    bond=None,
+    angle=None,
+    dihedral=None,
+    label_suffix: str = "closest_to_mean_geometry",
+) -> bool:
+    """
+    Write a "closest-to-mean" trajectory where each frame is an ACTUAL frame chosen from the inputs.
+
+    Selection is done PER-FRAME by comparing each subset's *geometry* to the per-frame mean geometry
+    across subsets (computed from analyze_geometry.py outputs).
+
+    - If a dihedral is requested, closeness is computed using ONLY the dihedral column, with proper
+      angle wrapping (i.e., a 179° vs -179° difference is 2°, not 358°).
+    - Otherwise, closeness is computed using all requested columns jointly (RMS across columns).
+    """
+    if len(xyz_files) < 1:
+        raise ValueError("No XYZ files provided for closest-to-mean selection.")
+    if len(subset_geometry_csv_files) != len(xyz_files):
+        raise ValueError("subset_geometry_csv_files must have the same length as xyz_files.")
+
+    # Load per-subset geometry arrays
+    arrays = [_read_csv_no_header(p) for p in subset_geometry_csv_files]
+    n_cols = arrays[0].shape[1]
+    if any(a.shape[1] != n_cols for a in arrays):
+        raise ValueError("Not all geometry CSV files have the same number of columns.")
+
+    # Determine frames we can safely use for BOTH geometry and XYZ writing
+    trajs = [_read_xyz_trajectory_frames(p) for p in xyz_files]
+    min_frames = min(min(a.shape[0] for a in arrays), min(len(t) for t in trajs))
+    if any(a.shape[0] != min_frames for a in arrays) or any(len(t) != min_frames for t in trajs):
+        print(
+            "Warning: Not all subset trajectories/geometry have the same number of frames. "
+            f"Truncating to min_frames={min_frames}."
+        )
+
+    # Validate natoms consistency in XYZs
+    natoms0 = trajs[0][0]["natoms"]
+    for ti, tr in enumerate(trajs):
+        for fi in range(min_frames):
+            if tr[fi]["natoms"] != natoms0:
+                raise ValueError(
+                    f"Subset {ti} frame {fi} natoms={tr[fi]['natoms']} differs from first natoms={natoms0}"
+                )
+
+    Y = np.stack([a[:min_frames, :] for a in arrays], axis=0)  # (n_subsets, n_frames, n_cols)
+    mean = np.mean(Y, axis=0)  # (n_frames, n_cols)
+
+    dcol = _dihedral_column_index(bond=bond, angle=angle, dihedral=dihedral)
+    cols = _selected_column_indices(bond=bond, angle=angle, dihedral=dihedral)
+    if len(cols) == 0:
+        raise ValueError("No geometry columns selected.")
+
+    chosen_subset_indices: list[int] = []
+    chosen_dist: list[float] = []
+
+    for fi in range(min_frames):
+        if dcol is not None:
+            diffs = np.abs(_wrapped_angle_diff_deg(Y[:, fi, dcol], mean[fi, dcol]))  # (n_subsets,)
+            best_i = int(np.argmin(diffs))
+            best_d = float(diffs[best_i])
+        else:
+            diffs = Y[:, fi, cols] - mean[fi, cols]  # (n_subsets, n_cols_sel)
+            dist = np.sqrt(np.mean(diffs * diffs, axis=1))  # RMS per subset
+            best_i = int(np.argmin(dist))
+            best_d = float(dist[best_i])
+
+        chosen_subset_indices.append(best_i)
+        chosen_dist.append(best_d)
+
+    with open(output_xyz, "w") as out:
+        for fi, best_i in enumerate(chosen_subset_indices):
+            frame = trajs[best_i][fi]
+            comment = frame["comment"]
+            if label_suffix:
+                if dcol is not None:
+                    comment = (
+                        f"{comment} | {label_suffix} | closest_subset={best_i} "
+                        f"| abs_wrapped_diff_deg={chosen_dist[fi]:.6g}"
+                    )
+                else:
+                    comment = (
+                        f"{comment} | {label_suffix} | closest_subset={best_i} "
+                        f"| rms_diff={chosen_dist[fi]:.6g}"
+                    )
+            out.write(f"{frame['natoms']}\n")
+            out.write(f"{comment}\n")
+            for line in frame["body_lines"]:
+                out.write(line)
+
+    print(
+        f"Closest-to-mean (by geometry) trajectory written to {output_xyz} "
+        f"(frames={min_frames}, subsets={len(trajs)})."
+    )
+    return True
+
+
 def analyze_geometry(xyz_file, output_csv, bond=None, angle=None, dihedral=None):
     """Run analyze_geometry.py to extract specified geometric parameters."""
     cmd = ["python3", "analyze_geometry.py", xyz_file]
@@ -1150,15 +1260,19 @@ def main():
             try:
                 closest_out = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
                 xyz_files = [r["xyz_file"] for r in records]
-                if mean_out is None:
-                    mean_out = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
-                if not os.path.exists(mean_out):
-                    raise FileNotFoundError(
-                        f"Mean trajectory not found at {mean_out}. "
-                        "It is required for closest-to-mean selection."
-                    )
-                print("Computing closest-to-mean trajectory (per-frame selection from subset trajectories)...")
-                if write_closest_to_mean_trajectory_per_frame(xyz_files, mean_out, closest_out):
+                subset_csv_files = [r["csv_file"] for r in records]
+                print(
+                    "Computing closest-to-mean trajectory (per-frame selection from subset trajectories, "
+                    "based on mean geometry across subsets)..."
+                )
+                if write_closest_to_mean_trajectory_by_geometry(
+                    xyz_files=xyz_files,
+                    subset_geometry_csv_files=subset_csv_files,
+                    output_xyz=closest_out,
+                    bond=args.bond,
+                    angle=args.angle,
+                    dihedral=args.dihedral,
+                ):
                     print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
                 else:
                     print("Warning: Failed to write closest-to-mean optimal-path XYZ.")
@@ -1191,6 +1305,7 @@ def main():
 
             triplet_png = os.path.splitext(args.output_plot)[0] + "_path_comparison.png"
             xyz_files = [r["xyz_file"] for r in records]
+            subset_csv_files = [r["csv_file"] for r in records]
 
             # Use persisted outputs if requested; otherwise generate temporary trajectories just for plotting.
             with tempfile.TemporaryDirectory(prefix="path_triplet_", dir=args.output_dir) as tmpdir:
@@ -1211,10 +1326,13 @@ def main():
                     closest_xyz = closest_out
                 else:
                     closest_xyz = os.path.join(tmpdir, "closest_to_mean.xyz")
-                    if not write_closest_to_mean_trajectory_per_frame(
-                        xyz_files,
-                        mean_xyz,
-                        closest_xyz,
+                    if not write_closest_to_mean_trajectory_by_geometry(
+                        xyz_files=xyz_files,
+                        subset_geometry_csv_files=subset_csv_files,
+                        output_xyz=closest_xyz,
+                        bond=args.bond,
+                        angle=args.angle,
+                        dihedral=args.dihedral,
                     ):
                         raise RuntimeError("Failed to create closest-to-mean trajectory for plotting.")
 
