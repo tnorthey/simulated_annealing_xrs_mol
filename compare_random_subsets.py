@@ -1257,12 +1257,13 @@ def main():
             if args.aggregate_plot_medoid:
                 print("Note: --aggregate-plot-medoid is currently ignored (aggregate plot shows mean ± std only).")
             # Overlay closest-to-mean (by geometry) curve (e.g., dihedral) on top of mean ± σ.
-            overlay_csv = None
+            # IMPORTANT: Keep tempdir alive until after plotting, since overlay CSV lives inside it.
             overlay_label = "closest-to-mean"
-            try:
-                xyz_files_for_closest = [r["xyz_file"] for r in records]
-                subset_csv_files_for_closest = [r["csv_file"] for r in records]
-                with tempfile.TemporaryDirectory(prefix="closest_overlay_", dir=args.output_dir) as tmpdir:
+            with tempfile.TemporaryDirectory(prefix="closest_overlay_", dir=args.output_dir) as tmpdir:
+                overlay_csv = None
+                try:
+                    xyz_files_for_closest = [r["xyz_file"] for r in records]
+                    subset_csv_files_for_closest = [r["csv_file"] for r in records]
                     closest_xyz_tmp = os.path.join(tmpdir, "closest_to_mean.xyz")
                     if write_closest_to_mean_trajectory_by_geometry(
                         xyz_files=xyz_files_for_closest,
@@ -1279,28 +1280,28 @@ def main():
                             overlay_csv = None
                     else:
                         overlay_csv = None
-            except Exception as e:
-                print(
-                    f"\nWarning: Failed to generate closest-to-mean overlay for aggregate plot: "
-                    f"{type(e).__name__}: {e}"
-                )
-                overlay_csv = None
+                except Exception as e:
+                    print(
+                        f"\nWarning: Failed to generate closest-to-mean overlay for aggregate plot: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    overlay_csv = None
 
-            plot_aggregate_mean_std(
-                csv_files,
-                args.output_plot,
-                random_sample=args.random_sample,
-                topM=args.topM,
-                bond=args.bond,
-                angle=args.angle,
-                dihedral=args.dihedral,
-                xmin=args.xmin,
-                xmax=args.xmax,
-                ymin=args.ymin,
-                ymax=args.ymax,
-                overlay_csv=overlay_csv,
-                overlay_label=overlay_label,
-            )
+                plot_aggregate_mean_std(
+                    csv_files,
+                    args.output_plot,
+                    random_sample=args.random_sample,
+                    topM=args.topM,
+                    bond=args.bond,
+                    angle=args.angle,
+                    dihedral=args.dihedral,
+                    xmin=args.xmin,
+                    xmax=args.xmax,
+                    ymin=args.ymin,
+                    ymax=args.ymax,
+                    overlay_csv=overlay_csv,
+                    overlay_label=overlay_label,
+                )
             ok = True
         except Exception as e:
             print(f"\nError: Failed to create aggregate plot: {type(e).__name__}: {e}")
