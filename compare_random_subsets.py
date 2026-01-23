@@ -361,6 +361,7 @@ def write_closest_to_mean_trajectory_by_geometry(
     bond=None,
     angle=None,
     dihedral=None,
+    smooth_weight: float = 0.0,
     label_suffix: str = "closest_to_mean_geometry",
 ) -> bool:
     """
@@ -372,6 +373,10 @@ def write_closest_to_mean_trajectory_by_geometry(
     - If a dihedral is requested, closeness is computed using ONLY the dihedral column, with proper
       angle wrapping (i.e., a 179° vs -179° difference is 2°, not 358°).
     - Otherwise, closeness is computed using all requested columns jointly (RMS across columns).
+
+    If smooth_weight > 0, adds a smoothness penalty (like the smoothed-medoid DP):
+      objective = sum(node_cost[frame, chosen_subset]) +
+                  smooth_weight * sum(KabschRMSD(chosen_frame[t-1], chosen_frame[t]))
     """
     if len(xyz_files) < 1:
         raise ValueError("No XYZ files provided for closest-to-mean selection.")
@@ -410,22 +415,49 @@ def write_closest_to_mean_trajectory_by_geometry(
     if len(cols) == 0:
         raise ValueError("No geometry columns selected.")
 
-    chosen_subset_indices: list[int] = []
-    chosen_dist: list[float] = []
+    K = len(trajs)
+    node_cost = np.zeros((min_frames, K), dtype=np.float64)
+    if dcol is not None:
+        # (n_subsets, n_frames) absolute wrapped angular difference in degrees
+        diffs = np.abs(_wrapped_angle_diff_deg(Y[:, :min_frames, dcol], mean[:min_frames, dcol][None, :]))
+        node_cost[:, :] = diffs.T  # (n_frames, n_subsets)
+    else:
+        diffs = Y[:, :min_frames, cols] - mean[:min_frames, cols][None, :]  # (n_subsets, n_frames, n_cols_sel)
+        node_cost[:, :] = np.sqrt(np.mean(diffs * diffs, axis=2)).T  # (n_frames, n_subsets)
 
-    for fi in range(min_frames):
-        if dcol is not None:
-            diffs = np.abs(_wrapped_angle_diff_deg(Y[:, fi, dcol], mean[fi, dcol]))  # (n_subsets,)
-            best_i = int(np.argmin(diffs))
-            best_d = float(diffs[best_i])
-        else:
-            diffs = Y[:, fi, cols] - mean[fi, cols]  # (n_subsets, n_cols_sel)
-            dist = np.sqrt(np.mean(diffs * diffs, axis=1))  # RMS per subset
-            best_i = int(np.argmin(dist))
-            best_d = float(dist[best_i])
+    # Choose subset index per frame; optionally smooth by DP with RMSD transitions
+    if smooth_weight <= 0.0:
+        chosen_subset_indices = [int(np.argmin(node_cost[fi, :])) for fi in range(min_frames)]
+    else:
+        dp = np.full((min_frames, K), np.inf, dtype=np.float64)
+        prev = np.full((min_frames, K), -1, dtype=np.int32)
+        dp[0, :] = node_cost[0, :]
 
-        chosen_subset_indices.append(best_i)
-        chosen_dist.append(best_d)
+        # Cache coords for faster transition RMSD computation
+        coords_by_frame = [[trajs[k][fi]["coords"] for k in range(K)] for fi in range(min_frames)]
+
+        for fi in range(1, min_frames):
+            curr_coords = coords_by_frame[fi]
+            prev_coords = coords_by_frame[fi - 1]
+            for j in range(K):
+                best_val = np.inf
+                best_i = -1
+                Pj = curr_coords[j]
+                for i in range(K):
+                    trans = smooth_weight * _kabsch_rmsd(prev_coords[i], Pj)
+                    val = dp[fi - 1, i] + trans + node_cost[fi, j]
+                    if val < best_val:
+                        best_val = val
+                        best_i = i
+                dp[fi, j] = best_val
+                prev[fi, j] = best_i
+
+        last = int(np.argmin(dp[min_frames - 1, :]))
+        chosen_subset_indices = [last]
+        for fi in range(min_frames - 1, 0, -1):
+            last = int(prev[fi, last])
+            chosen_subset_indices.append(last)
+        chosen_subset_indices.reverse()
 
     with open(output_xyz, "w") as out:
         for fi, best_i in enumerate(chosen_subset_indices):
@@ -435,13 +467,15 @@ def write_closest_to_mean_trajectory_by_geometry(
                 if dcol is not None:
                     comment = (
                         f"{comment} | {label_suffix} | closest_subset={best_i} "
-                        f"| abs_wrapped_diff_deg={chosen_dist[fi]:.6g}"
+                        f"| abs_wrapped_diff_deg={node_cost[fi, best_i]:.6g}"
                     )
                 else:
                     comment = (
                         f"{comment} | {label_suffix} | closest_subset={best_i} "
-                        f"| rms_diff={chosen_dist[fi]:.6g}"
+                        f"| rms_diff={node_cost[fi, best_i]:.6g}"
                     )
+                if smooth_weight > 0.0:
+                    comment = f"{comment} | smooth_weight={smooth_weight:g}"
             out.write(f"{frame['natoms']}\n")
             out.write(f"{comment}\n")
             for line in frame["body_lines"]:
@@ -993,6 +1027,17 @@ def main():
         ),
     )
     parser.add_argument(
+        "--closest-smooth-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "When writing the closest-to-mean trajectory, add a smoothness penalty so the chosen subset "
+            "doesn't flicker frame-to-frame. Objective is: sum(node_cost from mean geometry) + "
+            "weight * sum(RMSD between consecutive chosen frames). "
+            "0.0 means purely per-frame closest-to-mean (no smoothing)."
+        ),
+    )
+    parser.add_argument(
         "--bond",
         type=int,
         nargs=2,
@@ -1272,6 +1317,7 @@ def main():
                     bond=args.bond,
                     angle=args.angle,
                     dihedral=args.dihedral,
+                    smooth_weight=float(args.closest_smooth_weight),
                 ):
                     print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
                 else:
@@ -1333,6 +1379,7 @@ def main():
                         bond=args.bond,
                         angle=args.angle,
                         dihedral=args.dihedral,
+                        smooth_weight=float(args.closest_smooth_weight),
                     ):
                         raise RuntimeError("Failed to create closest-to-mean trajectory for plotting.")
 
