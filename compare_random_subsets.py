@@ -510,6 +510,98 @@ def plot_aggregate_mean_std(
     print(f"\nAggregate plot saved to: {output_png}")
 
 
+def plot_path_triplet_comparison(
+    *,
+    mean_csv: str,
+    medoid_csv: str,
+    closest_csv: str,
+    output_png: str,
+    random_sample: int,
+    topM: int,
+    bond=None,
+    angle=None,
+    dihedral=None,
+    xmin: float | None = None,
+    xmax: float | None = None,
+    ymin: float | None = None,
+    ymax: float | None = None,
+):
+    """
+    Plot a direct comparison between:
+      - smooth-medoid (median-as-medoid, optionally smoothed via DP)
+      - mean (frame-wise average)
+      - closest-to-mean (per-frame actual subset frame closest to mean)
+
+    The three inputs must be analyze_geometry.py outputs with identical requested columns.
+    """
+    a_mean = _read_csv_no_header(mean_csv)
+    a_medoid = _read_csv_no_header(medoid_csv)
+    a_closest = _read_csv_no_header(closest_csv)
+
+    n_cols = a_mean.shape[1]
+    if a_medoid.shape[1] != n_cols or a_closest.shape[1] != n_cols:
+        raise ValueError("Mean/medoid/closest CSV column counts do not match.")
+
+    min_frames = min(a_mean.shape[0], a_medoid.shape[0], a_closest.shape[0])
+    if min_frames < 1:
+        raise ValueError("No frames available for path triplet plot.")
+
+    a_mean = a_mean[:min_frames, :]
+    a_medoid = a_medoid[:min_frames, :]
+    a_closest = a_closest[:min_frames, :]
+
+    # Time axis: first frame at 10 fs, step 20 fs
+    x = np.arange(min_frames, dtype=np.float64) * 20.0 + 10.0
+
+    col_labels = _calc_column_labels(bond=bond, angle=angle, dihedral=dihedral)
+    if len(col_labels) != n_cols:
+        col_labels = [f"Column {i}" for i in range(n_cols)]
+
+    if n_cols == 1:
+        fig, ax = plt.subplots(figsize=(10, 6))
+        axes = [ax]
+    else:
+        fig, axes = plt.subplots(n_cols, 1, figsize=(10, 3.2 * n_cols), sharex=True)
+        if not isinstance(axes, (list, np.ndarray)):
+            axes = [axes]
+
+    for i in range(n_cols):
+        ax = axes[i]
+        ax.plot(x, a_medoid[:, i], linewidth=2.5, label="smooth-medoid")
+        ax.plot(x, a_mean[:, i], linewidth=2.0, label="mean")
+        ax.plot(x, a_closest[:, i], linewidth=2.0, label="closest-to-mean")
+        ax.set_ylabel(col_labels[i])
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.legend()
+
+    title_parts = []
+    if bond is not None:
+        title_parts.append(f"Bond {bond[0]}-{bond[1]}")
+    if angle is not None:
+        title_parts.append(f"Angle {angle[0]}-{angle[1]}-{angle[2]}")
+    if dihedral is not None:
+        title_parts.append(f"Dihedral {dihedral[0]}-{dihedral[1]}-{dihedral[2]}-{dihedral[3]}")
+    title = " / ".join(title_parts) if title_parts else "Geometry"
+    fig.suptitle(
+        f"{title} — smooth-medoid vs mean vs closest-to-mean "
+        f"(random-sample={random_sample}, topM={topM})"
+    )
+
+    axes[-1].set_xlabel("time (fs)")
+    xleft = 0.0 if xmin is None else float(xmin)
+    xright = None if xmax is None else float(xmax)
+    for ax in axes:
+        ax.set_xlim(left=xleft, right=xright)
+        if ymin is not None or ymax is not None:
+            ax.set_ylim(bottom=ymin, top=ymax)
+
+    plt.tight_layout()
+    plt.savefig(output_png, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\nPath triplet plot saved to: {output_png}")
+
+
 def _selected_column_indices(bond=None, angle=None, dihedral=None) -> List[int]:
     """Return column indices in analyze_geometry.py output for requested calculations."""
     idxs: List[int] = []
@@ -1040,6 +1132,7 @@ def main():
             print(f"\nWarning: Failed to select representative subset: {type(e).__name__}: {e}")
 
         # Mean optimal-path trajectory across subsets (frame-by-frame average)
+        mean_out = None
         try:
             mean_out = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
             xyz_files = [r["xyz_file"] for r in records]
@@ -1052,11 +1145,13 @@ def main():
             print(f"\nWarning: Failed to create mean optimal-path trajectory: {type(e).__name__}: {e}")
 
         # Closest-to-mean trajectory across subsets (per-frame, chooses actual subset frame)
+        closest_out = None
         if args.write_closest_to_mean_trajectory:
             try:
                 closest_out = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
                 xyz_files = [r["xyz_file"] for r in records]
-                mean_out = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
+                if mean_out is None:
+                    mean_out = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
                 if not os.path.exists(mean_out):
                     raise FileNotFoundError(
                         f"Mean trajectory not found at {mean_out}. "
@@ -1074,6 +1169,7 @@ def main():
                 )
 
         # Median optimal-path trajectory across subsets (frame-by-frame median)
+        median_out = None
         if args.write_median_trajectory:
             try:
                 median_out = os.path.splitext(args.output_plot)[0] + "_median.xyz"
@@ -1087,6 +1183,70 @@ def main():
                     print("Warning: Failed to write median (medoid) optimal-path XYZ.")
             except Exception as e:
                 print(f"\nWarning: Failed to create median optimal-path trajectory: {type(e).__name__}: {e}")
+
+        # Plot: smooth-medoid vs mean vs closest-to-mean (requires all three)
+        try:
+            if mean_out is None or not os.path.exists(mean_out):
+                raise FileNotFoundError("Mean trajectory is missing; cannot create triplet comparison plot.")
+
+            triplet_png = os.path.splitext(args.output_plot)[0] + "_path_comparison.png"
+            xyz_files = [r["xyz_file"] for r in records]
+
+            # Use persisted outputs if requested; otherwise generate temporary trajectories just for plotting.
+            with tempfile.TemporaryDirectory(prefix="path_triplet_", dir=args.output_dir) as tmpdir:
+                mean_xyz = mean_out
+
+                if median_out is not None and os.path.exists(median_out):
+                    medoid_xyz = median_out
+                else:
+                    medoid_xyz = os.path.join(tmpdir, "smooth_medoid.xyz")
+                    if not write_median_trajectory_as_medoid(
+                        xyz_files,
+                        medoid_xyz,
+                        smooth_weight=float(args.median_smooth_weight),
+                    ):
+                        raise RuntimeError("Failed to create smooth-medoid trajectory for plotting.")
+
+                if closest_out is not None and os.path.exists(closest_out):
+                    closest_xyz = closest_out
+                else:
+                    closest_xyz = os.path.join(tmpdir, "closest_to_mean.xyz")
+                    if not write_closest_to_mean_trajectory_per_frame(
+                        xyz_files,
+                        mean_xyz,
+                        closest_xyz,
+                    ):
+                        raise RuntimeError("Failed to create closest-to-mean trajectory for plotting.")
+
+                mean_csv = os.path.join(tmpdir, "geometry_mean.csv")
+                medoid_csv = os.path.join(tmpdir, "geometry_smooth_medoid.csv")
+                closest_csv = os.path.join(tmpdir, "geometry_closest_to_mean.csv")
+
+                print("Analyzing geometry for mean/medoid/closest paths (for triplet comparison plot)...")
+                if not analyze_geometry(mean_xyz, mean_csv, args.bond, args.angle, args.dihedral):
+                    raise RuntimeError("Failed to analyze geometry for mean path.")
+                if not analyze_geometry(medoid_xyz, medoid_csv, args.bond, args.angle, args.dihedral):
+                    raise RuntimeError("Failed to analyze geometry for smooth-medoid path.")
+                if not analyze_geometry(closest_xyz, closest_csv, args.bond, args.angle, args.dihedral):
+                    raise RuntimeError("Failed to analyze geometry for closest-to-mean path.")
+
+                plot_path_triplet_comparison(
+                    mean_csv=mean_csv,
+                    medoid_csv=medoid_csv,
+                    closest_csv=closest_csv,
+                    output_png=triplet_png,
+                    random_sample=args.random_sample,
+                    topM=args.topM,
+                    bond=args.bond,
+                    angle=args.angle,
+                    dihedral=args.dihedral,
+                    xmin=args.xmin,
+                    xmax=args.xmax,
+                    ymin=args.ymin,
+                    ymax=args.ymax,
+                )
+        except Exception as e:
+            print(f"\nWarning: Failed to create path triplet comparison plot: {type(e).__name__}: {e}")
     else:
         print("\nError: Failed to create comparison plot.")
         sys.exit(1)
