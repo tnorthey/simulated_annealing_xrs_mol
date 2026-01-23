@@ -169,11 +169,23 @@ def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
+def _kabsch_rmsd_selected(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None) -> float:
+    """
+    Kabsch-aligned RMSD between two structures using only selected atom indices.
+    If indices is None, uses all atoms.
+    """
+    if indices is None:
+        return _kabsch_rmsd(P, Q)
+    # advanced indexing creates a copy, but arrays are small (natoms x 3)
+    return _kabsch_rmsd(P[np.array(indices, dtype=np.int64)], Q[np.array(indices, dtype=np.int64)])
+
+
 def write_median_trajectory_as_medoid(
     xyz_files: Sequence[str],
     output_xyz: str,
     *,
     smooth_weight: float = 0.0,
+    rmsd_indices: Sequence[int] | None = None,
     label_suffix: str = "median=medoid",
 ) -> bool:
     """
@@ -205,6 +217,12 @@ def write_median_trajectory_as_medoid(
                 raise ValueError(
                     f"Subset {ti} frame {fi} natoms={tr[fi]['natoms']} differs from first natoms={natoms0}"
                 )
+    if rmsd_indices is not None:
+        if len(rmsd_indices) == 0:
+            raise ValueError("rmsd_indices was provided but empty.")
+        bad = [i for i in rmsd_indices if i < 0 or i >= natoms0]
+        if bad:
+            raise ValueError(f"rmsd_indices contains out-of-range indices for natoms={natoms0}: {bad}")
 
     # Precompute node costs: sum RMSD to all other subsets at the same frame
     K = len(trajs)
@@ -218,7 +236,7 @@ def write_median_trajectory_as_medoid(
             for j in range(K):
                 if i == j:
                     continue
-                si += _kabsch_rmsd(Pi, coords_list[j])
+                si += _kabsch_rmsd_selected(Pi, coords_list[j], rmsd_indices)
             node_cost[fi, i] = si
 
     # If smooth_weight == 0, pick per-frame medoid (historical behavior)
@@ -238,7 +256,7 @@ def write_median_trajectory_as_medoid(
                 best_i = -1
                 Pj = curr_coords[j]
                 for i in range(K):
-                    trans = smooth_weight * _kabsch_rmsd(prev_coords[i], Pj)
+                    trans = smooth_weight * _kabsch_rmsd_selected(prev_coords[i], Pj, rmsd_indices)
                     val = dp[fi - 1, i] + trans + node_cost[fi, j]
                     if val < best_val:
                         best_val = val
@@ -362,6 +380,7 @@ def write_closest_to_mean_trajectory_by_geometry(
     angle=None,
     dihedral=None,
     smooth_weight: float = 0.0,
+    rmsd_indices: Sequence[int] | None = None,
     label_suffix: str = "closest_to_mean_geometry",
 ) -> bool:
     """
@@ -406,6 +425,12 @@ def write_closest_to_mean_trajectory_by_geometry(
                 raise ValueError(
                     f"Subset {ti} frame {fi} natoms={tr[fi]['natoms']} differs from first natoms={natoms0}"
                 )
+    if rmsd_indices is not None:
+        if len(rmsd_indices) == 0:
+            raise ValueError("rmsd_indices was provided but empty.")
+        bad = [i for i in rmsd_indices if i < 0 or i >= natoms0]
+        if bad:
+            raise ValueError(f"rmsd_indices contains out-of-range indices for natoms={natoms0}: {bad}")
 
     Y = np.stack([a[:min_frames, :] for a in arrays], axis=0)  # (n_subsets, n_frames, n_cols)
     mean = np.mean(Y, axis=0)  # (n_frames, n_cols)
@@ -444,7 +469,7 @@ def write_closest_to_mean_trajectory_by_geometry(
                 best_i = -1
                 Pj = curr_coords[j]
                 for i in range(K):
-                    trans = smooth_weight * _kabsch_rmsd(prev_coords[i], Pj)
+                    trans = smooth_weight * _kabsch_rmsd_selected(prev_coords[i], Pj, rmsd_indices)
                     val = dp[fi - 1, i] + trans + node_cost[fi, j]
                     if val < best_val:
                         best_val = val
@@ -1038,6 +1063,16 @@ def main():
         ),
     )
     parser.add_argument(
+        "--smooth-rmsd-indices",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated atom indices to use for Kabsch RMSD computations inside smoothing penalties "
+            "(applies to both --median-smooth-weight and --closest-smooth-weight). "
+            "Example: --smooth-rmsd-indices 0,1,2,3,4,5. Default: all atoms."
+        ),
+    )
+    parser.add_argument(
         "--bond",
         type=int,
         nargs=2,
@@ -1095,6 +1130,19 @@ def main():
     parser.add_argument("--ymax", type=float, default=None, help="Maximum y-axis value. Default: auto")
     
     args = parser.parse_args()
+
+    # Parse --smooth-rmsd-indices
+    smooth_rmsd_indices: list[int] | None = None
+    if args.smooth_rmsd_indices is not None:
+        s = str(args.smooth_rmsd_indices).strip()
+        if s == "":
+            parser.error("--smooth-rmsd-indices was provided but empty")
+        try:
+            smooth_rmsd_indices = [int(x.strip()) for x in s.split(",") if x.strip() != ""]
+        except ValueError:
+            parser.error("--smooth-rmsd-indices must be a comma-separated list of integers")
+        if len(smooth_rmsd_indices) == 0:
+            parser.error("--smooth-rmsd-indices must contain at least one index")
     
     # Validate that at least one calculation type is specified
     if args.bond is None and args.angle is None and args.dihedral is None:
@@ -1221,6 +1269,7 @@ def main():
                     xyz_files_for_medoid,
                     median_out,
                     smooth_weight=float(args.median_smooth_weight),
+                    rmsd_indices=smooth_rmsd_indices,
                 )
                 medoid_csv = os.path.join(args.output_dir, "geometry_smooth_medoid.csv")
                 if not analyze_geometry(median_out, medoid_csv, args.bond, args.angle, args.dihedral):
@@ -1318,6 +1367,7 @@ def main():
                     angle=args.angle,
                     dihedral=args.dihedral,
                     smooth_weight=float(args.closest_smooth_weight),
+                    rmsd_indices=smooth_rmsd_indices,
                 ):
                     print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
                 else:
@@ -1336,7 +1386,10 @@ def main():
                 xyz_files = [r["xyz_file"] for r in records]
                 print("Computing 'median' trajectory as a per-frame medoid (must be an actual subset frame)...")
                 if write_median_trajectory_as_medoid(
-                    xyz_files, median_out, smooth_weight=float(args.median_smooth_weight)
+                    xyz_files,
+                    median_out,
+                    smooth_weight=float(args.median_smooth_weight),
+                    rmsd_indices=smooth_rmsd_indices,
                 ):
                     print(f"Median (medoid) optimal-path XYZ: {median_out}")
                 else:
@@ -1380,6 +1433,7 @@ def main():
                         angle=args.angle,
                         dihedral=args.dihedral,
                         smooth_weight=float(args.closest_smooth_weight),
+                        rmsd_indices=smooth_rmsd_indices,
                     ):
                         raise RuntimeError("Failed to create closest-to-mean trajectory for plotting.")
 
