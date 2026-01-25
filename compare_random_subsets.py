@@ -299,15 +299,22 @@ def write_closest_to_mean_trajectory_per_frame(
     mean_xyz: str,
     output_xyz: str,
     *,
+    smooth_weight: float = 0.0,
+    rmsd_indices: Sequence[int] | None = None,
+    transition_rmsd_indices: Sequence[int] | None = None,
     label_suffix: str = "closest_to_mean",
 ) -> bool:
     """
     Write a "closest-to-mean" trajectory where each frame is an ACTUAL frame chosen from the inputs.
 
     For each frame index, select the subset frame (from xyz_files) that minimizes Kabsch-RMSD
-    to the mean trajectory frame (from mean_xyz).
+    to the mean trajectory frame (from mean_xyz). Atom indices can be restricted via rmsd_indices.
 
     This allows choosing different subsets per frame (unlike the representative-subset method).
+
+    If smooth_weight > 0, adds a smoothness penalty (like the smoothed-medoid DP):
+      objective = sum(node_cost[frame, chosen_subset]) +
+                  smooth_weight * sum(KabschRMSD(chosen_frame[t-1], chosen_frame[t]))
     """
     if len(xyz_files) < 1:
         raise ValueError("No XYZ files provided for closest-to-mean selection.")
@@ -335,21 +342,77 @@ def write_closest_to_mean_trajectory_per_frame(
                 f"Mean trajectory frame {fi} natoms={mean_traj[fi]['natoms']} differs from subsets natoms={natoms0}"
             )
 
+    if rmsd_indices is not None:
+        if len(rmsd_indices) == 0:
+            raise ValueError("rmsd_indices was provided but empty.")
+        bad = [i for i in rmsd_indices if i < 0 or i >= natoms0]
+        if bad:
+            raise ValueError(f"rmsd_indices contains out-of-range indices for natoms={natoms0}: {bad}")
+
+    if transition_rmsd_indices is None:
+        transition_rmsd_indices = rmsd_indices
+    if transition_rmsd_indices is not None:
+        if len(transition_rmsd_indices) == 0:
+            raise ValueError("transition_rmsd_indices was provided but empty.")
+        bad = [i for i in transition_rmsd_indices if i < 0 or i >= natoms0]
+        if bad:
+            raise ValueError(
+                f"transition_rmsd_indices contains out-of-range indices for natoms={natoms0}: {bad}"
+            )
+
+    K = len(trajs)
+    node_cost = np.zeros((min_frames, K), dtype=np.float64)
+    for fi in range(min_frames):
+        target = mean_traj[fi]["coords"]
+        for si, tr in enumerate(trajs):
+            node_cost[fi, si] = _kabsch_rmsd_selected(tr[fi]["coords"], target, rmsd_indices)
+
+    # Choose subset index per frame; optionally smooth by DP with RMSD transitions
+    if smooth_weight <= 0.0:
+        chosen_subset_indices = [int(np.argmin(node_cost[fi, :])) for fi in range(min_frames)]
+    else:
+        dp = np.full((min_frames, K), np.inf, dtype=np.float64)
+        prev = np.full((min_frames, K), -1, dtype=np.int32)
+        dp[0, :] = node_cost[0, :]
+
+        # Cache coords for faster transition RMSD computation
+        coords_by_frame = [[trajs[k][fi]["coords"] for k in range(K)] for fi in range(min_frames)]
+
+        for fi in range(1, min_frames):
+            curr_coords = coords_by_frame[fi]
+            prev_coords = coords_by_frame[fi - 1]
+            for j in range(K):
+                best_val = np.inf
+                best_i = -1
+                Pj = curr_coords[j]
+                for i in range(K):
+                    trans = smooth_weight * _kabsch_rmsd_selected(
+                        prev_coords[i], Pj, transition_rmsd_indices
+                    )
+                    val = dp[fi - 1, i] + trans + node_cost[fi, j]
+                    if val < best_val:
+                        best_val = val
+                        best_i = i
+                dp[fi, j] = best_val
+                prev[fi, j] = best_i
+
+        last = int(np.argmin(dp[min_frames - 1, :]))
+        chosen_subset_indices = [last]
+        for fi in range(min_frames - 1, 0, -1):
+            last = int(prev[fi, last])
+            chosen_subset_indices.append(last)
+        chosen_subset_indices.reverse()
+
     with open(output_xyz, "w") as out:
         for fi in range(min_frames):
-            target = mean_traj[fi]["coords"]
-            best_i = -1
-            best_d = float("inf")
-            for si, tr in enumerate(trajs):
-                d = _kabsch_rmsd(tr[fi]["coords"], target)
-                if d < best_d:
-                    best_d = d
-                    best_i = si
-
+            best_i = chosen_subset_indices[fi]
+            best_d = float(node_cost[fi, best_i])
             frame = trajs[best_i][fi]
             comment = frame["comment"]
             if label_suffix:
                 comment = f"{comment} | {label_suffix} | closest_subset={best_i} | rmsd_to_mean={best_d:.6g}"
+                if smooth_weight > 0.0:
+                    comment = f"{comment} | smooth_weight={smooth_weight:g}"
             out.write(f"{frame['natoms']}\n")
             out.write(f"{comment}\n")
             for line in frame["body_lines"]:
@@ -1058,6 +1121,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--closest-rmsd-indices",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated atom indices to use when computing RMSD-to-mean for the closest-to-mean "
+            "trajectory selection. Example: --closest-rmsd-indices 0,1,2,3,4,5. Default: all atoms."
+        ),
+    )
+    parser.add_argument(
         "--smooth-rmsd-indices",
         type=str,
         default=None,
@@ -1138,6 +1210,19 @@ def main():
             parser.error("--smooth-rmsd-indices must be a comma-separated list of integers")
         if len(smooth_rmsd_indices) == 0:
             parser.error("--smooth-rmsd-indices must contain at least one index")
+
+    # Parse --closest-rmsd-indices
+    closest_rmsd_indices: list[int] | None = None
+    if args.closest_rmsd_indices is not None:
+        s = str(args.closest_rmsd_indices).strip()
+        if s == "":
+            parser.error("--closest-rmsd-indices was provided but empty")
+        try:
+            closest_rmsd_indices = [int(x.strip()) for x in s.split(",") if x.strip() != ""]
+        except ValueError:
+            parser.error("--closest-rmsd-indices must be a comma-separated list of integers")
+        if len(closest_rmsd_indices) == 0:
+            parser.error("--closest-rmsd-indices must contain at least one index")
     
     # Validate that at least one calculation type is specified
     if args.bond is None and args.angle is None and args.dihedral is None:
@@ -1253,6 +1338,7 @@ def main():
     # If we compute closest-to-mean early (e.g., for aggregate overlay), store it here to avoid
     # recomputing later and confusing log order.
     closest_out_precomputed: str | None = None
+    mean_out_precomputed: str | None = None
 
     # Create comparison plot
     print(f"Creating comparison plot...")
@@ -1266,6 +1352,16 @@ def main():
             with tempfile.TemporaryDirectory(prefix="closest_overlay_", dir=args.output_dir) as tmpdir:
                 overlay_csv = None
                 try:
+                    # Ensure mean trajectory exists (RMSD-to-mean selection depends on it).
+                    mean_out_precomputed = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
+                    if not os.path.exists(mean_out_precomputed):
+                        xyz_files_for_mean = [r["xyz_file"] for r in records]
+                        print("Averaging optimal-path trajectories across subsets (needed for closest-to-mean overlay)...")
+                        if not average_optimal_trajectories(
+                            xyz_files_for_mean, mean_out_precomputed, align="kabsch", stat="mean"
+                        ):
+                            mean_out_precomputed = None
+
                     xyz_files_for_closest = [r["xyz_file"] for r in records]
                     subset_csv_files_for_closest = [r["csv_file"] for r in records]
                     # If user asked to write closest-to-mean, compute that file here and reuse it for overlay.
@@ -1276,15 +1372,13 @@ def main():
                     else:
                         closest_xyz_for_overlay = os.path.join(tmpdir, "closest_to_mean.xyz")
 
-                    if write_closest_to_mean_trajectory_by_geometry(
-                        xyz_files=xyz_files_for_closest,
-                        subset_geometry_csv_files=subset_csv_files_for_closest,
-                        output_xyz=closest_xyz_for_overlay,
-                        bond=args.bond,
-                        angle=args.angle,
-                        dihedral=args.dihedral,
+                    if mean_out_precomputed is not None and os.path.exists(mean_out_precomputed) and write_closest_to_mean_trajectory_per_frame(
+                        xyz_files_for_closest,
+                        mean_out_precomputed,
+                        closest_xyz_for_overlay,
                         smooth_weight=float(args.closest_smooth_weight),
-                        rmsd_indices=smooth_rmsd_indices,
+                        rmsd_indices=closest_rmsd_indices,
+                        transition_rmsd_indices=smooth_rmsd_indices,
                     ):
                         overlay_csv = os.path.join(tmpdir, "geometry_closest_to_mean.csv")
                         if not analyze_geometry(
@@ -1363,10 +1457,14 @@ def main():
         # Mean optimal-path trajectory across subsets (frame-by-frame average)
         mean_out = None
         try:
-            mean_out = os.path.splitext(args.output_plot)[0] + "_mean.xyz"
+            mean_out = mean_out_precomputed or (os.path.splitext(args.output_plot)[0] + "_mean.xyz")
             xyz_files = [r["xyz_file"] for r in records]
-            print("Averaging optimal-path trajectories across subsets...")
-            if average_optimal_trajectories(xyz_files, mean_out, align="kabsch", stat="mean"):
+            if not os.path.exists(mean_out):
+                print("Averaging optimal-path trajectories across subsets...")
+                ok_mean = average_optimal_trajectories(xyz_files, mean_out, align="kabsch", stat="mean")
+            else:
+                ok_mean = True
+            if ok_mean:
                 print(f"Mean optimal-path XYZ: {mean_out}")
             else:
                 print("Warning: Failed to write mean optimal-path XYZ.")
@@ -1384,20 +1482,19 @@ def main():
                 else:
                     closest_out = os.path.splitext(args.output_plot)[0] + "_closest_mean.xyz"
                     xyz_files = [r["xyz_file"] for r in records]
-                    subset_csv_files = [r["csv_file"] for r in records]
                     print(
                         "Computing closest-to-mean trajectory (per-frame selection from subset trajectories, "
-                        "based on mean geometry across subsets)..."
+                        "based on lowest RMSD-to-mean)..."
                     )
-                    if write_closest_to_mean_trajectory_by_geometry(
-                        xyz_files=xyz_files,
-                        subset_geometry_csv_files=subset_csv_files,
-                        output_xyz=closest_out,
-                        bond=args.bond,
-                        angle=args.angle,
-                        dihedral=args.dihedral,
+                    if mean_out is None or not os.path.exists(mean_out):
+                        raise FileNotFoundError("Mean trajectory is missing; cannot compute closest-to-mean RMSD path.")
+                    if write_closest_to_mean_trajectory_per_frame(
+                        xyz_files,
+                        mean_out,
+                        closest_out,
                         smooth_weight=float(args.closest_smooth_weight),
-                        rmsd_indices=smooth_rmsd_indices,
+                        rmsd_indices=closest_rmsd_indices,
+                        transition_rmsd_indices=smooth_rmsd_indices,
                     ):
                         print(f"Closest-to-mean optimal-path XYZ: {closest_out}")
                     else:
