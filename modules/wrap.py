@@ -806,7 +806,10 @@ class Wrapper:
                         # Boltzmann sample only in first restart
                         print("Boltzmann distribution sampling...")
                         sampling_displacements = _sample().generate_boltzmann_displacement(
-                            displacements, freqs_cm1, p.boltzmann_temperature
+                            displacements,
+                            freqs_cm1,
+                            p.boltzmann_temperature,
+                            atomic_numbers=atomic_numbers,
                         )
                         # add sampled displacements to xyz
                         xyz_start += sampling_displacements
