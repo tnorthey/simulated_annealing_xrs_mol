@@ -18,6 +18,10 @@ We recommend using **[Miniconda](https://docs.conda.io/en/latest/miniconda.html)
    ```sh
    conda install -c conda-forge pyscf numba rdkit openbabel openmm openff-toolkit openff-forcefields pytest
    ```
+3. Optional (CUDA backend): install CuPy matching your CUDA version, for example:
+   ```sh
+   conda install -c conda-forge cupy
+   ```
 ---
 
 
@@ -66,6 +70,16 @@ python3 run.py --run-pyscf-modes --pyscf-basis 6-31g
 ### Enable Verbose Output
 ```bash
 python3 run.py --verbose
+```
+
+### Enable CUDA Backend (GPU)
+```bash
+python3 run.py --gpu-backend cuda
+```
+
+### Emulate CUDA Backend on CPU (Laptop Testing)
+```bash
+python3 run.py --gpu-backend cuda --gpu-emulation
 ```
 
 ### Configure Scattering Parameters

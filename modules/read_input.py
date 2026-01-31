@@ -102,7 +102,16 @@ class Input_to_params:
         self.verbose_bool = bool(data["options"]["verbose_bool"])
         self.write_dat_file_bool = bool(data["options"]["write_dat_file_bool"])
         # Optional; defaults to "basic" for backwards compatibility with older configs/tests
-        self.mm_param_method = str(data.get("options", {}).get("mm_param_method", "basic")).lower()
+        self.mm_param_method = str(
+            data.get("options", {}).get("mm_param_method", "basic")
+        ).lower()
+        # GPU backend options
+        self.gpu_backend = str(
+            data.get("options", {}).get("gpu_backend", "cpu")
+        ).lower()
+        self.gpu_emulation_bool = bool(
+            data.get("options", {}).get("gpu_emulation_bool", False)
+        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")
@@ -111,6 +120,16 @@ class Input_to_params:
             print(f"  Value: {self.mm_param_method}")
             print(f"  Allowed values: 'sdf' or 'basic'")
             print(f"  Suggestion: Set mm_param_method = 'sdf' or 'basic' in [options] section")
+            print(f"{'='*60}\n")
+            sys.exit(1)
+        # Validate gpu_backend
+        if self.gpu_backend not in ["cpu", "cuda"]:
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid gpu_backend value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.gpu_backend}")
+            print(f"  Allowed values: 'cpu' or 'cuda'")
+            print(f"  Suggestion: Set gpu_backend = 'cpu' or 'cuda' in [options]")
             print(f"{'='*60}\n")
             sys.exit(1)
         # sampling options

@@ -65,6 +65,13 @@ def create_parser():
                               dest='options.verbose_bool', help='Verbose output')
     options_group.add_argument('--write-dat-file', action='store_true',
                               dest='options.write_dat_file_bool', help='Write DAT file')
+    options_group.add_argument('--gpu-backend', type=str,
+                              dest='options.gpu_backend',
+                              choices=['cpu', 'cuda'],
+                              help='Compute backend for simulated annealing')
+    options_group.add_argument('--gpu-emulation', action='store_true',
+                              dest='options.gpu_emulation_bool',
+                              help='Run CUDA backend using CPU emulation')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')

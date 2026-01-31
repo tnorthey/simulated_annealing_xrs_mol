@@ -873,6 +873,8 @@ class Wrapper:
                     predicted_start,
                     p.tuning_ratio_target,
                     p.c_tuning_initial,
+                    backend=getattr(p, "gpu_backend", "cpu"),
+                    gpu_emulation=getattr(p, "gpu_emulation_bool", False),
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")

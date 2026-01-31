@@ -49,6 +49,10 @@ verbose_bool = false
 write_dat_file_bool = true
 # MM parameter retrieval method: "sdf" (try SDF method first, fallback to basic) or "basic" (use basic method directly)
 mm_param_method = "basic"
+# GPU backend for simulated annealing: "cpu" or "cuda"
+gpu_backend = "cpu"
+# Emulate CUDA backend on CPU (useful for laptop testing)
+gpu_emulation_bool = false
 
 # ============================================================================
 # SAMPLING PARAMETERS
