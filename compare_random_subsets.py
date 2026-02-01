@@ -6,7 +6,7 @@ Runs optimal_path.py multiple times with different random subsets,
 analyzes dihedral angles, and creates comparison plots.
 
 Usage:
-    python3 compare_random_subsets.py results/ [--n-subsets N] [--seed-start SEED]
+    python3 compare_random_subsets.py results/ [--n-subsets N] [--seed-start SEED] [--nprocs N]
 """
 
 import argparse
@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import shutil
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -31,10 +32,10 @@ def run_optimal_path(
     *,
     no_autoscale: bool,
     sample_after_prune: bool,
-):
+) -> tuple[str | None, str, str, int]:
     """Run optimal_path.py with specified parameters."""
     output_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_idx}.xyz")
-    
+
     cmd = [
         "python3", "optimal_path.py", directory,
         "--random-sample", str(random_sample),
@@ -52,20 +53,11 @@ def run_optimal_path(
         cmd.append("--sample-after-prune")
     if no_autoscale:
         cmd.append("--no-autoscale")
-    
-    print(f"\n{'='*60}")
-    print(f"Running subset {subset_idx} with seed {seed}...")
-    print(f"{'='*60}")
-    
+
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
     if result.returncode != 0:
-        print(f"Error running optimal_path.py:")
-        print(result.stderr)
-        return None
-    
-    print(result.stdout)
-    return output_xyz
+        return None, result.stdout, result.stderr, result.returncode
+    return output_xyz, result.stdout, result.stderr, result.returncode
 
 
 def average_optimal_trajectories(
@@ -576,7 +568,15 @@ def write_closest_to_mean_trajectory_by_geometry(
     return True
 
 
-def analyze_geometry(xyz_file, output_csv, bond=None, angle=None, dihedral=None):
+def analyze_geometry(
+    xyz_file,
+    output_csv,
+    bond=None,
+    angle=None,
+    dihedral=None,
+    *,
+    verbose: bool = True,
+) -> tuple[bool, str]:
     """Run analyze_geometry.py to extract specified geometric parameters."""
     cmd = ["python3", "analyze_geometry.py", xyz_file]
     
@@ -591,13 +591,102 @@ def analyze_geometry(xyz_file, output_csv, bond=None, angle=None, dihedral=None)
     cmd.extend(["--output", output_csv])
     
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
+
     if result.returncode != 0:
-        print(f"Error running analyze_geometry.py:")
-        print(result.stderr)
-        return False
-    
-    return True
+        if verbose:
+            print("Error running analyze_geometry.py:")
+            print(result.stderr)
+        return False, result.stderr
+
+    return True, result.stderr
+
+
+def _process_subset(
+    subset_index: int,
+    *,
+    directory: str,
+    output_dir: str,
+    seed_start: int,
+    random_sample: int,
+    topM: int,
+    no_autoscale: bool,
+    sample_after_prune: bool,
+    reuse_existing: bool,
+    bond,
+    angle,
+    dihedral,
+) -> tuple[int, dict | None, list[str]]:
+    logs: list[str] = []
+    seed = seed_start + subset_index
+
+    expected_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_index}.xyz")
+    reused = False
+    if reuse_existing and os.path.exists(expected_xyz):
+        xyz_file = expected_xyz
+        reused = True
+        logs.append(f"\nReusing existing trajectory for subset {subset_index}: {xyz_file}")
+    else:
+        logs.append(f"\n{'='*60}")
+        logs.append(f"Running subset {subset_index} with seed {seed}...")
+        logs.append(f"{'='*60}")
+
+        xyz_file, stdout, stderr, rc = run_optimal_path(
+            directory,
+            seed,
+            output_dir,
+            subset_index,
+            random_sample,
+            topM,
+            no_autoscale=bool(no_autoscale),
+            sample_after_prune=bool(sample_after_prune),
+        )
+
+        if stdout.strip():
+            logs.append(stdout.rstrip("\n"))
+        if rc != 0:
+            logs.append("Error running optimal_path.py:")
+            if stderr.strip():
+                logs.append(stderr.rstrip("\n"))
+            return subset_index, None, logs
+
+    if xyz_file is None:
+        logs.append(f"Warning: Failed to generate trajectory for subset {subset_index}, skipping...")
+        return subset_index, None, logs
+
+    if not os.path.exists(xyz_file):
+        logs.append(f"Warning: Output file {xyz_file} not found, skipping...")
+        return subset_index, None, logs
+
+    csv_file = os.path.join(output_dir, f"geometry_subset_{subset_index}.csv")
+    logs.append(f"\nAnalyzing geometry for subset {subset_index}...")
+
+    ok, err = analyze_geometry(
+        xyz_file,
+        csv_file,
+        bond,
+        angle,
+        dihedral,
+        verbose=False,
+    )
+    if not ok:
+        logs.append("Warning: Failed to analyze geometry for subset "
+                    f"{subset_index}, skipping...")
+        if err.strip():
+            logs.append(err.rstrip("\n"))
+        return subset_index, None, logs
+
+    if not os.path.exists(csv_file):
+        logs.append(f"Warning: Analysis output {csv_file} not found, skipping...")
+        return subset_index, None, logs
+
+    record = {
+        "subset_index": subset_index,
+        "seed": None if reused else seed,
+        "reused": reused,
+        "xyz_file": xyz_file,
+        "csv_file": csv_file,
+    }
+    return subset_index, record, logs
 
 
 def _read_csv_no_header(path: str) -> np.ndarray:
@@ -1050,6 +1139,12 @@ def main():
         help="Number of random subsets to compare (default: 5)",
     )
     parser.add_argument(
+        "--nprocs",
+        type=int,
+        default=1,
+        help="Number of processes to use for subset generation (default: 1)",
+    )
+    parser.add_argument(
         "--seed-start",
         type=int,
         default=0,
@@ -1197,6 +1292,8 @@ def main():
     parser.add_argument("--ymax", type=float, default=None, help="Maximum y-axis value. Default: auto")
     
     args = parser.parse_args()
+    if args.nprocs < 1:
+        parser.error("--nprocs must be >= 1")
 
     # Parse --smooth-rmsd-indices
     smooth_rmsd_indices: list[int] | None = None
@@ -1259,68 +1356,53 @@ def main():
     print(f"Directory: {args.directory}")
     print(f"Random sample size: {args.random_sample}")
     print(f"TopM: {args.topM}")
+    print(f"Parallel processes: {args.nprocs}")
     print(f"Calculations: {calc_desc}")
     print(f"Output directory: {args.output_dir}")
     print(f"Aggregate mode: {args.aggregate}")
     print(f"{'='*60}\n")
     
-    # Run optimal_path for each subset
-    for i in range(args.n_subsets):
-        seed = args.seed_start + i
+    # Run optimal_path/analyze geometry for each subset (optionally parallel)
+    subset_kwargs = dict(
+        directory=args.directory,
+        output_dir=args.output_dir,
+        seed_start=args.seed_start,
+        random_sample=args.random_sample,
+        topM=args.topM,
+        no_autoscale=bool(args.no_autoscale),
+        sample_after_prune=bool(args.sample_after_prune),
+        reuse_existing=bool(args.reuse_existing_trajectories),
+        bond=args.bond,
+        angle=args.angle,
+        dihedral=args.dihedral,
+    )
 
-        expected_xyz = os.path.join(args.output_dir, f"optimal_trajectory_subset_{i}.xyz")
-        reused = False
-        if args.reuse_existing_trajectories and os.path.exists(expected_xyz):
-            xyz_file = expected_xyz
-            reused = True
-            print(f"\nReusing existing trajectory for subset {i}: {xyz_file}")
-        else:
-            xyz_file = run_optimal_path(
-                args.directory,
-                seed,
-                args.output_dir,
-                i,
-                args.random_sample,
-                args.topM,
-                no_autoscale=bool(args.no_autoscale),
-                sample_after_prune=bool(args.sample_after_prune),
-            )
-        
-        if xyz_file is None:
-            print(f"Warning: Failed to generate trajectory for subset {i}, skipping...")
-            continue
-        
-        if not os.path.exists(xyz_file):
-            print(f"Warning: Output file {xyz_file} not found, skipping...")
-            continue
-        
-        # Analyze geometry
-        csv_file = os.path.join(args.output_dir, f"geometry_subset_{i}.csv")
-        print(f"\nAnalyzing geometry for subset {i}...")
-        
-        if not analyze_geometry(xyz_file, csv_file, args.bond, args.angle, args.dihedral):
-            print(f"Warning: Failed to analyze geometry for subset {i}, skipping...")
-            continue
-        
-        if not os.path.exists(csv_file):
-            print(f"Warning: Analysis output {csv_file} not found, skipping...")
-            continue
-        
-        records.append(
-            {
-                "subset_index": i,
-                "seed": None if reused else seed,
-                "reused": reused,
-                "xyz_file": xyz_file,
-                "csv_file": csv_file,
-            }
-        )
+    if args.nprocs == 1:
+        for i in range(args.n_subsets):
+            _, record, logs = _process_subset(i, **subset_kwargs)
+            for line in logs:
+                print(line)
+            if record is not None:
+                records.append(record)
+    else:
+        with ProcessPoolExecutor(max_workers=args.nprocs) as pool:
+            futures = [
+                pool.submit(_process_subset, i, **subset_kwargs)
+                for i in range(args.n_subsets)
+            ]
+            for fut in as_completed(futures):
+                subset_index, record, logs = fut.result()
+                for line in logs:
+                    print(line)
+                if record is not None:
+                    records.append(record)
     
     if len(records) == 0:
         print("\nError: No valid subsets were generated. Exiting.")
         sys.exit(1)
 
     # Convenience lists derived from records
+    records.sort(key=lambda r: r["subset_index"])
     csv_files = [r["csv_file"] for r in records]
     labels = []
     for r in records:
@@ -1381,9 +1463,15 @@ def main():
                         transition_rmsd_indices=smooth_rmsd_indices,
                     ):
                         overlay_csv = os.path.join(tmpdir, "geometry_closest_to_mean.csv")
-                        if not analyze_geometry(
-                            closest_xyz_for_overlay, overlay_csv, args.bond, args.angle, args.dihedral
-                        ):
+                        ok_overlay, _err = analyze_geometry(
+                            closest_xyz_for_overlay,
+                            overlay_csv,
+                            args.bond,
+                            args.angle,
+                            args.dihedral,
+                            verbose=False,
+                        )
+                        if not ok_overlay:
                             overlay_csv = None
                     else:
                         overlay_csv = None
