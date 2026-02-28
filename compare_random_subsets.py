@@ -29,10 +29,13 @@ def run_optimal_path(
     subset_idx,
     random_sample,
     topM,
-    energy_weight,
     *,
     no_autoscale: bool,
     sample_after_prune: bool,
+    fit_weight: float = 1.0,
+    signal_weight: float = 1.0,
+    rmsd_weight: float = 1.0,
+    rmsd_indices: str | None = None,
 ) -> tuple[str | None, str, str, int]:
     """Run optimal_path.py with specified parameters."""
     output_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_idx}.xyz")
@@ -41,16 +44,14 @@ def run_optimal_path(
         "python3", "optimal_path.py", directory,
         "--random-sample", str(random_sample),
         "--topM", str(topM),
-        "--fit-weight", "1",
-        "--rmsd-weight", "1",
-        "--rmsd-indices", "0,1,2,3,4,5",
-        "--signal-weight", "1",
-        "--energy-weight", str(energy_weight),
+        "--fit-weight", str(fit_weight),
+        "--signal-weight", str(signal_weight),
+        "--rmsd-weight", str(rmsd_weight),
         "--seed", str(seed),
         "--xyz-out", output_xyz,
     ]
-    # Default behavior (historical): random-sample first, then topM.
-    # Optionally allow the alternative: topM first, then random-sample from that pool.
+    if rmsd_weight != 0.0 and rmsd_indices is not None:
+        cmd.extend(["--rmsd-indices", rmsd_indices])
     if sample_after_prune:
         cmd.append("--sample-after-prune")
     if no_autoscale:
@@ -611,13 +612,16 @@ def _process_subset(
     seed_start: int,
     random_sample: int,
     topM: int,
-    energy_weight: float,
     no_autoscale: bool,
     sample_after_prune: bool,
     reuse_existing: bool,
     bond,
     angle,
     dihedral,
+    fit_weight: float = 1.0,
+    signal_weight: float = 1.0,
+    rmsd_weight: float = 1.0,
+    rmsd_indices: str | None = None,
 ) -> tuple[int, dict | None, list[str]]:
     logs: list[str] = []
     seed = seed_start + subset_index
@@ -640,9 +644,12 @@ def _process_subset(
             subset_index,
             random_sample,
             topM,
-            energy_weight,
             no_autoscale=bool(no_autoscale),
             sample_after_prune=bool(sample_after_prune),
+            fit_weight=fit_weight,
+            signal_weight=signal_weight,
+            rmsd_weight=rmsd_weight,
+            rmsd_indices=rmsd_indices,
         )
 
         if stdout.strip():
@@ -1275,15 +1282,6 @@ def main():
         help="Number of lowest-fit candidates to keep per timestep (default: 50)",
     )
     parser.add_argument(
-        "--energy-weight",
-        type=float,
-        default=0.0,
-        help=(
-            "Pass-through to optimal_path.py --energy-weight. "
-            "0.0 disables energy-delta scoring (default)."
-        ),
-    )
-    parser.add_argument(
         "--sample-after-prune",
         action="store_true",
         help=(
@@ -1296,6 +1294,33 @@ def main():
         "--no-autoscale",
         action="store_true",
         help="Disable optimal_path.py automatic scaling of fit/signal/RMSD cost terms.",
+    )
+    parser.add_argument(
+        "--fit-weight",
+        type=float,
+        default=1.0,
+        help="Weight for fit factor term passed to optimal_path.py (default: 1.0).",
+    )
+    parser.add_argument(
+        "--signal-weight",
+        type=float,
+        default=1.0,
+        help="Weight for signal MSE term passed to optimal_path.py (default: 1.0).",
+    )
+    parser.add_argument(
+        "--rmsd-weight",
+        type=float,
+        default=1.0,
+        help="Weight for RMSD term passed to optimal_path.py. Set to 0 to skip all RMSD computation (default: 1.0).",
+    )
+    parser.add_argument(
+        "--rmsd-indices",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated atom indices (0-based) for RMSD in optimal_path.py. "
+            "Example: '0,1,2,3,4,5'. Ignored when --rmsd-weight is 0. Default: all atoms."
+        ),
     )
 
     # Plot axis limits (applies to both aggregate and non-aggregate plots)
@@ -1369,7 +1394,6 @@ def main():
     print(f"Directory: {args.directory}")
     print(f"Random sample size: {args.random_sample}")
     print(f"TopM: {args.topM}")
-    print(f"Energy weight: {args.energy_weight}")
     print(f"Parallel processes: {args.nprocs}")
     print(f"Calculations: {calc_desc}")
     print(f"Output directory: {args.output_dir}")
@@ -1383,13 +1407,16 @@ def main():
         seed_start=args.seed_start,
         random_sample=args.random_sample,
         topM=args.topM,
-        energy_weight=float(args.energy_weight),
         no_autoscale=bool(args.no_autoscale),
         sample_after_prune=bool(args.sample_after_prune),
         reuse_existing=bool(args.reuse_existing_trajectories),
         bond=args.bond,
         angle=args.angle,
         dihedral=args.dihedral,
+        fit_weight=args.fit_weight,
+        signal_weight=args.signal_weight,
+        rmsd_weight=args.rmsd_weight,
+        rmsd_indices=args.rmsd_indices,
     )
 
     if args.nprocs == 1:
