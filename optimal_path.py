@@ -7,6 +7,7 @@ minimizing a weighted sum of:
   - per-candidate fit factor (parsed from filename)
   - signal delta between consecutive timesteps (MSE on interpolated common q-grid)
   - structure delta between consecutive timesteps (Kabsch-aligned RMSD)
+  - optional energy delta between consecutive timesteps (lightweight bonded model)
 
 Assumes files like:
   01_000.17533577.dat
@@ -89,16 +90,28 @@ def read_xyz_coords(path):
     Minimal XYZ reader for coordinates only: returns coords (N,3) float64.
     Assumes standard XYZ format.
     """
+    _symbols, xyz = read_xyz_symbols_coords(path)
+    return xyz
+
+
+def read_xyz_symbols_coords(path):
+    """
+    Minimal XYZ reader for atom symbols + coordinates.
+    Returns:
+      symbols (list[str]), coords (N,3) float64.
+    """
     with open(path, "r") as f:
         n = int(f.readline().strip())
         _ = f.readline()  # comment
+        symbols = []
         xyz = np.zeros((n, 3), dtype=np.float64)
         for i in range(n):
             parts = f.readline().split()
+            symbols.append(parts[0])
             xyz[i, 0] = float(parts[1])
             xyz[i, 1] = float(parts[2])
             xyz[i, 2] = float(parts[3])
-    return xyz
+    return symbols, xyz
 
 
 # -----------------------------
@@ -144,6 +157,155 @@ def interp_to(q_src, I_src, q_ref):
 def signal_mse(a, b):
     d = b - a
     return float(np.mean(d * d))
+
+
+# -----------------------------
+# Lightweight bonded energy
+# -----------------------------
+_COVALENT_RADII_ANGSTROM = {
+    "H": 0.31,
+    "C": 0.76,
+    "N": 0.71,
+    "O": 0.66,
+    "F": 0.57,
+    "P": 1.07,
+    "S": 1.05,
+    "Cl": 1.02,
+    "Si": 1.11,
+}
+
+
+def _infer_bonds_from_geometry(symbols, xyz, scale=1.25):
+    natoms = xyz.shape[0]
+    bonds = []
+    for i in range(natoms - 1):
+        ri = _COVALENT_RADII_ANGSTROM.get(str(symbols[i]), 0.77)
+        for j in range(i + 1, natoms):
+            rj = _COVALENT_RADII_ANGSTROM.get(str(symbols[j]), 0.77)
+            cutoff = scale * (ri + rj)
+            d = float(np.linalg.norm(xyz[i] - xyz[j]))
+            if d > 0.0 and d <= cutoff:
+                bonds.append((i, j))
+    return bonds
+
+
+def _angle_rad(p0, p1, p2):
+    v1 = p0 - p1
+    v2 = p2 - p1
+    n1 = float(np.linalg.norm(v1))
+    n2 = float(np.linalg.norm(v2))
+    if n1 == 0.0 or n2 == 0.0:
+        return 0.0
+    c = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+    return float(np.arccos(c))
+
+
+def _dihedral_rad(p0, p1, p2, p3):
+    b0 = p1 - p0
+    b1 = p2 - p1
+    b2 = p3 - p2
+    b1n = np.linalg.norm(b1)
+    if b1n == 0.0:
+        return 0.0
+    b1u = b1 / b1n
+    v = b0 - np.dot(b0, b1u) * b1u
+    w = b2 - np.dot(b2, b1u) * b1u
+    nv = np.linalg.norm(v)
+    nw = np.linalg.norm(w)
+    if nv == 0.0 or nw == 0.0:
+        return 0.0
+    x = np.dot(v, w)
+    y = np.dot(np.cross(b1u, v), w)
+    return float(np.arctan2(y, x))
+
+
+def build_lightweight_energy_params(symbols, xyz):
+    """
+    Build simple bonded parameters from a reference structure:
+      bonds (i,j,r0,k),
+      angles (i,j,k,theta0,k_theta),
+      torsions (i,j,k,l,delta0,k_torsion)
+    """
+    bonds = _infer_bonds_from_geometry(symbols, xyz)
+    natoms = xyz.shape[0]
+    neighbors = [[] for _ in range(natoms)]
+    for i, j in bonds:
+        neighbors[i].append(j)
+        neighbors[j].append(i)
+
+    K_BOND = 100.0
+    K_ANGLE = 50.0
+    K_TORSION = 1.0
+
+    bond_params = []
+    for i, j in bonds:
+        r0 = float(np.linalg.norm(xyz[i] - xyz[j]))
+        bond_params.append((i, j, r0, K_BOND))
+    bond_param_array = np.asarray(bond_params, dtype=np.float64).reshape((-1, 4))
+
+    angle_set = set()
+    angle_params = []
+    for j in range(natoms):
+        nbrs = neighbors[j]
+        for a_idx in range(len(nbrs)):
+            for b_idx in range(a_idx + 1, len(nbrs)):
+                i = nbrs[a_idx]
+                k = nbrs[b_idx]
+                key = (min(i, k), j, max(i, k))
+                if key in angle_set:
+                    continue
+                angle_set.add(key)
+                theta0 = _angle_rad(xyz[i], xyz[j], xyz[k])
+                angle_params.append((i, j, k, theta0, K_ANGLE))
+    angle_param_array = np.asarray(angle_params, dtype=np.float64).reshape((-1, 5))
+
+    torsion_set = set()
+    torsion_params = []
+    for j, k in bonds:
+        for i in neighbors[j]:
+            if i == k:
+                continue
+            for l in neighbors[k]:
+                if l == j:
+                    continue
+                key = (i, j, k, l)
+                key_rev = (l, k, j, i)
+                if key in torsion_set or key_rev in torsion_set:
+                    continue
+                torsion_set.add(key)
+                delta0 = _dihedral_rad(xyz[i], xyz[j], xyz[k], xyz[l])
+                torsion_params.append((i, j, k, l, delta0, K_TORSION))
+    torsion_param_array = np.asarray(torsion_params, dtype=np.float64).reshape((-1, 6))
+
+    return bond_param_array, angle_param_array, torsion_param_array
+
+
+def bonded_energy(xyz, energy_params):
+    bond_params, angle_params, torsion_params = energy_params
+    total = 0.0
+
+    for i, j, r0, k in bond_params:
+        ii = int(i)
+        jj = int(j)
+        r = float(np.linalg.norm(xyz[ii] - xyz[jj]))
+        total += 0.5 * float(k) * (r - float(r0)) ** 2
+
+    for i, j, k_idx, theta0, k_theta in angle_params:
+        ii = int(i)
+        jj = int(j)
+        kk = int(k_idx)
+        theta = _angle_rad(xyz[ii], xyz[jj], xyz[kk])
+        total += 0.5 * float(k_theta) * (theta - float(theta0)) ** 2
+
+    for i, j, k_idx, l, delta0, k_torsion in torsion_params:
+        ii = int(i)
+        jj = int(j)
+        kk = int(k_idx)
+        ll = int(l)
+        torsion = _dihedral_rad(xyz[ii], xyz[jj], xyz[kk], xyz[ll])
+        total += float(k_torsion) * (1.0 + np.cos(torsion - float(delta0)))
+
+    return float(total)
 
 
 # -----------------------------
@@ -304,6 +466,7 @@ def solve_optimal_path(
     w_fit=1.0,
     w_sig=1.0,
     w_rmsd=1.0,
+    w_energy=0.0,
     auto_scale=True,
     prune_topM=100,
     prune_delta=None,
@@ -347,7 +510,29 @@ def solve_optimal_path(
     for layer in layers:
         for c in layer:
             c["I"] = interp_to(c["q"], c["I_raw"], q_ref)
-            c["X"] = read_xyz_coords(c["xyz"])
+            c["symbols"], c["X"] = read_xyz_symbols_coords(c["xyz"])
+
+    # Optional energy model setup (reference from best-fit at first timestep)
+    use_energy = (w_energy is not None) and (float(w_energy) != 0.0)
+    if use_energy:
+        ref_c = min(layers[0], key=lambda cand: cand["fit"])
+        ref_symbols = ref_c["symbols"]
+        ref_xyz = ref_c["X"]
+        energy_params = build_lightweight_energy_params(ref_symbols, ref_xyz)
+
+        for t in range(T):
+            for c in layers[t]:
+                if c["X"].shape[0] != ref_xyz.shape[0]:
+                    raise RuntimeError(
+                        "Energy delta requires consistent atom counts across candidates. "
+                        f"Found mismatch at timestep {c['t']}: {c['xyz']}"
+                    )
+                if c["symbols"] != ref_symbols:
+                    raise RuntimeError(
+                        "Energy delta requires consistent atom ordering/symbols across candidates. "
+                        f"Found mismatch at timestep {c['t']}: {c['xyz']}"
+                    )
+                c["E"] = bonded_energy(c["X"], energy_params)
 
     # 2) Auto-scale terms so weights are comparable
     if auto_scale:
@@ -355,6 +540,7 @@ def solve_optimal_path(
 
         sig_samp = []
         rmsd_samp = []
+        energy_samp = []
         rng = np.random.default_rng(seed)
 
         for t in range(T - 1):
@@ -373,17 +559,29 @@ def solve_optimal_path(
             for i, j in pairs:
                 sig_samp.append(signal_mse(A[i]["I"], B[j]["I"]))
                 rmsd_samp.append(kabsch_rmsd(A[i]["X"], B[j]["X"], indices=rmsd_indices))
+                if use_energy:
+                    energy_samp.append(abs(B[j]["E"] - A[i]["E"]))
 
         s_fit = robust_scale(fit_vals)
         s_sig = robust_scale(np.array(sig_samp, dtype=np.float64))
         s_rmsd = robust_scale(np.array(rmsd_samp, dtype=np.float64))
+        if use_energy:
+            s_energy = robust_scale(np.array(energy_samp, dtype=np.float64))
 
         w_fit *= s_fit
         w_sig *= s_sig
         w_rmsd *= s_rmsd
+        if use_energy:
+            w_energy *= s_energy
 
         print("Auto-scale enabled (weights scaled by 1/median term):")
-        print(f"  w_fit={w_fit:.6g}, w_sig={w_sig:.6g}, w_rmsd={w_rmsd:.6g}")
+        if use_energy:
+            print(
+                f"  w_fit={w_fit:.6g}, w_sig={w_sig:.6g}, "
+                f"w_rmsd={w_rmsd:.6g}, w_energy={w_energy:.6g}"
+            )
+        else:
+            print(f"  w_fit={w_fit:.6g}, w_sig={w_sig:.6g}, w_rmsd={w_rmsd:.6g}")
 
     # 3) DP
     dp = []
@@ -417,7 +615,10 @@ def solve_optimal_path(
             for i in range(Ka):
                 c_sig = w_sig * signal_mse(A[i]["I"], BjI)
                 c_rmsd = w_rmsd * kabsch_rmsd(A[i]["X"], BjX, indices=rmsd_indices)
-                cand = dp[t][i] + node_cost + c_sig + c_rmsd
+                c_energy = 0.0
+                if use_energy:
+                    c_energy = w_energy * abs(B[j]["E"] - A[i]["E"])
+                cand = dp[t][i] + node_cost + c_sig + c_rmsd + c_energy
                 if cand < best:
                     best = cand
                     best_i = i
@@ -460,11 +661,14 @@ def solve_optimal_path(
     total_fit = sum(p["fit"] for p in path)
     total_sig = 0.0
     total_rmsd = 0.0
+    total_abs_dE = 0.0
     for t in range(T - 1):
         cA = layers[t][path_indices[t]]
         cB = layers[t + 1][path_indices[t + 1]]
         total_sig += signal_mse(cA["I"], cB["I"])
         total_rmsd += kabsch_rmsd(cA["X"], cB["X"], indices=rmsd_indices)
+        if use_energy:
+            total_abs_dE += abs(cB["E"] - cA["E"])
 
     print("\n=== Optimal Path ===")
     for item in path:
@@ -477,6 +681,8 @@ def solve_optimal_path(
     print(f"sum fit factors = {total_fit:.8g}")
     print(f"sum signal MSE  = {total_sig:.8g}")
     print(f"sum RMSD        = {total_rmsd:.8g}")
+    if use_energy:
+        print(f"sum |delta E|   = {total_abs_dE:.8g}")
 
     print("\n=== Best weighted cost ===")
     print(best_cost)
@@ -486,8 +692,9 @@ def solve_optimal_path(
         "path": path,
         "path_indices": path_indices,
         "best_cost": best_cost,
-        "weights_used": (w_fit, w_sig, w_rmsd),
+        "weights_used": (w_fit, w_sig, w_rmsd, w_energy),
         "q_ref": q_ref,
+        "energy_enabled": bool(use_energy),
     }
 
 
@@ -528,6 +735,16 @@ def main():
         type=float,
         default=1.0,
         help="Weight for RMSD term (auto-scaled unless --no-autoscale).",
+    )
+    parser.add_argument(
+        "--energy-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Optional weight for energy-delta term between consecutive timesteps. "
+            "Uses a lightweight bonded model inferred from the best-fit structure at the first timestep. "
+            "0.0 disables this term."
+        ),
     )
     parser.add_argument(
         "--no-autoscale",
@@ -597,6 +814,7 @@ def main():
         w_fit=args.fit_weight,
         w_sig=args.signal_weight,
         w_rmsd=args.rmsd_weight,
+        w_energy=args.energy_weight,
         auto_scale=not args.no_autoscale,
         prune_topM=args.topM,
         prune_delta=args.delta,

@@ -29,6 +29,7 @@ def run_optimal_path(
     subset_idx,
     random_sample,
     topM,
+    energy_weight,
     *,
     no_autoscale: bool,
     sample_after_prune: bool,
@@ -44,6 +45,7 @@ def run_optimal_path(
         "--rmsd-weight", "1",
         "--rmsd-indices", "0,1,2,3,4,5",
         "--signal-weight", "1",
+        "--energy-weight", str(energy_weight),
         "--seed", str(seed),
         "--xyz-out", output_xyz,
     ]
@@ -609,6 +611,7 @@ def _process_subset(
     seed_start: int,
     random_sample: int,
     topM: int,
+    energy_weight: float,
     no_autoscale: bool,
     sample_after_prune: bool,
     reuse_existing: bool,
@@ -637,6 +640,7 @@ def _process_subset(
             subset_index,
             random_sample,
             topM,
+            energy_weight,
             no_autoscale=bool(no_autoscale),
             sample_after_prune=bool(sample_after_prune),
         )
@@ -1271,6 +1275,15 @@ def main():
         help="Number of lowest-fit candidates to keep per timestep (default: 50)",
     )
     parser.add_argument(
+        "--energy-weight",
+        type=float,
+        default=0.0,
+        help=(
+            "Pass-through to optimal_path.py --energy-weight. "
+            "0.0 disables energy-delta scoring (default)."
+        ),
+    )
+    parser.add_argument(
         "--sample-after-prune",
         action="store_true",
         help=(
@@ -1356,6 +1369,7 @@ def main():
     print(f"Directory: {args.directory}")
     print(f"Random sample size: {args.random_sample}")
     print(f"TopM: {args.topM}")
+    print(f"Energy weight: {args.energy_weight}")
     print(f"Parallel processes: {args.nprocs}")
     print(f"Calculations: {calc_desc}")
     print(f"Output directory: {args.output_dir}")
@@ -1369,6 +1383,7 @@ def main():
         seed_start=args.seed_start,
         random_sample=args.random_sample,
         topM=args.topM,
+        energy_weight=float(args.energy_weight),
         no_autoscale=bool(args.no_autoscale),
         sample_after_prune=bool(args.sample_after_prune),
         reuse_existing=bool(args.reuse_existing_trajectories),

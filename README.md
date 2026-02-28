@@ -338,6 +338,7 @@ The `optimal_path.py` script finds the globally optimal "smoothest" trajectory t
 - **Fit factor**: Per-candidate fit quality (parsed from filename)
 - **Signal delta**: Signal difference between consecutive timesteps (MSE on interpolated common q-grid)
 - **Structure delta**: Structural difference between consecutive timesteps (Kabsch-aligned RMSD)
+- **Optional energy delta**: `|E(t+1) - E(t)|` from a lightweight bonded model (bonds/angles/torsions)
 
 This is useful for:
 - **Selecting optimal trajectories** from multiple candidate structures per timestep
@@ -423,13 +424,14 @@ python3 optimal_path.py results/ --delta 0.1 --topM 50
 
 ### Weight Configuration
 
-Control the relative importance of fit, signal, and RMSD terms:
+Control the relative importance of fit, signal, RMSD, and optional energy-delta terms:
 
 ```bash
 python3 optimal_path.py results/ \
     --fit-weight 1.0 \
     --signal-weight 1.0 \
-    --rmsd-weight 1.0
+    --rmsd-weight 1.0 \
+    --energy-weight 0.0
 ```
 
 **Auto-scaling** (enabled by default) normalizes weights so they're comparable:
@@ -441,6 +443,19 @@ python3 optimal_path.py results/  # Auto-scaling enabled
 ```bash
 python3 optimal_path.py results/ --no-autoscale
 ```
+
+### Energy-Delta Option
+
+Enable energy-based transition smoothing by setting `--energy-weight` > 0:
+
+```bash
+python3 optimal_path.py results/ --energy-weight 1.0
+```
+
+Details:
+- Energy is evaluated using a lightweight bonded potential (bonds/angles/torsions) inferred from the best-fit structure at the first timestep.
+- Transition cost adds `w_energy * |E(t+1) - E(t)|` to the existing signal and RMSD deltas.
+- Default is `--energy-weight 0.0` (disabled), so existing behavior is unchanged unless requested.
 
 ### RMSD Atom Selection
 
@@ -484,6 +499,7 @@ python3 optimal_path.py results/ \
     --fit-weight 1.0 \
     --signal-weight 1.0 \
     --rmsd-weight 1.0 \
+    --energy-weight 0.5 \
     --rmsd-indices "3,5,6,10,12" \
     --xyz-out optimal_trajectory.xyz \
     --edge-sample-cap 5000 \
@@ -497,7 +513,7 @@ The script provides:
    - Auto-scaling information (if enabled)
    - Progress for each timestep transition
    - Optimal path with timestep, fit, and filenames
-   - Unweighted totals (sum of fit factors, signal MSE, RMSD)
+   - Unweighted totals (sum of fit factors, signal MSE, RMSD, and `sum |delta E|` when enabled)
    - Best weighted cost
 
 2. **XYZ trajectory file**: Multi-frame XYZ file containing the selected structures, with comment lines recording timestep and fit values.
@@ -513,6 +529,7 @@ The script provides:
 | `--fit-weight` | float | 1.0 | Weight for fit factor term |
 | `--signal-weight` | float | 1.0 | Weight for signal MSE term |
 | `--rmsd-weight` | float | 1.0 | Weight for RMSD term |
+| `--energy-weight` | float | 0.0 | Optional weight for energy-delta term between timesteps |
 | `--no-autoscale` | flag | False | Disable automatic scaling of cost terms |
 | `--rmsd-indices` | str | None | Comma-separated atom indices (0-based) for RMSD calculation |
 | `--xyz-out` | str | optimal_trajectory.xyz | Output XYZ trajectory filename |
@@ -778,10 +795,11 @@ python3 compare_random_subsets.py results/ \
 1. **Runs optimal_path.py** for each subset with:
    - `--random-sample N` (configurable via `--random-sample`, default: 500)
    - `--topM M` (configurable via `--topM`, default: 50)
-   - `--fit-weight 0`
+   - `--fit-weight 1`
    - `--rmsd-weight 1`
    - `--signal-weight 1`
-   - `--no-autoscale`
+   - `--energy-weight` (configurable, default: `0.0`)
+   - Auto-scale on by default (or disabled with `--no-autoscale`)
    - Different seed for each subset
 
 2. **Analyzes geometry** using `analyze_geometry.py`:
@@ -810,6 +828,7 @@ All files are saved in the output directory (default: `subset_comparison/`).
 | `--n-subsets` | int | 5 | Number of random subsets to compare |
 | `--random-sample` | int | 500 | Number of files to randomly sample for each subset |
 | `--topM` | int | 50 | Number of lowest-fit candidates to keep per timestep |
+| `--energy-weight` | float | 0.0 | Pass-through energy weight for `optimal_path.py` (`--energy-weight`) |
 | `--seed-start` | int | 0 | Starting seed (each subset uses seed_start + index) |
 | `--output-dir` | str | subset_comparison | Output directory for intermediate files |
 | `--output-plot` | str | geometry_comparison.png | Output plot filename |
