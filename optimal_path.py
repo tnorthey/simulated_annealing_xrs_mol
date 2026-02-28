@@ -147,6 +147,72 @@ def signal_mse(a, b):
 
 
 # -----------------------------
+# Classical energy
+# -----------------------------
+def compute_classical_energy(xyz, bond_params, angle_params, torsion_params):
+    """
+    Total classical potential energy of a structure.
+
+    Uses the same functional forms as modules/sa.py:
+      bond:    0.5 * k * (r - r0)^2
+      angle:   0.5 * k * (theta - theta0)^2
+      torsion: k * (1 + cos(phi - delta0))
+
+    Args:
+        xyz: (N, 3) coordinates
+        bond_params:    (n_bonds, 4)   columns: [i, j, r0, k]
+        angle_params:   (n_angles, 5)  columns: [i, j, k, theta0, k_theta]
+        torsion_params: (n_torsions, 6) columns: [i, j, k, l, delta0, k_delta]
+
+    Returns:
+        total energy (float)
+    """
+    energy = 0.0
+
+    if bond_params.size > 0:
+        for b in range(bond_params.shape[0]):
+            i, j = int(bond_params[b, 0]), int(bond_params[b, 1])
+            r0 = bond_params[b, 2]
+            k = bond_params[b, 3]
+            d = xyz[i] - xyz[j]
+            r = float(np.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]))
+            energy += 0.5 * k * (r - r0) ** 2
+
+    if angle_params.size > 0:
+        for a in range(angle_params.shape[0]):
+            i, j, k_idx = int(angle_params[a, 0]), int(angle_params[a, 1]), int(angle_params[a, 2])
+            theta0 = angle_params[a, 3]
+            k = angle_params[a, 4]
+            ba = xyz[i] - xyz[j]
+            bc = xyz[k_idx] - xyz[j]
+            cos_theta = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+            cos_theta = float(np.clip(cos_theta, -1.0, 1.0))
+            theta = float(np.arccos(cos_theta))
+            energy += 0.5 * k * (theta - theta0) ** 2
+
+    if torsion_params.size > 0:
+        for t in range(torsion_params.shape[0]):
+            i = int(torsion_params[t, 0])
+            j = int(torsion_params[t, 1])
+            k = int(torsion_params[t, 2])
+            l = int(torsion_params[t, 3])
+            delta0 = torsion_params[t, 4]
+            k_delta = torsion_params[t, 5]
+            b0 = -(xyz[j] - xyz[i])
+            b1 = xyz[k] - xyz[j]
+            b2 = xyz[l] - xyz[k]
+            b1n = b1 / np.linalg.norm(b1)
+            v = b0 - np.dot(b0, b1n) * b1n
+            w = b2 - np.dot(b2, b1n) * b1n
+            x = np.dot(v, w)
+            y = np.dot(np.cross(b1n, v), w)
+            phi = np.arctan2(y, x)
+            energy += k_delta * (1.0 + np.cos(phi - delta0))
+
+    return float(energy)
+
+
+# -----------------------------
 # Pruned candidate loader
 # -----------------------------
 def load_candidates(
@@ -304,6 +370,8 @@ def solve_optimal_path(
     w_fit=1.0,
     w_sig=1.0,
     w_rmsd=1.0,
+    w_energy=0.0,
+    reference_xyz=None,
     auto_scale=True,
     prune_topM=100,
     prune_delta=None,
@@ -327,6 +395,20 @@ def solve_optimal_path(
         raise RuntimeError("Need at least 2 timesteps.")
 
     use_rmsd = (w_rmsd != 0.0)
+    use_energy = (w_energy != 0.0)
+    need_coords = use_rmsd or use_energy
+
+    # Extract force field parameters from reference geometry if energy is enabled
+    bond_params = angle_params = torsion_params = None
+    if use_energy:
+        if reference_xyz is None:
+            raise ValueError("--reference-xyz is required when energy-weight != 0")
+        from modules.openff_retreive_mm_params import Openff_retreive_mm_params
+        mm = Openff_retreive_mm_params()
+        bond_params, angle_params, torsion_params = mm.extract_params_from_geometry(reference_xyz)
+        print(f"Classical energy enabled: {bond_params.shape[0]} bonds, "
+              f"{angle_params.shape[0]} angles, {torsion_params.shape[0]} torsions "
+              f"(from {reference_xyz})")
 
     # 1) Load all signals and compute a common q grid (intersection range, min length)
     all_q = []
@@ -348,8 +430,12 @@ def solve_optimal_path(
     for layer in layers:
         for c in layer:
             c["I"] = interp_to(c["q"], c["I_raw"], q_ref)
-            if use_rmsd:
+            if need_coords:
                 c["X"] = read_xyz_coords(c["xyz"])
+            if use_energy:
+                c["energy"] = compute_classical_energy(
+                    c["X"], bond_params, angle_params, torsion_params
+                )
 
     # 2) Auto-scale terms so weights are comparable
     if auto_scale:
@@ -357,6 +443,7 @@ def solve_optimal_path(
 
         sig_samp = []
         rmsd_samp = [] if use_rmsd else None
+        energy_samp = [] if use_energy else None
         rng = np.random.default_rng(seed)
 
         for t in range(T - 1):
@@ -376,6 +463,8 @@ def solve_optimal_path(
                 sig_samp.append(signal_mse(A[i]["I"], B[j]["I"]))
                 if use_rmsd:
                     rmsd_samp.append(kabsch_rmsd(A[i]["X"], B[j]["X"], indices=rmsd_indices))
+                if use_energy:
+                    energy_samp.append(abs(A[i]["energy"] - B[j]["energy"]))
 
         s_fit = robust_scale(fit_vals)
         s_sig = robust_scale(np.array(sig_samp, dtype=np.float64))
@@ -386,11 +475,21 @@ def solve_optimal_path(
             s_rmsd = robust_scale(np.array(rmsd_samp, dtype=np.float64))
             w_rmsd *= s_rmsd
 
-        print("Auto-scale enabled (weights scaled by 1/median term):")
+        if use_energy:
+            s_energy = robust_scale(np.array(energy_samp, dtype=np.float64))
+            w_energy *= s_energy
+
+        parts = [f"w_fit={w_fit:.6g}", f"w_sig={w_sig:.6g}"]
         if use_rmsd:
-            print(f"  w_fit={w_fit:.6g}, w_sig={w_sig:.6g}, w_rmsd={w_rmsd:.6g}")
+            parts.append(f"w_rmsd={w_rmsd:.6g}")
         else:
-            print(f"  w_fit={w_fit:.6g}, w_sig={w_sig:.6g} (RMSD disabled)")
+            parts.append("RMSD disabled")
+        if use_energy:
+            parts.append(f"w_energy={w_energy:.6g}")
+        else:
+            parts.append("energy disabled")
+        print("Auto-scale enabled (weights scaled by 1/median term):")
+        print(f"  {', '.join(parts)}")
 
     # 3) DP
     dp = []
@@ -416,6 +515,7 @@ def solve_optimal_path(
             node_cost = w_fit * B[j]["fit"]
             BjI = B[j]["I"]
             BjX = B[j]["X"] if use_rmsd else None
+            BjE = B[j]["energy"] if use_energy else 0.0
 
             best = np.inf
             best_i = -1
@@ -423,7 +523,8 @@ def solve_optimal_path(
             for i in range(Ka):
                 c_sig = w_sig * signal_mse(A[i]["I"], BjI)
                 c_rmsd = w_rmsd * kabsch_rmsd(A[i]["X"], BjX, indices=rmsd_indices) if use_rmsd else 0.0
-                cand = dp[t][i] + node_cost + c_sig + c_rmsd
+                c_energy = w_energy * abs(A[i]["energy"] - BjE) if use_energy else 0.0
+                cand = dp[t][i] + node_cost + c_sig + c_rmsd + c_energy
                 if cand < best:
                     best = cand
                     best_i = i
@@ -466,12 +567,15 @@ def solve_optimal_path(
     total_fit = sum(p["fit"] for p in path)
     total_sig = 0.0
     total_rmsd = 0.0
+    total_energy_delta = 0.0
     for t in range(T - 1):
         cA = layers[t][path_indices[t]]
         cB = layers[t + 1][path_indices[t + 1]]
         total_sig += signal_mse(cA["I"], cB["I"])
         if use_rmsd:
             total_rmsd += kabsch_rmsd(cA["X"], cB["X"], indices=rmsd_indices)
+        if use_energy:
+            total_energy_delta += abs(cA["energy"] - cB["energy"])
 
     print("\n=== Optimal Path ===")
     for item in path:
@@ -481,12 +585,16 @@ def solve_optimal_path(
         )
 
     print("\n=== Unweighted totals along chosen path ===")
-    print(f"sum fit factors = {total_fit:.8g}")
-    print(f"sum signal MSE  = {total_sig:.8g}")
+    print(f"sum fit factors   = {total_fit:.8g}")
+    print(f"sum signal MSE    = {total_sig:.8g}")
     if use_rmsd:
-        print(f"sum RMSD        = {total_rmsd:.8g}")
+        print(f"sum RMSD          = {total_rmsd:.8g}")
     else:
-        print(f"sum RMSD        = (disabled)")
+        print(f"sum RMSD          = (disabled)")
+    if use_energy:
+        print(f"sum delta energy  = {total_energy_delta:.8g}")
+    else:
+        print(f"sum delta energy  = (disabled)")
 
     print("\n=== Best weighted cost ===")
     print(best_cost)
@@ -496,7 +604,7 @@ def solve_optimal_path(
         "path": path,
         "path_indices": path_indices,
         "best_cost": best_cost,
-        "weights_used": (w_fit, w_sig, w_rmsd),
+        "weights_used": (w_fit, w_sig, w_rmsd, w_energy),
         "q_ref": q_ref,
     }
 
@@ -538,6 +646,19 @@ def main():
         type=float,
         default=1.0,
         help="Weight for RMSD term (auto-scaled unless --no-autoscale).",
+    )
+    parser.add_argument(
+        "--energy-weight",
+        type=float,
+        default=0.0,
+        help="Weight for classical delta-energy edge cost. 0 disables it (default: 0).",
+    )
+    parser.add_argument(
+        "--reference-xyz",
+        type=str,
+        default=None,
+        help="Reference XYZ file for deriving force field parameters (connectivity, equilibrium "
+             "values, generic force constants). Required when --energy-weight != 0.",
     )
     parser.add_argument(
         "--no-autoscale",
@@ -588,6 +709,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.energy_weight != 0.0 and args.reference_xyz is None:
+        parser.error("--reference-xyz is required when --energy-weight != 0")
     
     # Parse RMSD indices if provided
     rmsd_indices = None
@@ -607,6 +731,8 @@ def main():
         w_fit=args.fit_weight,
         w_sig=args.signal_weight,
         w_rmsd=args.rmsd_weight,
+        w_energy=args.energy_weight,
+        reference_xyz=args.reference_xyz,
         auto_scale=not args.no_autoscale,
         prune_topM=args.topM,
         prune_delta=args.delta,

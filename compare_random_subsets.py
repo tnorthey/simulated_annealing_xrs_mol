@@ -36,6 +36,8 @@ def run_optimal_path(
     signal_weight: float = 1.0,
     rmsd_weight: float = 1.0,
     rmsd_indices: str | None = None,
+    energy_weight: float = 0.0,
+    reference_xyz: str | None = None,
 ) -> tuple[str | None, str, str, int]:
     """Run optimal_path.py with specified parameters."""
     output_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_idx}.xyz")
@@ -47,11 +49,14 @@ def run_optimal_path(
         "--fit-weight", str(fit_weight),
         "--signal-weight", str(signal_weight),
         "--rmsd-weight", str(rmsd_weight),
+        "--energy-weight", str(energy_weight),
         "--seed", str(seed),
         "--xyz-out", output_xyz,
     ]
     if rmsd_weight != 0.0 and rmsd_indices is not None:
         cmd.extend(["--rmsd-indices", rmsd_indices])
+    if energy_weight != 0.0 and reference_xyz is not None:
+        cmd.extend(["--reference-xyz", reference_xyz])
     if sample_after_prune:
         cmd.append("--sample-after-prune")
     if no_autoscale:
@@ -622,6 +627,8 @@ def _process_subset(
     signal_weight: float = 1.0,
     rmsd_weight: float = 1.0,
     rmsd_indices: str | None = None,
+    energy_weight: float = 0.0,
+    reference_xyz: str | None = None,
 ) -> tuple[int, dict | None, list[str]]:
     logs: list[str] = []
     seed = seed_start + subset_index
@@ -650,6 +657,8 @@ def _process_subset(
             signal_weight=signal_weight,
             rmsd_weight=rmsd_weight,
             rmsd_indices=rmsd_indices,
+            energy_weight=energy_weight,
+            reference_xyz=reference_xyz,
         )
 
         if stdout.strip():
@@ -1322,6 +1331,20 @@ def main():
             "Example: '0,1,2,3,4,5'. Ignored when --rmsd-weight is 0. Default: all atoms."
         ),
     )
+    parser.add_argument(
+        "--energy-weight",
+        type=float,
+        default=0.0,
+        help="Weight for classical delta-energy edge cost passed to optimal_path.py. "
+             "0 disables it (default: 0).",
+    )
+    parser.add_argument(
+        "--reference-xyz",
+        type=str,
+        default=None,
+        help="Reference XYZ file for deriving force field parameters. "
+             "Required when --energy-weight != 0.",
+    )
 
     # Plot axis limits (applies to both aggregate and non-aggregate plots)
     parser.add_argument("--xmin", type=float, default=None, help="Minimum x-axis value (time in fs). Default: 0")
@@ -1359,6 +1382,10 @@ def main():
         if len(closest_rmsd_indices) == 0:
             parser.error("--closest-rmsd-indices must contain at least one index")
     
+    # Validate energy args
+    if args.energy_weight != 0.0 and args.reference_xyz is None:
+        parser.error("--reference-xyz is required when --energy-weight != 0")
+
     # Validate that at least one calculation type is specified
     if args.bond is None and args.angle is None and args.dihedral is None:
         parser.error("At least one of --bond, --angle, or --dihedral must be specified")
@@ -1417,6 +1444,8 @@ def main():
         signal_weight=args.signal_weight,
         rmsd_weight=args.rmsd_weight,
         rmsd_indices=args.rmsd_indices,
+        energy_weight=args.energy_weight,
+        reference_xyz=args.reference_xyz,
     )
 
     if args.nprocs == 1:
