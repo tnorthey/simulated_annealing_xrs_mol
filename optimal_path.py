@@ -219,7 +219,7 @@ def load_candidates(
     directory=".",
     dat_ext=".dat",
     xyz_ext=".xyz",
-    prune_topM=100,
+    prune_topM=None,
     prune_delta=None,
     random_sample=None,
     seed=0,
@@ -373,7 +373,7 @@ def solve_optimal_path(
     w_energy=0.0,
     reference_xyz=None,
     auto_scale=True,
-    prune_topM=100,
+    prune_topM=None,
     prune_delta=None,
     edge_sample_cap=3000,
     seed=0,
@@ -620,8 +620,8 @@ def main():
     parser.add_argument(
         "--topM",
         type=int,
-        default=100,
-        help="Number of lowest-fit candidates to keep per timestep (fit-only pruning).",
+        default=None,
+        help="Keep only the M lowest-fit candidates per timestep (pre-filter). Default: no limit.",
     )
     parser.add_argument(
         "--delta",

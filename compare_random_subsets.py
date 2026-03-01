@@ -45,7 +45,6 @@ def run_optimal_path(
     cmd = [
         "python3", "optimal_path.py", directory,
         "--random-sample", str(random_sample),
-        "--topM", str(topM),
         "--fit-weight", str(fit_weight),
         "--signal-weight", str(signal_weight),
         "--rmsd-weight", str(rmsd_weight),
@@ -53,6 +52,8 @@ def run_optimal_path(
         "--seed", str(seed),
         "--xyz-out", output_xyz,
     ]
+    if topM is not None:
+        cmd.extend(["--topM", str(topM)])
     if rmsd_weight != 0.0 and rmsd_indices is not None:
         cmd.extend(["--rmsd-indices", rmsd_indices])
     if energy_weight != 0.0 and reference_xyz is not None:
@@ -824,9 +825,9 @@ def plot_aggregate_mean_std(
     title = " / ".join(title_parts) if title_parts else "Geometry"
     fig.suptitle(
         (
-            f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}, topM={topM})"
+            f"{title} — mean ± std across {len(csv_files)} subsets (random-sample={random_sample}{f', topM={topM}' if topM is not None else ''})"
             if overlay_arr is None
-            else f"{title} — mean ± std + {overlay_label} (random-sample={random_sample}, topM={topM})"
+            else f"{title} — mean ± std + {overlay_label} (random-sample={random_sample}{f', topM={topM}' if topM is not None else ''})"
         )
     )
 
@@ -921,7 +922,7 @@ def plot_path_triplet_comparison(
     title = " / ".join(title_parts) if title_parts else "Geometry"
     fig.suptitle(
         f"{title} — smooth-medoid vs mean vs closest-to-mean "
-        f"(random-sample={random_sample}, topM={topM})"
+        f"(random-sample={random_sample}{f', topM={topM}' if topM is not None else ''})"
     )
 
     axes[-1].set_xlabel("time (fs)")
@@ -1133,7 +1134,8 @@ def _auto_output_plot_name(args: argparse.Namespace) -> str:
     # run parameters
     parts.append(f"nsub-{args.n_subsets}")
     parts.append(f"rs-{args.random_sample}")
-    parts.append(f"topM-{args.topM}")
+    if args.topM is not None:
+        parts.append(f"topM-{args.topM}")
     parts.append(f"seed-{args.seed_start}")
     parts.append("agg" if args.aggregate else "all")
 
@@ -1287,16 +1289,16 @@ def main():
     parser.add_argument(
         "--topM",
         type=int,
-        default=50,
-        help="Number of lowest-fit candidates to keep per timestep (default: 50)",
+        default=None,
+        help="Keep only the M lowest-fit candidates per timestep as a pre-filter "
+             "(applied before random sampling). Default: no limit (use all candidates).",
     )
     parser.add_argument(
         "--sample-after-prune",
         action="store_true",
         help=(
             "Change candidate selection order for optimal_path: apply topM/delta pruning first, "
-            "then randomly sample from that pool. Default is the historical behavior "
-            "(random subset first, then topM)."
+            "then randomly sample from that pool. Automatically enabled when --topM is specified."
         ),
     )
     parser.add_argument(
@@ -1382,6 +1384,10 @@ def main():
         if len(closest_rmsd_indices) == 0:
             parser.error("--closest-rmsd-indices must contain at least one index")
     
+    # When topM is specified, force it to act as a pre-filter (before random sampling)
+    if args.topM is not None:
+        args.sample_after_prune = True
+
     # Validate energy args
     if args.energy_weight != 0.0 and args.reference_xyz is None:
         parser.error("--reference-xyz is required when --energy-weight != 0")
@@ -1420,7 +1426,7 @@ def main():
     print(f"Comparing {args.n_subsets} random subsets")
     print(f"Directory: {args.directory}")
     print(f"Random sample size: {args.random_sample}")
-    print(f"TopM: {args.topM}")
+    print(f"TopM: {args.topM if args.topM is not None else 'all (no limit)'}")
     print(f"Parallel processes: {args.nprocs}")
     print(f"Calculations: {calc_desc}")
     print(f"Output directory: {args.output_dir}")
