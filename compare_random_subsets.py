@@ -696,6 +696,8 @@ def _process_subset(
             logs.append(err.rstrip("\n"))
         return subset_index, None, logs
 
+    _wrap_negative_dihedrals_in_csv(csv_file, bond=bond, angle=angle, dihedral=dihedral)
+
     if not os.path.exists(csv_file):
         logs.append(f"Warning: Analysis output {csv_file} not found, skipping...")
         return subset_index, None, logs
@@ -716,6 +718,25 @@ def _read_csv_no_header(path: str) -> np.ndarray:
     if data.ndim == 1:
         data = data.reshape(-1, 1)
     return data.astype(np.float64)
+
+
+def _wrap_negative_dihedrals_in_csv(csv_path: str, *, bond=None, angle=None, dihedral=None):
+    """Shift negative dihedral values by +360 so they lie in [0, 360)."""
+    if dihedral is None:
+        return
+    dcol = _dihedral_column_index(bond=bond, angle=angle, dihedral=dihedral)
+    if dcol is None:
+        return
+    data = np.loadtxt(csv_path, delimiter=",")
+    if data.ndim == 1:
+        data = data.reshape(-1, 1)
+    if dcol >= data.shape[1]:
+        return
+    mask = data[:, dcol] < 0
+    if not np.any(mask):
+        return
+    data[:, dcol] = np.where(mask, data[:, dcol] + 360.0, data[:, dcol])
+    np.savetxt(csv_path, data, delimiter=",", fmt="%.10g")
 
 
 def _calc_column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
@@ -1550,6 +1571,10 @@ def main():
                         )
                         if not ok_overlay:
                             overlay_csv = None
+                        else:
+                            _wrap_negative_dihedrals_in_csv(
+                                overlay_csv, bond=args.bond, angle=args.angle, dihedral=args.dihedral
+                            )
                     else:
                         overlay_csv = None
                 except Exception as e:
