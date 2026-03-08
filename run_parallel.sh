@@ -50,13 +50,13 @@ if [[ ${#candidates[@]} -eq 0 ]]; then
     exit 1
 fi
 
-idx=$(( RANDOM % ${#candidates[@]} ))
-starting_xyz="${candidates[$idx]}"
-
-echo "  xyz=$starting_xyz (from step $ts_padded, pool=${#candidates[@]}/${TOP_N})"
+echo "  pool=${#candidates[@]}/${TOP_N} (from step $ts_padded)"
 echo "  workers=$N_WORKERS | excitation=$excitation_factor | tuning=$tuning_ratio_target"
 
 for (( worker=0; worker<N_WORKERS; worker++ )); do
+    idx=$(( RANDOM % ${#candidates[@]} ))
+    starting_xyz="${candidates[$idx]}"
+    echo "  worker $worker: xyz=$starting_xyz"
     python run.py \
         --run-id "$time_step" \
         --start-xyz-file "$starting_xyz" \
