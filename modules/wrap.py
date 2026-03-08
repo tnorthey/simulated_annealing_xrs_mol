@@ -227,17 +227,25 @@ class Wrapper:
             This is shared by the "basic" geometry method and the SDF->geometry fallback.
             """
             # Bonds
-            mask = np.ones(len(bond_param_array), dtype=bool)
+            n_before = len(bond_param_array)
+            mask = np.ones(n_before, dtype=bool)
             for i, j in p.bond_ignore_array:
                 remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
                     (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
                 )
+                n_hit = int(np.sum(remove))
+                if n_hit == 0:
+                    print(f"  WARNING: bond_ignore [{int(i)}, {int(j)}] matched 0 rows in param array")
                 mask &= ~remove
             bond_param_array = bond_param_array[mask]
+            n_removed = n_before - len(bond_param_array)
+            if len(p.bond_ignore_array) > 0:
+                print(f"  Bonds: {n_before} -> {len(bond_param_array)} ({n_removed} removed by ignore list)")
 
             # Angles
             if len(angle_param_array) > 0:
-                mask = np.ones(len(angle_param_array), dtype=bool)
+                n_before = len(angle_param_array)
+                mask = np.ones(n_before, dtype=bool)
                 for i, j, k in p.angle_ignore_array:
                     remove = (
                         (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
@@ -246,19 +254,23 @@ class Wrapper:
                     ) & (
                         angle_param_array[:, 2] == i
                     )
+                    n_hit = int(np.sum(remove))
+                    if n_hit == 0:
+                        print(f"  WARNING: angle_ignore [{int(i)}, {int(j)}, {int(k)}] matched 0 rows in param array")
                     mask &= ~remove
                 angle_param_array = angle_param_array[mask]
+                n_removed = n_before - len(angle_param_array)
+                if len(p.angle_ignore_array) > 0:
+                    print(f"  Angles: {n_before} -> {len(angle_param_array)} ({n_removed} removed by ignore list)")
 
             # Torsions
             if len(torsion_param_array) > 0:
-                # If OpenFF is available, keep the previous behavior of updating torsion
-                # equilibrium deltas based on the starting geometry. Otherwise, the
-                # lightweight extraction already uses the starting geometry.
                 if HAVE_OPENFF:
                     torsion_param_array = _mm_params().update_torsion_deltas(
                         torsion_param_array, xyz_start
                     )
-                mask = np.ones(len(torsion_param_array), dtype=bool)
+                n_before = len(torsion_param_array)
+                mask = np.ones(n_before, dtype=bool)
                 for i, j, k, l in p.torsion_ignore_array:
                     remove = (
                         ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
@@ -269,8 +281,14 @@ class Wrapper:
                     ) & (
                         torsion_param_array[:, 3] == i
                     )
+                    n_hit = int(np.sum(remove))
+                    if n_hit == 0:
+                        print(f"  WARNING: torsion_ignore [{int(i)}, {int(j)}, {int(k)}, {int(l)}] matched 0 rows in param array")
                     mask &= ~remove
                 torsion_param_array = torsion_param_array[mask]
+                n_removed = n_before - len(torsion_param_array)
+                if len(p.torsion_ignore_array) > 0:
+                    print(f"  Torsions: {n_before} -> {len(torsion_param_array)} ({n_removed} removed by ignore list)")
 
             return bond_param_array, angle_param_array, torsion_param_array
         
@@ -416,15 +434,20 @@ class Wrapper:
             )
         )
         # mask out chosen ignored bonds
-        mask = np.ones(len(bond_param_array), dtype=bool)
+        n_before = len(bond_param_array)
+        mask = np.ones(n_before, dtype=bool)
         for i, j in p.bond_ignore_array:
-            # order ij or ji is equivalent
-            # this works because python has the Truthy equality, i.e. float(1.0) == int(1) is True
             remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
                 (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
             )
+            n_hit = int(np.sum(remove))
+            if n_hit == 0:
+                print(f"  WARNING: bond_ignore [{int(i)}, {int(j)}] matched 0 rows in param array")
             mask &= ~remove
         bond_param_array = bond_param_array[mask]
+        n_removed = n_before - len(bond_param_array)
+        if len(p.bond_ignore_array) > 0:
+            print(f"  Bonds: {n_before} -> {len(bond_param_array)} ({n_removed} removed by ignore list)")
 
         # Get the angles and params
         (
@@ -444,9 +467,9 @@ class Wrapper:
             )
         )
         # mask out chosen ignored angles
-        mask = np.ones(len(angle_param_array), dtype=bool)
+        n_before = len(angle_param_array)
+        mask = np.ones(n_before, dtype=bool)
         for i, j, k in p.angle_ignore_array:
-            # order ijk or kji is equivalent
             remove = (
                 (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
             ) & (angle_param_array[:, 2] == k) | (
@@ -454,8 +477,14 @@ class Wrapper:
             ) & (
                 angle_param_array[:, 2] == i
             )
+            n_hit = int(np.sum(remove))
+            if n_hit == 0:
+                print(f"  WARNING: angle_ignore [{int(i)}, {int(j)}, {int(k)}] matched 0 rows in param array")
             mask &= ~remove
         angle_param_array = angle_param_array[mask]
+        n_removed = n_before - len(angle_param_array)
+        if len(p.angle_ignore_array) > 0:
+            print(f"  Angles: {n_before} -> {len(angle_param_array)} ({n_removed} removed by ignore list)")
 
         # Get the torsions and params
         (
@@ -484,9 +513,9 @@ class Wrapper:
         torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
 
         # mask out chosen ignored torsions
-        mask = np.ones(len(torsion_param_array), dtype=bool)
+        n_before = len(torsion_param_array)
+        mask = np.ones(n_before, dtype=bool)
         for i, j, k, l in p.torsion_ignore_array:
-            # order ijkl or lkji is equivalent
             remove = (
                 ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
                 & (torsion_param_array[:, 2] == k)
@@ -496,8 +525,14 @@ class Wrapper:
             ) & (
                 torsion_param_array[:, 3] == i
             )
+            n_hit = int(np.sum(remove))
+            if n_hit == 0:
+                print(f"  WARNING: torsion_ignore [{int(i)}, {int(j)}, {int(k)}, {int(l)}] matched 0 rows in param array")
             mask &= ~remove
         torsion_param_array = torsion_param_array[mask]
+        n_removed = n_before - len(torsion_param_array)
+        if len(p.torsion_ignore_array) > 0:
+            print(f"  Torsions: {n_before} -> {len(torsion_param_array)} ({n_removed} removed by ignore list)")
 
         # Print
         print(bond_param_array)
