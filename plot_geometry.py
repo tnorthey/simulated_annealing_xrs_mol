@@ -7,16 +7,16 @@ plots of the geometric parameters over time (or frame number).
 
 Usage:
     # Plot single column from single file
-    python3 plot_geometry.py data.csv output.png
+    python3 plot_geometry.py input.csv output.png
     
     # Plot specific columns from single file
-    python3 plot_geometry.py data.csv output.png --columns 0 1
+    python3 plot_geometry.py input.csv output.png --columns 0 1
     
     # Plot multiple files for comparison
     python3 plot_geometry.py file1.csv file2.csv file3.csv output.png --columns 0
     
     # Customize plot
-    python3 plot_geometry.py data.csv output.png --xlabel "Frame" --ylabel "Bond Length (Å)" --title "Bond Length Evolution"
+    python3 plot_geometry.py input.csv output.png --xlabel "Frame" --ylabel "Bond Length (Å)" --title "Bond Length Evolution"
 """
 
 import argparse
