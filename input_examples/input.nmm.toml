@@ -22,14 +22,14 @@ results_dir = "results"
 # Force field file for molecular mechanics calculations (OpenFF format)
 forcefield_file = "forcefields/openff_unconstrained-2.0.0.offxml"
 # Starting structure in XYZ format
-start_xyz_file = "xyz/start.xyz"
+start_xyz_file = "xyz/nmm_opt.xyz"
 # Starting structure in SDF format (alternative to XYZ)
-start_sdf_file = "sdf/chd_start.sdf"
+start_sdf_file = "sdf/nmm_opt.sdf"
 # Reference structure for comparison (used for RMSD calculations)
-reference_xyz_file = "xyz/chd_reference.xyz"
+reference_xyz_file = "xyz/nmm_opt.xyz"
 # Reference DAT file for PCD mode (optional, if provided, uses this instead of calculating from reference_xyz_file)
 # If empty string or not provided, reference IAM is calculated from reference_xyz_file
-reference_dat_file = "data/chd_reference.dat"
+#reference_dat_file = "data/chd_reference.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
 target_file = "xyz/target.xyz"
 
@@ -46,7 +46,7 @@ verbose_bool = false
 # Write DAT file output with scattering data
 write_dat_file_bool = true
 # MM parameter retrieval method: "sdf" (try SDF method first, fallback to basic) or "basic" (use basic method directly)
-mm_param_method = "basic"
+mm_param_method = "sdf"
 # GPU backend for simulated annealing: "cpu" or "cuda"
 gpu_backend = "cpu"
 # Emulate CUDA backend on CPU (useful for laptop testing)
@@ -79,11 +79,11 @@ excitation_factor = 1.0
 # Q-vector parameters (scattering vector magnitude)
 [scattering_params.q]
 # Minimum q value (Å⁻¹)
-qmin = 0.4
+qmin = 0.3323
 # Maximum q value (Å⁻¹)
-qmax = 4.0
+qmax = 4.3727
 # Number of q points
-qlen = 100
+qlen = 39
 
 # Ewald sphere parameters (3D scattering mode)
 [scattering_params.ewald]
@@ -126,7 +126,7 @@ sa_nsteps = 4000
 # Enable greedy algorithm phase after simulated annealing
 greedy_algorithm_bool = true
 # Number of steps in greedy algorithm phase
-ga_nsteps = 4000
+ga_nsteps = 20000
 # Step size for simulated annealing (controls displacement magnitude)
 sa_step_size = 0.012
 # Step size for greedy algorithm
@@ -134,7 +134,7 @@ ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
 nrestarts = 5
 # Total number of runs (repeats entire process ntotalruns times)
-ntotalruns = 5
+ntotalruns = 1
 # Enable bond length constraints (harmonic oscillator potential)
 bonds_bool = true
 # Enable bond angle constraints (harmonic oscillator potential)
