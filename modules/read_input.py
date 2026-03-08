@@ -86,14 +86,13 @@ class Input_to_params:
         # run params
         try:
             self.run_id = str(data["run_params"]["run_id"])
-            self.molecule = str(data["run_params"]["molecule"])
             self.results_dir = str(data["run_params"]["results_dir"])
         except KeyError as e:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
             print(f"{'='*60}")
             print(f"  Missing key: {e}")
-            print(f"  Suggestion: Add [run_params] section with run_id, molecule, and results_dir")
+            print(f"  Suggestion: Add [run_params] section with run_id and results_dir")
             print(f"{'='*60}\n")
             sys.exit(1)
         # options
@@ -211,52 +210,29 @@ class Input_to_params:
         )  # run PySCF HF energy
 
         # molecule params
-        molecule = self.molecule
         try:
-            self.natoms = int(data["molecule_params"][molecule]["natoms"])
-            self.nmodes = int(data["molecule_params"][molecule]["nmodes"])
-            self.hydrogen_mode_range = np.array(
-                data["molecule_params"][molecule]["hydrogen_mode_range"]
-            )
-            self.sa_mode_range = np.array(
-                data["molecule_params"][molecule]["sa_mode_range"]
-            )
-            self.ga_mode_range = np.array(
-                data["molecule_params"][molecule]["ga_mode_range"]
-            )
-            self.bond_ignore_array = np.array(
-                data["molecule_params"][molecule]["bond_ignore_array"]
-            )
-            self.angle_ignore_array = np.array(
-                data["molecule_params"][molecule]["angle_ignore_array"]
-            )
-            self.torsion_ignore_array = np.array(
-                data["molecule_params"][molecule]["torsion_ignore_array"]
-            )
-            self.rmsd_indices = np.array(
-                data["molecule_params"][molecule]["rmsd_indices"]
-            )
-            self.bond_indices = np.array(
-                data["molecule_params"][molecule]["bond_indices"]
-            )
-            self.angle_indices = np.array(
-                data["molecule_params"][molecule]["angle_indices"]
-            )
-            self.dihedral_indices = np.array(
-                data["molecule_params"][molecule]["dihedral_indices"]
-            )
+            mol = data["molecule_params"]
+            self.natoms = int(mol["natoms"])
+            self.nmodes = int(mol["nmodes"])
+            self.hydrogen_mode_range = np.array(mol["hydrogen_mode_range"])
+            self.sa_mode_range = np.array(mol["sa_mode_range"])
+            self.ga_mode_range = np.array(mol["ga_mode_range"])
+            self.bond_ignore_array = np.array(mol["bond_ignore_array"])
+            self.angle_ignore_array = np.array(mol["angle_ignore_array"])
+            self.torsion_ignore_array = np.array(mol["torsion_ignore_array"])
+            self.rmsd_indices = np.array(mol["rmsd_indices"])
+            self.bond_indices = np.array(mol["bond_indices"])
+            self.angle_indices = np.array(mol["angle_indices"])
+            self.dihedral_indices = np.array(mol["dihedral_indices"])
         except KeyError as e:
             print(f"\n{'='*60}")
             print("ERROR: Missing required parameter in TOML file")
             print(f"{'='*60}")
             print(f"  Missing key: {e}")
             if "molecule_params" not in data:
-                print(f"  Suggestion: Add [molecule_params.{molecule}] section to input file")
-            elif molecule not in data["molecule_params"]:
-                print(f"  Suggestion: Add molecule '{molecule}' to molecule_params section")
-                print(f"  Available molecules: {list(data.get('molecule_params', {}).keys())}")
+                print(f"  Suggestion: Add [molecule_params] section to input file")
             else:
-                print(f"  Suggestion: Add missing parameter to [molecule_params.{molecule}] section")
+                print(f"  Suggestion: Add missing parameter to [molecule_params] section")
             print(f"{'='*60}\n")
             sys.exit(1)
         except (ValueError, TypeError) as e:
@@ -264,8 +240,7 @@ class Input_to_params:
             print("ERROR: Invalid parameter value in TOML file")
             print(f"{'='*60}")
             print(f"  Error: {type(e).__name__}: {e}")
-            print(f"  Molecule: {molecule}")
-            print(f"  Suggestion: Check parameter types and values in [molecule_params.{molecule}] section")
+            print(f"  Suggestion: Check parameter types and values in [molecule_params] section")
             print(f"{'='*60}\n")
             sys.exit(1)
 
@@ -317,13 +292,11 @@ class Input_to_params:
         errors = []
         warnings = []
         
-        # 1. Check if molecule exists in molecule_params
-        molecule = self.molecule
-        if "molecule_params" not in data or molecule not in data["molecule_params"]:
+        # 1. Check if molecule_params section exists
+        if "molecule_params" not in data:
             errors.append(
-                f'Error: Molecule "{molecule}" not found in molecule_params section.\n'
-                f'  Available molecules: {list(data.get("molecule_params", {}).keys())}\n'
-                f'  Suggestion: Check spelling or add molecule section to input file.'
+                'Error: [molecule_params] section not found in input file.\n'
+                '  Suggestion: Add a [molecule_params] section with natoms, nmodes, etc.'
             )
         
         # 2. Validate file paths (warn if they don't exist yet)
@@ -455,9 +428,8 @@ class Input_to_params:
                 f'  Suggestion: Set noise_value >= 0 (typically 0.0-0.1)'
             )
         
-        # 8. Validate molecule-specific parameters (if molecule section exists)
-        if "molecule_params" in data and molecule in data["molecule_params"]:
-            mol_data = data["molecule_params"][molecule]
+        # 8. Validate molecule parameters (if section exists)
+        if "molecule_params" in data:
             
             # Check natoms and nmodes
             if self.natoms < 1:

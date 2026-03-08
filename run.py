@@ -3,7 +3,7 @@ Run simulated annealing
 """
 
 # run example: python3 run.py
-# Override defaults: python3 run.py --mode test --molecule chd --run-id test_run
+# Override defaults: python3 run.py --mode test --run-id test_run
 
 import argparse
 from timeit import default_timer
@@ -34,8 +34,6 @@ def create_parser():
     run_group = parser.add_argument_group('run_params', 'Run parameters')
     run_group.add_argument('--run-id', type=str, dest='run_params.run_id',
                           help='Run ID')
-    run_group.add_argument('--molecule', type=str, dest='run_params.molecule',
-                          help='Molecule name')
     run_group.add_argument('--results-dir', type=str, dest='run_params.results_dir',
                           help='Results directory')
     

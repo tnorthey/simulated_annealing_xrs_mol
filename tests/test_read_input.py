@@ -20,7 +20,6 @@ class TestInputToParams:
         
         assert p.mode == "test"
         assert p.run_id == "test_run"
-        assert p.molecule == "test"
         assert p.inelastic is True
         assert hasattr(p, "ion_mode")
         assert p.ion_mode is False
@@ -43,7 +42,6 @@ class TestInputToParams:
         assert p.sa_nsteps == 5000
         # Other parameters should remain unchanged
         assert p.mode == "test"
-        assert p.molecule == "test"
     
     def test_mode_validation(self):
         """Test mode validation"""
@@ -51,7 +49,6 @@ class TestInputToParams:
         toml_content = '''mode = "invalid"
 [run_params]
 run_id = "test"
-molecule = "test"
 results_dir = "test"
 
 [files]
@@ -132,7 +129,6 @@ hf_energy_bool = false
         toml_content = '''mode = "TEST"
 [run_params]
 run_id = "test"
-molecule = "test"
 results_dir = "test"
 
 [files]
@@ -197,7 +193,7 @@ non_h_modes_only_bool = false
 hydrogen_mode_damping_factor = 0.2
 hf_energy_bool = false
 
-[molecule_params.test]
+[molecule_params]
 natoms = 2
 nmodes = 6
 hydrogen_mode_range = [4, 6]
@@ -236,7 +232,6 @@ dihedral_indices = []
         toml_content = '''mode = "test"
 [run_params]
 run_id = "test"
-molecule = "chd"
 results_dir = "test"
 
 [files]
@@ -301,7 +296,7 @@ non_h_modes_only_bool = false
 hydrogen_mode_damping_factor = 0.2
 hf_energy_bool = false
 
-[molecule_params.chd]
+[molecule_params]
 natoms = 14
 nmodes = 36
 hydrogen_mode_range = [28, 36]

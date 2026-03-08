@@ -62,7 +62,6 @@ def sample_toml_file():
 
 [run_params]
 run_id = "test_run"
-molecule = "test"
 results_dir = "test_results"
 
 [files]
@@ -127,7 +126,7 @@ non_h_modes_only_bool = false
 hydrogen_mode_damping_factor = 0.2
 hf_energy_bool = false
 
-[molecule_params.test]
+[molecule_params]
 natoms = 2
 nmodes = 6
 hydrogen_mode_range = [4, 6]
