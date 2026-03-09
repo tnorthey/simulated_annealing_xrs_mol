@@ -733,9 +733,9 @@ def _wrap_negative_dihedrals_in_csv(csv_path: str, *, bond=None, angle=None, dih
     if dcol >= data.shape[1]:
         return
     mask = data[:, dcol] < 0
-    if not np.any(mask):
-        return
-    data[:, dcol] = np.where(mask, data[:, dcol] + 360.0, data[:, dcol])
+    if np.any(mask):
+        data[:, dcol] = np.where(mask, data[:, dcol] + 360.0, data[:, dcol])
+    data[:, dcol] -= 180.0
     np.savetxt(csv_path, data, delimiter=",", fmt="%.10g")
 
 
