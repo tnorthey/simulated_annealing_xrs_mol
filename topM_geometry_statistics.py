@@ -244,12 +244,12 @@ def _dihedral_column_index(bond=None, angle=None, dihedral=None) -> Optional[int
 def _column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
     labels: List[str] = []
     if bond is not None:
-        labels.append(f"Bond {bond[0]}-{bond[1]} (Å)")
+        labels.append(f"Bond {bond[0] + 1}-{bond[1] + 1} (Å)")
     if angle is not None:
-        labels.append(f"Angle {angle[0]}-{angle[1]}-{angle[2]} (°)")
+        labels.append(f"Angle {angle[0] + 1}-{angle[1] + 1}-{angle[2] + 1} (°)")
     if dihedral is not None:
         labels.append(
-            f"Dihedral {dihedral[0]}-{dihedral[1]}-{dihedral[2]}-{dihedral[3]} (°)"
+            f"Dihedral {dihedral[0] + 1}-{dihedral[1] + 1}-{dihedral[2] + 1}-{dihedral[3] + 1} (°)"
         )
     return labels
 
