@@ -152,11 +152,31 @@ def compute_geometry_for_layer(
 
 
 def wrap_dihedral_column(data: np.ndarray, col_idx: int) -> np.ndarray:
-    """Shift dihedrals: negative values +360, then -180, then +180 to re-center."""
+    """Shift dihedrals: negative values +360 to put into [0, 360)."""
     vals = data[:, col_idx].copy()
     vals = np.where(vals < 0, vals + 360.0, vals)
     data[:, col_idx] = vals
     return data
+
+
+def circular_mean_deg(angles_deg: np.ndarray) -> float:
+    """Circular (directional) mean of angles in degrees, returned in [0, 360)."""
+    rad = np.deg2rad(angles_deg)
+    mean_deg = float(np.rad2deg(np.arctan2(np.mean(np.sin(rad)), np.mean(np.cos(rad)))))
+    return mean_deg % 360.0
+
+
+def circular_std_deg(angles_deg: np.ndarray) -> float:
+    """Circular standard deviation of angles in degrees.
+
+    Uses sqrt(-2 * ln(R)) where R is the mean resultant length.
+    """
+    rad = np.deg2rad(angles_deg)
+    R = np.sqrt(np.mean(np.sin(rad)) ** 2 + np.mean(np.cos(rad)) ** 2)
+    R = min(R, 1.0)
+    if R < 1e-15:
+        return 180.0
+    return float(np.rad2deg(np.sqrt(-2.0 * np.log(R))))
 
 
 def _dihedral_column_index(bond=None, angle=None, dihedral=None) -> Optional[int]:
@@ -291,8 +311,14 @@ def main():
         if dihedral_col is not None:
             geom = wrap_dihedral_column(geom, dihedral_col)
         all_geom.append(geom)
-        means[ti, :] = np.mean(geom, axis=0)
-        stds[ti, :] = np.std(geom, axis=0, ddof=0)
+
+        for ci in range(n_cols):
+            if ci == dihedral_col:
+                means[ti, ci] = circular_mean_deg(geom[:, ci])
+                stds[ti, ci] = circular_std_deg(geom[:, ci])
+            else:
+                means[ti, ci] = np.mean(geom[:, ci])
+                stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
         medoid_idx = select_medoid(layer)
         medoids[ti, :] = geom[medoid_idx, :]
