@@ -285,16 +285,19 @@ def main():
         help="Dihedral atom indices I J K L (0-indexed)",
     )
     parser.add_argument(
+        "--output-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory for all outputs (plot, CSV, xyz trajectories). "
+            "Default: current directory."
+        ),
+    )
+    parser.add_argument(
         "--output-plot",
         type=str,
         default=None,
-        help="Output PNG filename. Default: auto-generated from parameters.",
-    )
-    parser.add_argument(
-        "--output-csv",
-        type=str,
-        default=None,
-        help="Also write a CSV with per-timestep mean, medoid, and std.",
+        help="Output PNG filename (placed inside --output-dir). Default: auto-generated.",
     )
     parser.add_argument(
         "--show-individuals",
@@ -395,6 +398,12 @@ def main():
             parts.append(f"topM-{args.topM}")
         args.output_plot = "_".join(parts) + ".png"
 
+    # Place all outputs inside --output-dir
+    if args.output_dir is not None:
+        os.makedirs(args.output_dir, exist_ok=True)
+        if os.path.dirname(args.output_plot) == "":
+            args.output_plot = os.path.join(args.output_dir, args.output_plot)
+
     print("Creating plot...")
     if n_cols == 1:
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -464,28 +473,30 @@ def main():
     plt.close(fig)
     print(f"Plot saved to: {args.output_plot}")
 
-    if args.output_csv is not None:
-        header_parts = ["time_fs"]
-        for label in col_labels:
-            short = label.split(" (")[0].replace(" ", "_")
-            header_parts.extend([f"mean_{short}", f"medoid_{short}", f"std_{short}"])
+    # Write CSV alongside plot
+    plot_stem = os.path.splitext(args.output_plot)[0]
+    csv_path = plot_stem + ".csv"
 
-        cols_out = [x]
-        for i in range(n_cols):
-            cols_out.extend([means[:, i], medoids[:, i], stds[:, i]])
-        out_data = np.column_stack(cols_out)
-        np.savetxt(
-            args.output_csv,
-            out_data,
-            delimiter=",",
-            header=",".join(header_parts),
-            comments="",
-            fmt="%.10g",
-        )
-        print(f"CSV written to: {args.output_csv}")
+    header_parts = ["time_fs"]
+    for label in col_labels:
+        short = label.split(" (")[0].replace(" ", "_")
+        header_parts.extend([f"mean_{short}", f"median_{short}", f"std_{short}"])
+
+    cols_out = [x]
+    for i in range(n_cols):
+        cols_out.extend([means[:, i], medoids[:, i], stds[:, i]])
+    out_data = np.column_stack(cols_out)
+    np.savetxt(
+        csv_path,
+        out_data,
+        delimiter=",",
+        header=",".join(header_parts),
+        comments="",
+        fmt="%.10g",
+    )
+    print(f"CSV written to: {csv_path}")
 
     # Write median (medoid) and mean xyz trajectories
-    plot_stem = os.path.splitext(args.output_plot)[0]
     median_xyz_path = plot_stem + "_median.xyz"
     mean_xyz_path = plot_stem + "_mean.xyz"
 
