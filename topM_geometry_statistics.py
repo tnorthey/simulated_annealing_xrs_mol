@@ -4,11 +4,10 @@ topM_geometry_statistics.py
 
 For each timestep, select the topM best-fitting xyz files, compute the
 requested geometry (bond / angle / dihedral), and plot the per-timestep
-mean and medoid.
+mean and closest-to-mean frame.
 
-The medoid is the actual candidate whose sum of Kabsch-RMSD to all other
-candidates at the same timestep is minimal — it always corresponds to a
-real frame from the dataset.
+The closest-to-mean frame is the actual candidate whose RMSD to the
+per-timestep mean structure is minimal.
 
 No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
@@ -118,31 +117,24 @@ def _plain_rmsd(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None = No
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
-def select_medoid(
+def select_closest_to_mean(
     layer: Sequence[dict],
     *,
     use_kabsch: bool = True,
     rmsd_indices: Sequence[int] | None = None,
 ) -> int:
-    """Return the index of the medoid in a layer.
-
-    The medoid is the candidate with the smallest sum of pairwise RMSD
-    to all other candidates. Coordinates are read on-the-fly.
-    """
+    """Return index of frame with minimal RMSD to layer mean structure."""
     K = len(layer)
     if K <= 1:
         return 0
 
     rmsd_fn = _kabsch_rmsd if use_kabsch else _plain_rmsd
     coords = [read_xyz_coords(c["xyz"]) for c in layer]
-    sum_rmsd = np.zeros(K, dtype=np.float64)
-    for i in range(K):
-        for j in range(i + 1, K):
-            d = rmsd_fn(coords[i], coords[j], indices=rmsd_indices)
-            sum_rmsd[i] += d
-            sum_rmsd[j] += d
-
-    return int(np.argmin(sum_rmsd))
+    mean_coords = np.mean(np.stack(coords, axis=0), axis=0)
+    dists = np.array(
+        [rmsd_fn(c, mean_coords, indices=rmsd_indices) for c in coords], dtype=np.float64
+    )
+    return int(np.argmin(dists))
 
 
 def load_topM_candidates(directory, topM):
@@ -257,7 +249,7 @@ def _column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Compute and plot per-timestep mean and medoid geometry "
+            "Compute and plot per-timestep mean and closest-to-mean geometry "
             "for the topM best-fitting xyz files."
         ),
     )
@@ -319,7 +311,7 @@ def main():
         "--no-kabsch",
         action="store_true",
         help=(
-            "Use plain centroid-aligned RMSD (no Kabsch rotation) for medoid selection. "
+            "Use plain centroid-aligned RMSD (no Kabsch rotation) for closest-to-mean selection. "
             "Much faster but assumes structures share a consistent orientation."
         ),
     )
@@ -328,7 +320,7 @@ def main():
         type=str,
         default=None,
         help=(
-            "Comma-separated atom indices (0-based) for RMSD in medoid selection. "
+            "Comma-separated atom indices (0-based) for RMSD in closest-to-mean selection. "
             "Example: '0,1,2,3,4,5'. Default: all atoms."
         ),
     )
@@ -393,7 +385,7 @@ def main():
 
     plot_stem = os.path.splitext(args.output_plot)[0]
     csv_path = plot_stem + ".csv"
-    median_xyz_path = plot_stem + "_median.xyz"
+    closest_xyz_path = plot_stem + "_closest_to_mean.xyz"
     mean_xyz_path = plot_stem + "_mean.xyz"
 
     col_labels = _column_labels(
@@ -411,28 +403,38 @@ def main():
             raw = np.loadtxt(csv_path, delimiter=",", skiprows=1)
             if raw.ndim == 1:
                 raw = raw.reshape(1, -1)
-            expected_cols = 1 + 3 * n_cols  # time + (mean, median, std) per column
+            expected_cols = 1 + 3 * n_cols  # time + (mean, closest, std) per column
             if raw.shape[1] == expected_cols:
                 x = raw[:, 0]
                 means = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
-                medoids = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
+                closest = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
                 stds = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
                 for ci in range(n_cols):
                     base = 1 + ci * 3
                     means[:, ci] = raw[:, base]
-                    medoids[:, ci] = raw[:, base + 1]
+                    closest[:, ci] = raw[:, base + 1]
                     stds[:, ci] = raw[:, base + 2]
                 n_timesteps = raw.shape[0]
-                loaded_from_csv = True
-                print(f"Loaded cached data from {csv_path} ({n_timesteps} timesteps). "
-                      f"Use --recompute to force recalculation.")
+                try:
+                    with open(csv_path, "r") as f:
+                        header_line = f.readline().strip()
+                    loaded_from_csv = "closest_" in header_line
+                except OSError:
+                    loaded_from_csv = False
+                if loaded_from_csv:
+                    print(
+                        f"Loaded cached data from {csv_path} ({n_timesteps} timesteps). "
+                        f"Use --recompute to force recalculation."
+                    )
+                else:
+                    print("Cached CSV uses legacy median columns, recomputing...")
             else:
                 print(f"CSV column count mismatch ({raw.shape[1]} vs expected {expected_cols}), recomputing...")
         except Exception as e:
             print(f"Could not load cached CSV ({e}), recomputing...")
 
     layers = None
-    medoid_indices: list[int] = []
+    closest_indices: list[int] = []
     all_geom: list[np.ndarray] = []
     timesteps: list[int] = []
 
@@ -448,9 +450,9 @@ def main():
             f"topM={'all' if args.topM is None else args.topM}"
         )
 
-        print("Computing geometry and selecting medoids...")
+        print("Computing geometry and selecting closest-to-mean frames...")
         means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
-        medoids = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+        closest = np.zeros((n_timesteps, n_cols), dtype=np.float64)
         stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
 
         for ti, layer in enumerate(layers):
@@ -471,9 +473,11 @@ def main():
                     means[ti, ci] = np.mean(geom[:, ci])
                     stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
-            medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices)
-            medoid_indices.append(medoid_idx)
-            medoids[ti, :] = geom[medoid_idx, :]
+            closest_idx = select_closest_to_mean(
+                layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices
+            )
+            closest_indices.append(closest_idx)
+            closest[ti, :] = geom[closest_idx, :]
 
         print()  # finish progress line
 
@@ -483,11 +487,11 @@ def main():
         header_parts = ["time_fs"]
         for label in col_labels:
             short = label.split(" (")[0].replace(" ", "_")
-            header_parts.extend([f"mean_{short}", f"median_{short}", f"std_{short}"])
+            header_parts.extend([f"mean_{short}", f"closest_{short}", f"std_{short}"])
 
         cols_out = [x]
         for i in range(n_cols):
-            cols_out.extend([means[:, i], medoids[:, i], stds[:, i]])
+            cols_out.extend([means[:, i], closest[:, i], stds[:, i]])
         out_data = np.column_stack(cols_out)
         np.savetxt(
             csv_path,
@@ -499,16 +503,16 @@ def main():
         )
         print(f"CSV written to: {csv_path}")
 
-        # Write median (medoid) and mean xyz trajectories
-        print("Writing median (medoid) trajectory...")
-        median_frames = []
+        # Write closest-to-mean and mean xyz trajectories
+        print("Writing closest-to-mean trajectory...")
+        closest_frames = []
         for ti, layer_i in enumerate(layers):
-            mi = medoid_indices[ti]
+            mi = closest_indices[ti]
             n, comment, atoms, coords = read_xyz_frame(layer_i[mi]["xyz"])
-            comment = f"{comment} | median(medoid) | timestep={timesteps[ti]}"
-            median_frames.append((n, comment, atoms, coords))
-        write_xyz_trajectory(median_frames, median_xyz_path)
-        print(f"Median trajectory written to: {median_xyz_path}")
+            comment = f"{comment} | closest-to-mean | timestep={timesteps[ti]}"
+            closest_frames.append((n, comment, atoms, coords))
+        write_xyz_trajectory(closest_frames, closest_xyz_path)
+        print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
 
         print("Writing mean trajectory...")
         mean_frames = []
@@ -570,7 +574,12 @@ def main():
             label="±1σ",
         )
         ax.plot(
-            x, medoids[:, i], linewidth=2, label="median", color="C1", linestyle="--"
+            x,
+            closest[:, i],
+            linewidth=2,
+            label="closest-to-mean",
+            color="C1",
+            linestyle="--",
         )
         ax.set_ylabel(col_labels[i], fontsize=label_fs)
         ax.tick_params(axis="both", labelsize=tick_fs)
