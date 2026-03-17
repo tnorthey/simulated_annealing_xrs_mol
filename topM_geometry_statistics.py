@@ -349,6 +349,12 @@ def main():
     parser.add_argument(
         "--ymax", type=float, default=None, help="Maximum y-axis value."
     )
+    parser.add_argument(
+        "--font-scale",
+        type=float,
+        default=1.0,
+        help="Scale factor for plot text sizes (e.g. 2.0 for about double size).",
+    )
 
     args = parser.parse_args()
 
@@ -524,6 +530,14 @@ def main():
 
     # --- Plot (always runs, using either fresh or cached data) ---
     print("Creating plot...")
+    font_scale = float(args.font_scale)
+    if font_scale <= 0:
+        parser.error("--font-scale must be > 0")
+    title_fs = 16.0 * font_scale
+    label_fs = 12.0 * font_scale
+    tick_fs = 10.0 * font_scale
+    legend_fs = 10.0 * font_scale
+
     if n_cols == 1:
         fig, ax = plt.subplots(figsize=(10, 6))
         axes = [ax]
@@ -558,10 +572,11 @@ def main():
         ax.plot(
             x, medoids[:, i], linewidth=2, label="median", color="C1", linestyle="--"
         )
-        ax.set_ylabel(col_labels[i])
+        ax.set_ylabel(col_labels[i], fontsize=label_fs)
+        ax.tick_params(axis="both", labelsize=tick_fs)
         ax.grid(True, alpha=0.3)
         if i == 0:
-            ax.legend()
+            ax.legend(fontsize=legend_fs)
 
     title_parts = []
     if args.bond is not None:
@@ -577,9 +592,9 @@ def main():
         )
     title = " / ".join(title_parts) if title_parts else "Geometry"
     topM_str = f"topM={args.topM}" if args.topM is not None else "all candidates"
-    fig.suptitle(f"{title} — mean & medoid ({topM_str})")
+    fig.suptitle(f"{title} — mean & medoid ({topM_str})", fontsize=title_fs)
 
-    axes[-1].set_xlabel("time (fs)")
+    axes[-1].set_xlabel("time (fs)", fontsize=label_fs)
     xleft = 0.0 if args.xmin is None else float(args.xmin)
     xright = None if args.xmax is None else float(args.xmax)
     for ax in axes:
