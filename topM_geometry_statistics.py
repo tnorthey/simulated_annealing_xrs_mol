@@ -73,21 +73,30 @@ def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
-def select_medoid(layer: Sequence[dict]) -> int:
+def _plain_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+    """Centroid-aligned RMSD without Kabsch rotation (translation only)."""
+    Pc = P - P.mean(axis=0, keepdims=True)
+    Qc = Q - Q.mean(axis=0, keepdims=True)
+    d = Pc - Qc
+    return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
+
+
+def select_medoid(layer: Sequence[dict], *, use_kabsch: bool = True) -> int:
     """Return the index of the medoid in a layer.
 
-    The medoid is the candidate with the smallest sum of Kabsch-RMSD
+    The medoid is the candidate with the smallest sum of pairwise RMSD
     to all other candidates. Coordinates are read on-the-fly.
     """
     K = len(layer)
     if K <= 1:
         return 0
 
+    rmsd_fn = _kabsch_rmsd if use_kabsch else _plain_rmsd
     coords = [read_xyz_coords(c["xyz"]) for c in layer]
     sum_rmsd = np.zeros(K, dtype=np.float64)
     for i in range(K):
         for j in range(i + 1, K):
-            d = _kabsch_rmsd(coords[i], coords[j])
+            d = rmsd_fn(coords[i], coords[j])
             sum_rmsd[i] += d
             sum_rmsd[j] += d
 
@@ -262,6 +271,14 @@ def main():
         help="Also plot each individual candidate as a faint line.",
     )
     parser.add_argument(
+        "--no-kabsch",
+        action="store_true",
+        help=(
+            "Use plain centroid-aligned RMSD (no Kabsch rotation) for medoid selection. "
+            "Much faster but assumes structures share a consistent orientation."
+        ),
+    )
+    parser.add_argument(
         "--xmin", type=float, default=None, help="Minimum x-axis value (time in fs)."
     )
     parser.add_argument(
@@ -322,7 +339,7 @@ def main():
                 means[ti, ci] = np.mean(geom[:, ci])
                 stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
-        medoid_idx = select_medoid(layer)
+        medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch)
         medoids[ti, :] = geom[medoid_idx, :]
 
     print()  # finish progress line
