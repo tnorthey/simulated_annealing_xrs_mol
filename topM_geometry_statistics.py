@@ -89,8 +89,11 @@ def write_xyz_trajectory(frames: Sequence[tuple], path: str):
                 )
 
 
-def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None = None) -> float:
     """Kabsch-aligned RMSD between two (N,3) coordinate arrays."""
+    if indices is not None:
+        idx = np.asarray(indices, dtype=np.int64)
+        P, Q = P[idx], Q[idx]
     Pc = P - P.mean(axis=0, keepdims=True)
     Qc = Q - Q.mean(axis=0, keepdims=True)
     H = Pc.T @ Qc
@@ -104,15 +107,23 @@ def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
-def _plain_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+def _plain_rmsd(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None = None) -> float:
     """Centroid-aligned RMSD without Kabsch rotation (translation only)."""
+    if indices is not None:
+        idx = np.asarray(indices, dtype=np.int64)
+        P, Q = P[idx], Q[idx]
     Pc = P - P.mean(axis=0, keepdims=True)
     Qc = Q - Q.mean(axis=0, keepdims=True)
     d = Pc - Qc
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
-def select_medoid(layer: Sequence[dict], *, use_kabsch: bool = True) -> int:
+def select_medoid(
+    layer: Sequence[dict],
+    *,
+    use_kabsch: bool = True,
+    rmsd_indices: Sequence[int] | None = None,
+) -> int:
     """Return the index of the medoid in a layer.
 
     The medoid is the candidate with the smallest sum of pairwise RMSD
@@ -127,7 +138,7 @@ def select_medoid(layer: Sequence[dict], *, use_kabsch: bool = True) -> int:
     sum_rmsd = np.zeros(K, dtype=np.float64)
     for i in range(K):
         for j in range(i + 1, K):
-            d = rmsd_fn(coords[i], coords[j])
+            d = rmsd_fn(coords[i], coords[j], indices=rmsd_indices)
             sum_rmsd[i] += d
             sum_rmsd[j] += d
 
@@ -313,6 +324,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--rmsd-indices",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated atom indices (0-based) for RMSD in medoid selection. "
+            "Example: '0,1,2,3,4,5'. Default: all atoms."
+        ),
+    )
+    parser.add_argument(
         "--recompute",
         action="store_true",
         help="Force recomputation even if CSV from a previous run exists.",
@@ -334,6 +354,15 @@ def main():
 
     if args.bond is None and args.angle is None and args.dihedral is None:
         parser.error("At least one of --bond, --angle, or --dihedral must be specified")
+
+    rmsd_indices: list[int] | None = None
+    if args.rmsd_indices is not None:
+        try:
+            rmsd_indices = [int(x.strip()) for x in args.rmsd_indices.split(",") if x.strip()]
+        except ValueError:
+            parser.error("--rmsd-indices must be a comma-separated list of integers")
+        if not rmsd_indices:
+            parser.error("--rmsd-indices must contain at least one index")
 
     # --- Resolve output paths early so we can check for cached CSV ---
     if args.output_plot is None:
@@ -436,7 +465,7 @@ def main():
                     means[ti, ci] = np.mean(geom[:, ci])
                     stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
-            medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch)
+            medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices)
             medoid_indices.append(medoid_idx)
             medoids[ti, :] = geom[medoid_idx, :]
 
