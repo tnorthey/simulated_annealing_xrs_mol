@@ -305,6 +305,8 @@ def main():
 
     all_geom: list[np.ndarray] = []
     for ti, layer in enumerate(layers):
+        pct = (ti + 1) * 100 // n_timesteps
+        print(f"\r  Timestep {ti + 1}/{n_timesteps} ({pct}%)", end="", flush=True)
         geom = compute_geometry_for_layer(
             layer, bond=args.bond, angle=args.angle, dihedral=args.dihedral
         )
@@ -322,6 +324,8 @@ def main():
 
         medoid_idx = select_medoid(layer)
         medoids[ti, :] = geom[medoid_idx, :]
+
+    print()  # finish progress line
 
     x = np.arange(n_timesteps, dtype=np.float64) * 20.0 + 10.0
 
