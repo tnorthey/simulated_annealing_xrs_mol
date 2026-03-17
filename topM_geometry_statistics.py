@@ -4,7 +4,11 @@ topM_geometry_statistics.py
 
 For each timestep, select the topM best-fitting xyz files, compute the
 requested geometry (bond / angle / dihedral), and plot the per-timestep
-mean and median.
+mean and medoid.
+
+The medoid is the actual candidate whose sum of Kabsch-RMSD to all other
+candidates at the same timestep is minimal — it always corresponds to a
+real frame from the dataset.
 
 No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
@@ -52,6 +56,42 @@ def read_xyz_coords(path):
             xyz[i, 1] = float(parts[2])
             xyz[i, 2] = float(parts[3])
     return xyz
+
+
+def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
+    """Kabsch-aligned RMSD between two (N,3) coordinate arrays."""
+    Pc = P - P.mean(axis=0, keepdims=True)
+    Qc = Q - Q.mean(axis=0, keepdims=True)
+    H = Pc.T @ Qc
+    U, _S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1.0
+        R = Vt.T @ U.T
+    Pr = Pc @ R
+    d = Pr - Qc
+    return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
+
+
+def select_medoid(layer: Sequence[dict]) -> int:
+    """Return the index of the medoid in a layer.
+
+    The medoid is the candidate with the smallest sum of Kabsch-RMSD
+    to all other candidates. Coordinates are read on-the-fly.
+    """
+    K = len(layer)
+    if K <= 1:
+        return 0
+
+    coords = [read_xyz_coords(c["xyz"]) for c in layer]
+    sum_rmsd = np.zeros(K, dtype=np.float64)
+    for i in range(K):
+        for j in range(i + 1, K):
+            d = _kabsch_rmsd(coords[i], coords[j])
+            sum_rmsd[i] += d
+            sum_rmsd[j] += d
+
+    return int(np.argmin(sum_rmsd))
 
 
 def load_topM_candidates(directory, topM):
@@ -146,7 +186,7 @@ def _column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Compute and plot per-timestep mean and median geometry "
+            "Compute and plot per-timestep mean and medoid geometry "
             "for the topM best-fitting xyz files."
         ),
     )
@@ -194,7 +234,7 @@ def main():
         "--output-csv",
         type=str,
         default=None,
-        help="Also write a CSV with per-timestep mean, median, and std.",
+        help="Also write a CSV with per-timestep mean, medoid, and std.",
     )
     parser.add_argument(
         "--show-individuals",
@@ -238,9 +278,9 @@ def main():
     )
     n_cols = len(col_labels)
 
-    print("Computing geometry for all candidates...")
+    print("Computing geometry and selecting medoids...")
     means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
-    medians = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+    medoids = np.zeros((n_timesteps, n_cols), dtype=np.float64)
     stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
 
     all_geom: list[np.ndarray] = []
@@ -252,8 +292,10 @@ def main():
             geom = wrap_dihedral_column(geom, dihedral_col)
         all_geom.append(geom)
         means[ti, :] = np.mean(geom, axis=0)
-        medians[ti, :] = np.median(geom, axis=0)
         stds[ti, :] = np.std(geom, axis=0, ddof=0)
+
+        medoid_idx = select_medoid(layer)
+        medoids[ti, :] = geom[medoid_idx, :]
 
     x = np.arange(n_timesteps, dtype=np.float64) * 20.0 + 10.0
 
@@ -306,7 +348,7 @@ def main():
             label="±1σ",
         )
         ax.plot(
-            x, medians[:, i], linewidth=2, label="median", color="C1", linestyle="--"
+            x, medoids[:, i], linewidth=2, label="medoid", color="C1", linestyle="--"
         )
         ax.set_ylabel(col_labels[i])
         ax.grid(True, alpha=0.3)
@@ -327,7 +369,7 @@ def main():
         )
     title = " / ".join(title_parts) if title_parts else "Geometry"
     topM_str = f"topM={args.topM}" if args.topM is not None else "all candidates"
-    fig.suptitle(f"{title} — mean & median ({topM_str})")
+    fig.suptitle(f"{title} — mean & medoid ({topM_str})")
 
     axes[-1].set_xlabel("time (fs)")
     xleft = 0.0 if args.xmin is None else float(args.xmin)
@@ -346,11 +388,11 @@ def main():
         header_parts = ["time_fs"]
         for label in col_labels:
             short = label.split(" (")[0].replace(" ", "_")
-            header_parts.extend([f"mean_{short}", f"median_{short}", f"std_{short}"])
+            header_parts.extend([f"mean_{short}", f"medoid_{short}", f"std_{short}"])
 
         cols_out = [x]
         for i in range(n_cols):
-            cols_out.extend([means[:, i], medians[:, i], stds[:, i]])
+            cols_out.extend([means[:, i], medoids[:, i], stds[:, i]])
         out_data = np.column_stack(cols_out)
         np.savetxt(
             args.output_csv,
