@@ -313,6 +313,11 @@ def main():
         ),
     )
     parser.add_argument(
+        "--recompute",
+        action="store_true",
+        help="Force recomputation even if CSV from a previous run exists.",
+    )
+    parser.add_argument(
         "--xmin", type=float, default=None, help="Minimum x-axis value (time in fs)."
     )
     parser.add_argument(
@@ -330,59 +335,7 @@ def main():
     if args.bond is None and args.angle is None and args.dihedral is None:
         parser.error("At least one of --bond, --angle, or --dihedral must be specified")
 
-    print(f"Loading candidates from {args.directory}...")
-    timesteps, layers = load_topM_candidates(args.directory, args.topM)
-
-    n_timesteps = len(timesteps)
-    layer_sizes = [len(layer) for layer in layers]
-    print(
-        f"Found {n_timesteps} timesteps, candidates per timestep: "
-        f"min={min(layer_sizes)}, max={max(layer_sizes)}, "
-        f"topM={'all' if args.topM is None else args.topM}"
-    )
-
-    col_labels = _column_labels(
-        bond=args.bond, angle=args.angle, dihedral=args.dihedral
-    )
-    dihedral_col = _dihedral_column_index(
-        bond=args.bond, angle=args.angle, dihedral=args.dihedral
-    )
-    n_cols = len(col_labels)
-
-    print("Computing geometry and selecting medoids...")
-    means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
-    medoids = np.zeros((n_timesteps, n_cols), dtype=np.float64)
-    stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
-    medoid_indices: list[int] = []
-
-    all_geom: list[np.ndarray] = []
-    for ti, layer in enumerate(layers):
-        pct = (ti + 1) * 100 // n_timesteps
-        print(f"\r  Timestep {ti + 1}/{n_timesteps} ({pct}%)", end="", flush=True)
-        geom = compute_geometry_for_layer(
-            layer, bond=args.bond, angle=args.angle, dihedral=args.dihedral
-        )
-        if dihedral_col is not None:
-            geom = wrap_dihedral_column(geom, dihedral_col)
-        all_geom.append(geom)
-
-        for ci in range(n_cols):
-            if ci == dihedral_col:
-                means[ti, ci] = circular_mean_deg(geom[:, ci])
-                stds[ti, ci] = circular_std_deg(geom[:, ci])
-            else:
-                means[ti, ci] = np.mean(geom[:, ci])
-                stds[ti, ci] = np.std(geom[:, ci], ddof=0)
-
-        medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch)
-        medoid_indices.append(medoid_idx)
-        medoids[ti, :] = geom[medoid_idx, :]
-
-    print()  # finish progress line
-
-    x = np.arange(n_timesteps, dtype=np.float64) * 20.0 + 10.0
-
-    # Auto-generate output plot name
+    # --- Resolve output paths early so we can check for cached CSV ---
     if args.output_plot is None:
         parts = ["topM_geometry"]
         if args.bond is not None:
@@ -398,12 +351,149 @@ def main():
             parts.append(f"topM-{args.topM}")
         args.output_plot = "_".join(parts) + ".png"
 
-    # Place all outputs inside --output-dir
     if args.output_dir is not None:
         os.makedirs(args.output_dir, exist_ok=True)
         if os.path.dirname(args.output_plot) == "":
             args.output_plot = os.path.join(args.output_dir, args.output_plot)
 
+    plot_stem = os.path.splitext(args.output_plot)[0]
+    csv_path = plot_stem + ".csv"
+    median_xyz_path = plot_stem + "_median.xyz"
+    mean_xyz_path = plot_stem + "_mean.xyz"
+
+    col_labels = _column_labels(
+        bond=args.bond, angle=args.angle, dihedral=args.dihedral
+    )
+    n_cols = len(col_labels)
+    dihedral_col = _dihedral_column_index(
+        bond=args.bond, angle=args.angle, dihedral=args.dihedral
+    )
+
+    # --- Try to reuse cached CSV to skip expensive computation ---
+    loaded_from_csv = False
+    if not args.recompute and os.path.exists(csv_path):
+        try:
+            raw = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+            if raw.ndim == 1:
+                raw = raw.reshape(1, -1)
+            expected_cols = 1 + 3 * n_cols  # time + (mean, median, std) per column
+            if raw.shape[1] == expected_cols:
+                x = raw[:, 0]
+                means = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
+                medoids = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
+                stds = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
+                for ci in range(n_cols):
+                    base = 1 + ci * 3
+                    means[:, ci] = raw[:, base]
+                    medoids[:, ci] = raw[:, base + 1]
+                    stds[:, ci] = raw[:, base + 2]
+                n_timesteps = raw.shape[0]
+                loaded_from_csv = True
+                print(f"Loaded cached data from {csv_path} ({n_timesteps} timesteps). "
+                      f"Use --recompute to force recalculation.")
+            else:
+                print(f"CSV column count mismatch ({raw.shape[1]} vs expected {expected_cols}), recomputing...")
+        except Exception as e:
+            print(f"Could not load cached CSV ({e}), recomputing...")
+
+    layers = None
+    medoid_indices: list[int] = []
+    all_geom: list[np.ndarray] = []
+    timesteps: list[int] = []
+
+    if not loaded_from_csv:
+        print(f"Loading candidates from {args.directory}...")
+        timesteps, layers = load_topM_candidates(args.directory, args.topM)
+
+        n_timesteps = len(timesteps)
+        layer_sizes = [len(layer) for layer in layers]
+        print(
+            f"Found {n_timesteps} timesteps, candidates per timestep: "
+            f"min={min(layer_sizes)}, max={max(layer_sizes)}, "
+            f"topM={'all' if args.topM is None else args.topM}"
+        )
+
+        print("Computing geometry and selecting medoids...")
+        means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+        medoids = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+        stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+
+        for ti, layer in enumerate(layers):
+            pct = (ti + 1) * 100 // n_timesteps
+            print(f"\r  Timestep {ti + 1}/{n_timesteps} ({pct}%)", end="", flush=True)
+            geom = compute_geometry_for_layer(
+                layer, bond=args.bond, angle=args.angle, dihedral=args.dihedral
+            )
+            if dihedral_col is not None:
+                geom = wrap_dihedral_column(geom, dihedral_col)
+            all_geom.append(geom)
+
+            for ci in range(n_cols):
+                if ci == dihedral_col:
+                    means[ti, ci] = circular_mean_deg(geom[:, ci])
+                    stds[ti, ci] = circular_std_deg(geom[:, ci])
+                else:
+                    means[ti, ci] = np.mean(geom[:, ci])
+                    stds[ti, ci] = np.std(geom[:, ci], ddof=0)
+
+            medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch)
+            medoid_indices.append(medoid_idx)
+            medoids[ti, :] = geom[medoid_idx, :]
+
+        print()  # finish progress line
+
+        x = np.arange(n_timesteps, dtype=np.float64) * 20.0 + 10.0
+
+        # Write CSV
+        header_parts = ["time_fs"]
+        for label in col_labels:
+            short = label.split(" (")[0].replace(" ", "_")
+            header_parts.extend([f"mean_{short}", f"median_{short}", f"std_{short}"])
+
+        cols_out = [x]
+        for i in range(n_cols):
+            cols_out.extend([means[:, i], medoids[:, i], stds[:, i]])
+        out_data = np.column_stack(cols_out)
+        np.savetxt(
+            csv_path,
+            out_data,
+            delimiter=",",
+            header=",".join(header_parts),
+            comments="",
+            fmt="%.10g",
+        )
+        print(f"CSV written to: {csv_path}")
+
+        # Write median (medoid) and mean xyz trajectories
+        print("Writing median (medoid) trajectory...")
+        median_frames = []
+        for ti, layer_i in enumerate(layers):
+            mi = medoid_indices[ti]
+            n, comment, atoms, coords = read_xyz_frame(layer_i[mi]["xyz"])
+            comment = f"{comment} | median(medoid) | timestep={timesteps[ti]}"
+            median_frames.append((n, comment, atoms, coords))
+        write_xyz_trajectory(median_frames, median_xyz_path)
+        print(f"Median trajectory written to: {median_xyz_path}")
+
+        print("Writing mean trajectory...")
+        mean_frames = []
+        for ti, layer_i in enumerate(layers):
+            all_coords = []
+            atoms_ref = None
+            natoms_ref = None
+            for c in layer_i:
+                n, _comment, atoms, coords = read_xyz_frame(c["xyz"])
+                all_coords.append(coords)
+                if atoms_ref is None:
+                    atoms_ref = atoms
+                    natoms_ref = n
+            mean_coords = np.mean(np.stack(all_coords, axis=0), axis=0)
+            comment = f"mean over {len(layer_i)} candidates | timestep={timesteps[ti]}"
+            mean_frames.append((natoms_ref, comment, atoms_ref, mean_coords))
+        write_xyz_trajectory(mean_frames, mean_xyz_path)
+        print(f"Mean trajectory written to: {mean_xyz_path}")
+
+    # --- Plot (always runs, using either fresh or cached data) ---
     print("Creating plot...")
     if n_cols == 1:
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -416,7 +506,7 @@ def main():
     for i in range(n_cols):
         ax = axes[i]
 
-        if args.show_individuals:
+        if args.show_individuals and all_geom:
             max_candidates = max(g.shape[0] for g in all_geom)
             for ci in range(max_candidates):
                 ys = []
@@ -472,61 +562,6 @@ def main():
     plt.savefig(args.output_plot, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"Plot saved to: {args.output_plot}")
-
-    # Write CSV alongside plot
-    plot_stem = os.path.splitext(args.output_plot)[0]
-    csv_path = plot_stem + ".csv"
-
-    header_parts = ["time_fs"]
-    for label in col_labels:
-        short = label.split(" (")[0].replace(" ", "_")
-        header_parts.extend([f"mean_{short}", f"median_{short}", f"std_{short}"])
-
-    cols_out = [x]
-    for i in range(n_cols):
-        cols_out.extend([means[:, i], medoids[:, i], stds[:, i]])
-    out_data = np.column_stack(cols_out)
-    np.savetxt(
-        csv_path,
-        out_data,
-        delimiter=",",
-        header=",".join(header_parts),
-        comments="",
-        fmt="%.10g",
-    )
-    print(f"CSV written to: {csv_path}")
-
-    # Write median (medoid) and mean xyz trajectories
-    median_xyz_path = plot_stem + "_median.xyz"
-    mean_xyz_path = plot_stem + "_mean.xyz"
-
-    print("Writing median (medoid) trajectory...")
-    median_frames = []
-    for ti, layer in enumerate(layers):
-        mi = medoid_indices[ti]
-        n, comment, atoms, coords = read_xyz_frame(layer[mi]["xyz"])
-        comment = f"{comment} | median(medoid) | timestep={timesteps[ti]}"
-        median_frames.append((n, comment, atoms, coords))
-    write_xyz_trajectory(median_frames, median_xyz_path)
-    print(f"Median trajectory written to: {median_xyz_path}")
-
-    print("Writing mean trajectory...")
-    mean_frames = []
-    for ti, layer in enumerate(layers):
-        all_coords = []
-        atoms_ref = None
-        natoms_ref = None
-        for c in layer:
-            n, _comment, atoms, coords = read_xyz_frame(c["xyz"])
-            all_coords.append(coords)
-            if atoms_ref is None:
-                atoms_ref = atoms
-                natoms_ref = n
-        mean_coords = np.mean(np.stack(all_coords, axis=0), axis=0)
-        comment = f"mean over {len(layer)} candidates | timestep={timesteps[ti]}"
-        mean_frames.append((natoms_ref, comment, atoms_ref, mean_coords))
-    write_xyz_trajectory(mean_frames, mean_xyz_path)
-    print(f"Mean trajectory written to: {mean_xyz_path}")
 
 
 if __name__ == "__main__":
