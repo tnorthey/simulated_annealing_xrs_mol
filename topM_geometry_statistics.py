@@ -6,8 +6,9 @@ For each timestep, select the topM best-fitting xyz files, compute the
 requested geometry (bond / angle / dihedral), and plot the per-timestep
 mean and closest-to-mean frame.
 
-The closest-to-mean frame is the actual candidate whose RMSD to the
-per-timestep mean structure is minimal.
+The closest-to-mean frame can be selected either by:
+  - RMSD to the per-timestep mean structure, or
+  - distance in requested geometry space to the per-timestep geometry mean.
 
 No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
@@ -135,6 +136,19 @@ def select_closest_to_mean(
         [rmsd_fn(c, mean_coords, indices=rmsd_indices) for c in coords], dtype=np.float64
     )
     return int(np.argmin(dists))
+
+
+def select_closest_by_geometry(
+    geom: np.ndarray, target: np.ndarray, *, dihedral_col: int | None = None
+) -> int:
+    """Return index of row in geom closest to target in geometry space."""
+    diff = geom - target[None, :]
+    if dihedral_col is not None:
+        # Shortest signed angular difference in degrees.
+        ang = diff[:, dihedral_col]
+        diff[:, dihedral_col] = (ang + 180.0) % 360.0 - 180.0
+    d2 = np.sum(diff * diff, axis=1)
+    return int(np.argmin(d2))
 
 
 def load_topM_candidates(directory, topM):
@@ -320,8 +334,19 @@ def main():
         type=str,
         default=None,
         help=(
-            "Comma-separated atom indices (0-based) for RMSD in closest-to-mean selection. "
+            "Comma-separated atom indices (0-based) for RMSD in closest-to-mean selection "
+            "(used when --closest-selection=rmsd). "
             "Example: '0,1,2,3,4,5'. Default: all atoms."
+        ),
+    )
+    parser.add_argument(
+        "--closest-selection",
+        choices=["rmsd", "geometry"],
+        default="rmsd",
+        help=(
+            "How to choose the per-timestep closest-to-mean representative frame: "
+            "'rmsd' uses RMSD to the mean structure, "
+            "'geometry' uses distance to mean of requested geometry values."
         ),
     )
     parser.add_argument(
@@ -385,7 +410,12 @@ def main():
 
     plot_stem = os.path.splitext(args.output_plot)[0]
     csv_path = plot_stem + ".csv"
-    closest_xyz_path = plot_stem + "_closest_to_mean.xyz"
+    using_geometry_closest = args.closest_selection == "geometry"
+    closest_xyz_path = (
+        plot_stem + "_closest_geometry_to_mean.xyz"
+        if using_geometry_closest
+        else plot_stem + "_closest_to_mean.xyz"
+    )
     mean_xyz_path = plot_stem + "_mean.xyz"
 
     col_labels = _column_labels(
@@ -415,10 +445,11 @@ def main():
                     closest[:, ci] = raw[:, base + 1]
                     stds[:, ci] = raw[:, base + 2]
                 n_timesteps = raw.shape[0]
+                closest_header_tag = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
                 try:
                     with open(csv_path, "r") as f:
                         header_line = f.readline().strip()
-                    loaded_from_csv = "closest_" in header_line
+                    loaded_from_csv = closest_header_tag in header_line
                 except OSError:
                     loaded_from_csv = False
                 if loaded_from_csv:
@@ -427,7 +458,10 @@ def main():
                         f"Use --recompute to force recalculation."
                     )
                 else:
-                    print("Cached CSV uses legacy median columns, recomputing...")
+                    print(
+                        "Cached CSV does not match requested closest-selection mode "
+                        "(or uses legacy headers), recomputing..."
+                    )
             else:
                 print(f"CSV column count mismatch ({raw.shape[1]} vs expected {expected_cols}), recomputing...")
         except Exception as e:
@@ -450,7 +484,10 @@ def main():
             f"topM={'all' if args.topM is None else args.topM}"
         )
 
-        print("Computing geometry and selecting closest-to-mean frames...")
+        if using_geometry_closest:
+            print("Computing geometry and selecting geometry-closest-to-mean frames...")
+        else:
+            print("Computing geometry and selecting RMSD-closest-to-mean frames...")
         means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
         closest = np.zeros((n_timesteps, n_cols), dtype=np.float64)
         stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
@@ -473,9 +510,14 @@ def main():
                     means[ti, ci] = np.mean(geom[:, ci])
                     stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
-            closest_idx = select_closest_to_mean(
-                layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices
-            )
+            if using_geometry_closest:
+                closest_idx = select_closest_by_geometry(
+                    geom, means[ti, :], dihedral_col=dihedral_col
+                )
+            else:
+                closest_idx = select_closest_to_mean(
+                    layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices
+                )
             closest_indices.append(closest_idx)
             closest[ti, :] = geom[closest_idx, :]
 
@@ -485,9 +527,10 @@ def main():
 
         # Write CSV
         header_parts = ["time_fs"]
+        closest_prefix = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
         for label in col_labels:
             short = label.split(" (")[0].replace(" ", "_")
-            header_parts.extend([f"mean_{short}", f"closest_{short}", f"std_{short}"])
+            header_parts.extend([f"mean_{short}", f"{closest_prefix}{short}", f"std_{short}"])
 
         cols_out = [x]
         for i in range(n_cols):
@@ -509,7 +552,8 @@ def main():
         for ti, layer_i in enumerate(layers):
             mi = closest_indices[ti]
             n, comment, atoms, coords = read_xyz_frame(layer_i[mi]["xyz"])
-            comment = f"{comment} | closest-to-mean | timestep={timesteps[ti]}"
+            sel_tag = "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
+            comment = f"{comment} | {sel_tag} | timestep={timesteps[ti]}"
             closest_frames.append((n, comment, atoms, coords))
         write_xyz_trajectory(closest_frames, closest_xyz_path)
         print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
@@ -573,11 +617,14 @@ def main():
             color="C0",
             label="±1σ",
         )
+        closest_plot_label = (
+            "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
+        )
         ax.plot(
             x,
             closest[:, i],
             linewidth=2,
-            label="closest-to-mean",
+            label=closest_plot_label,
             color="C1",
             linestyle="--",
         )
