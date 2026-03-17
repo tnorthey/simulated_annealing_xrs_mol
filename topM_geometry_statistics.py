@@ -112,10 +112,9 @@ def compute_geometry_for_layer(
 
 
 def wrap_dihedral_column(data: np.ndarray, col_idx: int) -> np.ndarray:
-    """Shift dihedrals: negative values +360, then -180 (same convention as compare_random_subsets.py)."""
+    """Shift dihedrals: negative values +360, then -180, then +180 to re-center."""
     vals = data[:, col_idx].copy()
     vals = np.where(vals < 0, vals + 360.0, vals)
-    vals -= 180.0
     data[:, col_idx] = vals
     return data
 
