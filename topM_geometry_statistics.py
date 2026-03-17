@@ -378,7 +378,7 @@ def main():
             label="±1σ",
         )
         ax.plot(
-            x, medoids[:, i], linewidth=2, label="medoid", color="C1", linestyle="--"
+            x, medoids[:, i], linewidth=2, label="median", color="C1", linestyle="--"
         )
         ax.set_ylabel(col_labels[i])
         ax.grid(True, alpha=0.3)
