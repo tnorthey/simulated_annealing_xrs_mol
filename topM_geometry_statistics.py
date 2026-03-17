@@ -58,6 +58,37 @@ def read_xyz_coords(path):
     return xyz
 
 
+def read_xyz_frame(path):
+    """Read a single-frame xyz file, returning (natoms, comment, atoms, coords)."""
+    with open(path, "r") as f:
+        n = int(f.readline().strip())
+        comment = f.readline().rstrip("\n")
+        atoms: list[str] = []
+        coords = np.zeros((n, 3), dtype=np.float64)
+        for i in range(n):
+            parts = f.readline().split()
+            atoms.append(parts[0])
+            coords[i, 0] = float(parts[1])
+            coords[i, 1] = float(parts[2])
+            coords[i, 2] = float(parts[3])
+    return n, comment, atoms, coords
+
+
+def write_xyz_trajectory(frames: Sequence[tuple], path: str):
+    """Write a multi-frame xyz trajectory.
+
+    frames: list of (natoms, comment, atoms, coords) tuples.
+    """
+    with open(path, "w") as f:
+        for natoms, comment, atoms, coords in frames:
+            f.write(f"{natoms}\n")
+            f.write(f"{comment}\n")
+            for i in range(natoms):
+                f.write(
+                    f"{atoms[i]:>2s} {coords[i, 0]:16.10f} {coords[i, 1]:16.10f} {coords[i, 2]:16.10f}\n"
+                )
+
+
 def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray) -> float:
     """Kabsch-aligned RMSD between two (N,3) coordinate arrays."""
     Pc = P - P.mean(axis=0, keepdims=True)
@@ -319,6 +350,7 @@ def main():
     means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
     medoids = np.zeros((n_timesteps, n_cols), dtype=np.float64)
     stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+    medoid_indices: list[int] = []
 
     all_geom: list[np.ndarray] = []
     for ti, layer in enumerate(layers):
@@ -340,6 +372,7 @@ def main():
                 stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
         medoid_idx = select_medoid(layer, use_kabsch=not args.no_kabsch)
+        medoid_indices.append(medoid_idx)
         medoids[ti, :] = geom[medoid_idx, :]
 
     print()  # finish progress line
@@ -450,6 +483,39 @@ def main():
             fmt="%.10g",
         )
         print(f"CSV written to: {args.output_csv}")
+
+    # Write median (medoid) and mean xyz trajectories
+    plot_stem = os.path.splitext(args.output_plot)[0]
+    median_xyz_path = plot_stem + "_median.xyz"
+    mean_xyz_path = plot_stem + "_mean.xyz"
+
+    print("Writing median (medoid) trajectory...")
+    median_frames = []
+    for ti, layer in enumerate(layers):
+        mi = medoid_indices[ti]
+        n, comment, atoms, coords = read_xyz_frame(layer[mi]["xyz"])
+        comment = f"{comment} | median(medoid) | timestep={timesteps[ti]}"
+        median_frames.append((n, comment, atoms, coords))
+    write_xyz_trajectory(median_frames, median_xyz_path)
+    print(f"Median trajectory written to: {median_xyz_path}")
+
+    print("Writing mean trajectory...")
+    mean_frames = []
+    for ti, layer in enumerate(layers):
+        all_coords = []
+        atoms_ref = None
+        natoms_ref = None
+        for c in layer:
+            n, _comment, atoms, coords = read_xyz_frame(c["xyz"])
+            all_coords.append(coords)
+            if atoms_ref is None:
+                atoms_ref = atoms
+                natoms_ref = n
+        mean_coords = np.mean(np.stack(all_coords, axis=0), axis=0)
+        comment = f"mean over {len(layer)} candidates | timestep={timesteps[ti]}"
+        mean_frames.append((natoms_ref, comment, atoms_ref, mean_coords))
+    write_xyz_trajectory(mean_frames, mean_xyz_path)
+    print(f"Mean trajectory written to: {mean_xyz_path}")
 
 
 if __name__ == "__main__":
