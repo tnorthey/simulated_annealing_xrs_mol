@@ -578,22 +578,6 @@ def main():
         if i == 0:
             ax.legend(fontsize=legend_fs)
 
-    title_parts = []
-    if args.bond is not None:
-        title_parts.append(f"Bond {args.bond[0]}-{args.bond[1]}")
-    if args.angle is not None:
-        title_parts.append(
-            f"Angle {args.angle[0]}-{args.angle[1]}-{args.angle[2]}"
-        )
-    if args.dihedral is not None:
-        title_parts.append(
-            f"Dihedral {args.dihedral[0]}-{args.dihedral[1]}"
-            f"-{args.dihedral[2]}-{args.dihedral[3]}"
-        )
-    title = " / ".join(title_parts) if title_parts else "Geometry"
-    topM_str = f"topM={args.topM}" if args.topM is not None else "all candidates"
-    fig.suptitle(f"{title} — mean & medoid ({topM_str})", fontsize=title_fs)
-
     axes[-1].set_xlabel("time (fs)", fontsize=label_fs)
     xleft = 0.0 if args.xmin is None else float(args.xmin)
     xright = None if args.xmax is None else float(args.xmax)
