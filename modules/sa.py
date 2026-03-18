@@ -55,6 +55,9 @@ class Annealing:
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
         self.last_chain_results = None
+        # Reset backend-array cache per call to avoid stale host->device mappings
+        # when Python reuses object ids across independent runs.
+        self._gpu_array_cache = {}
         ######## READ BOND/ANGLE PARAMS #######
         # Bonds
         bond_atom1_idx_arr = bond_param_array[:, 0].astype(int)
