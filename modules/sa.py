@@ -11,7 +11,8 @@ class Annealing:
     """Simulated annealing functions"""
 
     def __init__(self):
-        pass
+        # Populated by GPU batched runs (gpu_chains > 1).
+        self.last_chain_results = None
 
     def simulated_annealing_modes_ho(
         self,
@@ -46,8 +47,11 @@ class Annealing:
         verbose: bool = False,
         backend: str = "cpu",
         gpu_emulation: bool = False,
+        gpu_chains: int = 1,
     ):
         """simulated annealing minimisation to target_function"""
+        # Clear stale results from prior invocations.
+        self.last_chain_results = None
         ######## READ BOND/ANGLE PARAMS #######
         # Bonds
         bond_atom1_idx_arr = bond_param_array[:, 0].astype(int)
@@ -73,6 +77,7 @@ class Annealing:
         ##=#=#=# DEFINITIONS #=#=#=##
         natoms = starting_xyz.shape[0]  # number of atoms
         c_tuning = c_tuning_initial  # initialise C_tuning
+        gpu_chains = max(1, int(gpu_chains))
         # nmodes = displacements.shape[0]  # number of displacement vectors
         # nmode_indices = len(mode_indices)
         # print((nmodes, nmode_indices))
@@ -642,6 +647,304 @@ class Annealing:
                 c_tuning_adjusted,
             )
 
+        def run_annealing_gpu_batched(nsteps, xp, n_chains):
+            """
+            Run multiple independent SA chains in parallel on GPU and
+            return the best chain outcome.
+            """
+            # Backend arrays with chain dimension
+            xyz = xp.repeat(
+                xp.asarray(starting_xyz, dtype=xp.float64)[xp.newaxis, :, :],
+                n_chains,
+                axis=0,
+            )
+            xyz_trial = xp.empty_like(xyz)
+            xyz_best = xyz.copy()
+
+            predicted_start_xp = xp.asarray(predicted_start, dtype=xp.float64)
+            if predicted_start_xp.ndim == 1:
+                predicted_best = xp.repeat(
+                    predicted_start_xp[xp.newaxis, :], n_chains, axis=0
+                )
+            elif predicted_start_xp.ndim == 2 and predicted_start_xp.shape[0] == n_chains:
+                predicted_best = predicted_start_xp.copy()
+            else:
+                predicted_best = xp.repeat(
+                    predicted_start_xp.reshape(1, -1), n_chains, axis=0
+                )
+
+            f_best = xp.full(n_chains, float(f_start), dtype=xp.float64)
+            f_xray_best = xp.full(n_chains, float(f_xray_start), dtype=xp.float64)
+            f = xp.full(n_chains, 1e9, dtype=xp.float64)
+            c = 0
+
+            n_mode_indices = len(mode_indices)
+            mdisp = xp.asarray(displacements, dtype=xp.float64)
+            step_size_xp = xp.asarray(step_size_array, dtype=xp.float64)
+            qvector_xp = xp.asarray(qvector, dtype=xp.float64)
+            target_function_xp = xp.asarray(target_function, dtype=xp.float64)
+            reference_iam_xp = xp.asarray(reference_iam, dtype=xp.float64)
+            abs_target_function_xp = xp.asarray(abs_target_function, dtype=xp.float64)
+            atomic_total_xp = xp.asarray(atomic_total, dtype=xp.float64)
+            compton_xp = xp.asarray(compton, dtype=xp.float64)
+            pre_molecular_xp = xp.asarray(pre_molecular, dtype=xp.float64)
+
+            # Constraints arrays
+            bond_atom1_idx = bond_atom1_idx_arr
+            bond_atom2_idx = bond_atom2_idx_arr
+            angle_atom1_idx = angle_atom1_idx_arr
+            angle_atom2_idx = angle_atom2_idx_arr
+            angle_atom3_idx = angle_atom3_idx_arr
+            torsion_atom1_idx = torsion_atom1_idx_arr
+            torsion_atom2_idx = torsion_atom2_idx_arr
+            torsion_atom3_idx = torsion_atom3_idx_arr
+            torsion_atom4_idx = torsion_atom4_idx_arr
+            r0_xp = xp.asarray(r0_arr, dtype=xp.float64)
+            k_xp = xp.asarray(k_arr, dtype=xp.float64)
+            theta0_xp = xp.asarray(theta0_arr, dtype=xp.float64)
+            k_theta_xp = xp.asarray(k_theta_arr, dtype=xp.float64)
+            delta0_xp = xp.asarray(delta0_arr, dtype=xp.float64)
+            k_delta_xp = xp.asarray(k_delta_arr, dtype=xp.float64)
+
+            total_bonding_contrib = 0.0
+            total_angular_contrib = 0.0
+            total_torsional_contrib = 0.0
+            total_xray_contrib = 0.0
+
+            inv_nsteps = 1.0 / nsteps
+            inv_qlen = 1.0 / qlen
+            HALF = 0.5
+
+            # Batched path currently supports isotropic mode only.
+            if ewald_mode:
+                raise NotImplementedError(
+                    "gpu_chains > 1 is not implemented for ewald_mode yet."
+                )
+
+            for i in range(nsteps):
+                tmp = 1.0 - i * inv_nsteps
+                temp = starting_temp * tmp
+
+                # Displace xyz along displacement vectors for all chains
+                summed_displacement = xp.zeros_like(xyz)
+                for mi in range(n_mode_indices):
+                    n = mode_indices[mi]
+                    scale = (
+                        step_size_xp[n]
+                        * tmp
+                        * (2.0 * xp.random.random(n_chains) - 1.0)
+                    )
+                    summed_displacement += mdisp[n][xp.newaxis, :, :] * scale[
+                        :, xp.newaxis, xp.newaxis
+                    ]
+                xyz_trial = xyz + summed_displacement
+
+                temp_accept = temp > xp.random.random(n_chains)
+                if bool(xp.any(temp_accept)):
+                    xyz = xp.where(temp_accept[:, xp.newaxis, xp.newaxis], xyz_trial, xyz)
+                    c += int(to_numpy(xp.sum(temp_accept), xp))
+
+                # Evaluate objective for all chains
+                molecular = xp.zeros((n_chains, qlen), dtype=xp.float64)
+                k = 0
+                for ii in range(natoms):
+                    for jj in range(ii + 1, natoms):
+                        dx = xyz_trial[:, ii, 0] - xyz_trial[:, jj, 0]
+                        dy = xyz_trial[:, ii, 1] - xyz_trial[:, jj, 1]
+                        dz = xyz_trial[:, ii, 2] - xyz_trial[:, jj, 2]
+                        r = xp.sqrt(dx * dx + dy * dy + dz * dz)
+                        qd = r[:, xp.newaxis] * qvector_xp[xp.newaxis, :]
+                        molecular += (
+                            2.0
+                            * pre_molecular_xp[k][xp.newaxis, :]
+                            * xp.sin(qd)
+                            / qd
+                        )
+                        k += 1
+                iam = molecular
+
+                # Objective function (PCD or IAM)
+                if pcd_mode:
+                    pred_mol = 100.0 * (iam / reference_iam_xp[xp.newaxis, :])
+                    diff = pred_mol - target_function_xp[xp.newaxis, :]
+                    sse = xp.sum(diff * diff, axis=1)
+                    if inelastic:
+                        offset = atomic_total_xp + compton_xp
+                    else:
+                        offset = atomic_total_xp
+                    predicted_function_ = pred_mol + 100.0 * (
+                        offset[xp.newaxis, :] / reference_iam_xp[xp.newaxis, :] - 1.0
+                    )
+                    xray_contrib = sse * inv_qlen
+                else:
+                    diff = iam - target_function_xp[xp.newaxis, :]
+                    sse = xp.sum(
+                        (diff * diff) / abs_target_function_xp[xp.newaxis, :], axis=1
+                    )
+                    if inelastic:
+                        predicted_function_ = (
+                            iam
+                            + atomic_total_xp[xp.newaxis, :]
+                            + compton_xp[xp.newaxis, :]
+                        )
+                    else:
+                        predicted_function_ = iam + atomic_total_xp[xp.newaxis, :]
+                    xray_contrib = sse * inv_qlen
+
+                bonding_contrib = xp.zeros(n_chains, dtype=xp.float64)
+                if bonds_bool and nbonds > 0:
+                    vec = (
+                        xyz_trial[:, bond_atom1_idx, :] - xyz_trial[:, bond_atom2_idx, :]
+                    )
+                    r = xp.sqrt(xp.sum(vec * vec, axis=2))
+                    bonding_contrib = xp.sum(
+                        k_xp[xp.newaxis, :] * HALF * (r - r0_xp[xp.newaxis, :]) ** 2,
+                        axis=1,
+                    )
+
+                angular_contrib = xp.zeros(n_chains, dtype=xp.float64)
+                if angles_bool and nangles > 0:
+                    ba = (
+                        xyz_trial[:, angle_atom1_idx, :] - xyz_trial[:, angle_atom2_idx, :]
+                    )
+                    bc = (
+                        xyz_trial[:, angle_atom3_idx, :] - xyz_trial[:, angle_atom2_idx, :]
+                    )
+                    norm_ba = xp.sqrt(xp.sum(ba * ba, axis=2))
+                    norm_bc = xp.sqrt(xp.sum(bc * bc, axis=2))
+                    cos_theta = xp.sum(ba * bc, axis=2) / (norm_ba * norm_bc)
+                    cos_theta = xp.clip(cos_theta, -1.0, 1.0)
+                    theta = xp.arccos(cos_theta)
+                    angular_contrib = xp.sum(
+                        k_theta_xp[xp.newaxis, :]
+                        * HALF
+                        * (theta - theta0_xp[xp.newaxis, :]) ** 2,
+                        axis=1,
+                    )
+
+                torsion_contrib = xp.zeros(n_chains, dtype=xp.float64)
+                if torsions_bool and ntorsions > 0:
+                    for i_tors in range(ntorsions):
+                        idx1 = torsion_atom1_idx[i_tors]
+                        idx2 = torsion_atom2_idx[i_tors]
+                        idx3 = torsion_atom3_idx[i_tors]
+                        idx4 = torsion_atom4_idx[i_tors]
+                        p0 = xyz_trial[:, idx1, :]
+                        p1 = xyz_trial[:, idx2, :]
+                        p2 = xyz_trial[:, idx3, :]
+                        p3 = xyz_trial[:, idx4, :]
+
+                        b0 = -1.0 * (p1 - p0)
+                        b1 = p2 - p1
+                        b2 = p3 - p2
+
+                        b1_norm = xp.sqrt(xp.sum(b1 * b1, axis=1))
+                        b1 = b1 / b1_norm[:, xp.newaxis]
+
+                        v = b0 - xp.sum(b0 * b1, axis=1)[:, xp.newaxis] * b1
+                        w = b2 - xp.sum(b2 * b1, axis=1)[:, xp.newaxis] * b1
+
+                        x_t = xp.sum(v * w, axis=1)
+                        y_t = xp.sum(xp.cross(b1, v) * w, axis=1)
+                        torsion = xp.arctan2(y_t, x_t)
+
+                        torsion_contrib += k_delta_xp[i_tors] * (
+                            1 + xp.cos(torsion - delta0_xp[i_tors])
+                        )
+
+                f_ = xray_contrib + c_tuning * (
+                    bonding_contrib + angular_contrib + torsion_contrib
+                )
+                improve = xp.logical_and(~temp_accept, f_ < f * 0.999)
+                if bool(xp.any(improve)):
+                    c += int(to_numpy(xp.sum(improve), xp))
+                    f = xp.where(improve, f_, f)
+                    xyz = xp.where(improve[:, xp.newaxis, xp.newaxis], xyz_trial, xyz)
+
+                    is_new_best = xp.logical_and(improve, f < f_best)
+                    if bool(xp.any(is_new_best)):
+                        f_best = xp.where(is_new_best, f, f_best)
+                        f_xray_best = xp.where(is_new_best, xray_contrib, f_xray_best)
+                        xyz_best = xp.where(
+                            is_new_best[:, xp.newaxis, xp.newaxis], xyz, xyz_best
+                        )
+                        predicted_best = xp.where(
+                            is_new_best[:, xp.newaxis], predicted_function_, predicted_best
+                        )
+
+                    improve_f = improve.astype(xp.float64)
+                    total_bonding_contrib += float(
+                        to_numpy(
+                            xp.sum(c_tuning * bonding_contrib * improve_f),
+                            xp,
+                        )
+                    )
+                    total_angular_contrib += float(
+                        to_numpy(
+                            xp.sum(c_tuning * angular_contrib * improve_f),
+                            xp,
+                        )
+                    )
+                    total_torsional_contrib += float(
+                        to_numpy(
+                            xp.sum(c_tuning * torsion_contrib * improve_f),
+                            xp,
+                        )
+                    )
+                    total_xray_contrib += float(
+                        to_numpy(
+                            xp.sum(xray_contrib * improve_f),
+                            xp,
+                        )
+                    )
+
+            priors_contrib = (
+                total_bonding_contrib + total_angular_contrib + total_torsional_contrib
+            )
+            total_contrib = total_xray_contrib + priors_contrib
+            if total_contrib > 0 and priors_contrib > 0:
+                xray_ratio = total_xray_contrib / total_contrib
+                bonding_ratio = total_bonding_contrib / total_contrib
+                angular_ratio = total_angular_contrib / total_contrib
+                torsional_ratio = total_torsional_contrib / total_contrib
+                c_tuning_adjusted = (
+                    (1 - tuning_ratio_target)
+                    * c_tuning
+                    / (1 - total_xray_contrib / total_contrib)
+                )
+            else:
+                (
+                    xray_ratio,
+                    bonding_ratio,
+                    angular_ratio,
+                    torsional_ratio,
+                    c_tuning_adjusted,
+                ) = (0, 0, 0, 0, 0)
+
+            best_chain_idx = int(to_numpy(xp.argmin(f_best), xp))
+            f_best_scalar = float(to_numpy(f_best[best_chain_idx], xp))
+            f_xray_best_scalar = float(to_numpy(f_xray_best[best_chain_idx], xp))
+            predicted_best_chain = predicted_best[best_chain_idx]
+            xyz_best_chain = xyz_best[best_chain_idx]
+
+            return (
+                f_best_scalar,
+                f_xray_best_scalar,
+                predicted_best_chain,
+                xyz_best_chain,
+                xray_ratio,
+                bonding_ratio,
+                angular_ratio,
+                torsional_ratio,
+                c,
+                c_tuning_adjusted,
+                f_best,
+                f_xray_best,
+                predicted_best,
+                xyz_best,
+                best_chain_idx,
+            )
+
         ### Call the run_annealing() function...
         start = default_timer()
         backend_name = str(backend).lower().strip()
@@ -660,18 +963,65 @@ class Annealing:
             ) = run_annealing(nsteps)
         else:
             backend_info = get_backend(backend_name, emulate=gpu_emulation)
-            (
-                f_best,
-                f_xray_best,
-                predicted_best,
-                xyz_best,
-                xray_ratio,
-                bonding_ratio,
-                angular_ratio,
-                torsional_ratio,
-                c,
-                c_tuning_adjusted,
-            ) = run_annealing_gpu(nsteps, backend_info.xp)
+            if gpu_chains > 1:
+                if ewald_mode:
+                    if verbose:
+                        print(
+                            "gpu_chains > 1 currently supports isotropic mode only; "
+                            "falling back to single-chain CUDA."
+                        )
+                    (
+                        f_best,
+                        f_xray_best,
+                        predicted_best,
+                        xyz_best,
+                        xray_ratio,
+                        bonding_ratio,
+                        angular_ratio,
+                        torsional_ratio,
+                        c,
+                        c_tuning_adjusted,
+                    ) = run_annealing_gpu(nsteps, backend_info.xp)
+                else:
+                    (
+                        f_best,
+                        f_xray_best,
+                        predicted_best,
+                        xyz_best,
+                        xray_ratio,
+                        bonding_ratio,
+                        angular_ratio,
+                        torsional_ratio,
+                        c,
+                        c_tuning_adjusted,
+                        f_best_all,
+                        f_xray_best_all,
+                        predicted_best_all,
+                        xyz_best_all,
+                        best_chain_idx,
+                    ) = run_annealing_gpu_batched(nsteps, backend_info.xp, gpu_chains)
+                    self.last_chain_results = {
+                        "f_best_all": to_numpy(f_best_all, backend_info.xp),
+                        "f_xray_best_all": to_numpy(f_xray_best_all, backend_info.xp),
+                        "predicted_best_all": to_numpy(
+                            predicted_best_all, backend_info.xp
+                        ),
+                        "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
+                        "best_chain_idx": int(best_chain_idx),
+                    }
+            else:
+                (
+                    f_best,
+                    f_xray_best,
+                    predicted_best,
+                    xyz_best,
+                    xray_ratio,
+                    bonding_ratio,
+                    angular_ratio,
+                    torsional_ratio,
+                    c,
+                    c_tuning_adjusted,
+                ) = run_annealing_gpu(nsteps, backend_info.xp)
             predicted_best = to_numpy(predicted_best, backend_info.xp)
             xyz_best = to_numpy(xyz_best, backend_info.xp)
         if verbose:

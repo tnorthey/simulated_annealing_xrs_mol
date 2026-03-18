@@ -51,6 +51,8 @@ mm_param_method = "sdf"
 gpu_backend = "cpu"
 # Emulate CUDA backend on CPU (useful for laptop testing)
 gpu_emulation_bool = false
+# Number of independent chains to run in parallel on GPU backend
+gpu_chains = 1
 
 # ============================================================================
 # SAMPLING PARAMETERS

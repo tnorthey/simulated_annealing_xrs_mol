@@ -70,6 +70,9 @@ def create_parser():
     options_group.add_argument('--gpu-emulation', action='store_true',
                               dest='options.gpu_emulation_bool',
                               help='Run CUDA backend using CPU emulation')
+    options_group.add_argument('--gpu-chains', type=int,
+                              dest='options.gpu_chains',
+                              help='Number of independent GPU chains to run in parallel')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')

@@ -111,6 +111,9 @@ class Input_to_params:
         self.gpu_emulation_bool = bool(
             data.get("options", {}).get("gpu_emulation_bool", False)
         )
+        self.gpu_chains = int(
+            data.get("options", {}).get("gpu_chains", 1)
+        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")
@@ -129,6 +132,15 @@ class Input_to_params:
             print(f"  Value: {self.gpu_backend}")
             print(f"  Allowed values: 'cpu' or 'cuda'")
             print(f"  Suggestion: Set gpu_backend = 'cpu' or 'cuda' in [options]")
+            print(f"{'='*60}\n")
+            sys.exit(1)
+        if self.gpu_chains < 1:
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid gpu_chains value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.gpu_chains}")
+            print(f"  Allowed values: integer >= 1")
+            print(f"  Suggestion: Set gpu_chains = 1 (or larger) in [options]")
             print(f"{'='*60}\n")
             sys.exit(1)
         # sampling options

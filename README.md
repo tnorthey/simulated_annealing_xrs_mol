@@ -15,6 +15,11 @@ Optional (CUDA backend):
 conda install -c conda-forge cupy
 ```
 
+Optional multi-chain CUDA execution (independent SA chains in parallel):
+- Set `gpu_backend = "cuda"` and `gpu_chains = <N>` in `input.toml`
+- Or use CLI: `python3 run.py --gpu-backend cuda --gpu-chains 8`
+- Outputs include one `.xyz/.dat` per chain (`..._c000`, `..._c001`, etc.) plus the best-chain file for compatibility
+
 ## Quick Start
 
 Run with default configuration:

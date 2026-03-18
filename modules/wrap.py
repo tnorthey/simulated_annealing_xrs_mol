@@ -942,6 +942,7 @@ class Wrapper:
                     p.c_tuning_initial,
                     backend=getattr(p, "gpu_backend", "cpu"),
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
+                    gpu_chains=getattr(p, "gpu_chains", 1),
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")
@@ -1014,6 +1015,85 @@ class Wrapper:
                 atomlist,
                 xyz_best,
             )
+            # If GPU multi-chain mode was used, also persist each chain result.
+            chain_results = getattr(sa, "last_chain_results", None)
+            if (
+                chain_results is not None
+                and "xyz_best_all" in chain_results
+                and np.ndim(chain_results["xyz_best_all"]) == 3
+                and chain_results["xyz_best_all"].shape[0] > 1
+            ):
+                xyz_best_all = np.asarray(chain_results["xyz_best_all"])
+                predicted_best_all = np.asarray(chain_results["predicted_best_all"])
+                f_xray_best_all = np.asarray(chain_results["f_xray_best_all"])
+                best_chain_idx = int(chain_results.get("best_chain_idx", -1))
+                print(
+                    f"Writing per-chain outputs for {xyz_best_all.shape[0]} GPU chains "
+                    f"(best chain index: {best_chain_idx})"
+                )
+                for chain_idx in range(xyz_best_all.shape[0]):
+                    xyz_chain = xyz_best_all[chain_idx]
+                    f_xray_chain = float(f_xray_best_all[chain_idx])
+
+                    # bond-length of interest
+                    bond_distance_chain = np.linalg.norm(
+                        xyz_chain[p.bond_indices[0], :] - xyz_chain[p.bond_indices[1], :]
+                    )
+                    # angle of interest
+                    p0c = np.array(xyz_chain[p.angle_indices[0], :])
+                    p1c = np.array(xyz_chain[p.angle_indices[1], :])  # central point
+                    p2c = np.array(xyz_chain[p.angle_indices[2], :])
+                    angle_degrees_chain = analysis.directional_angle_3d(
+                        p0c, p1c, p2c, [0, 1, 0]
+                    )
+                    # dihedral of interest
+                    p0c = np.array(xyz_chain[p.dihedral_indices[0], :])
+                    p1c = np.array(xyz_chain[p.dihedral_indices[1], :])
+                    p2c = np.array(xyz_chain[p.dihedral_indices[2], :])
+                    p3c = np.array(xyz_chain[p.dihedral_indices[3], :])
+                    dihedral_chain = analysis.new_dihedral((p0c, p1c, p2c, p3c))
+                    if rmsd_target_bool:
+                        rmsd_chain, _ = m.rmsd_kabsch(
+                            xyz_chain, target_xyz, p.rmsd_indices
+                        )
+                        mapd_chain = m.mapd_function(
+                            xyz_chain, target_xyz, p.rmsd_indices
+                        )
+                    else:
+                        rmsd_chain, mapd_chain = 0.0, 0.0
+                    e_mol_chain = 0.0  # per-chain HF not computed here
+
+                    header_str_chain = (
+                        "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f"
+                        % (
+                            f_xray_chain,
+                            rmsd_chain,
+                            bond_distance_chain,
+                            angle_degrees_chain,
+                            dihedral_chain,
+                            e_mol_chain,
+                            mapd_chain,
+                        )
+                    )
+                    f_chain_str = ("%10.8f" % f_xray_chain).zfill(12)
+                    chain_tag = f"c{chain_idx:03d}"
+                    m.write_xyz(
+                        "%s/%s_%s_%s.xyz" % (p.results_dir, run_id, f_chain_str, chain_tag),
+                        header_str_chain,
+                        atomlist,
+                        xyz_chain,
+                    )
+                    if p.write_dat_file_bool:
+                        predicted_chain = predicted_best_all[chain_idx]
+                        if p.ewald_mode:
+                            predicted_chain = x.spherical_rotavg(
+                                predicted_chain, p.th, p.ph
+                            )
+                        np.savetxt(
+                            "%s/%s_%s_%s.dat"
+                            % (p.results_dir, run_id, f_chain_str, chain_tag),
+                            np.column_stack((p.qvector, predicted_chain)),
+                        )
             ### analysis values dictionary for final print out
             A = {
                 "f_xray_best": "%10.8f" % f_xray_best,
