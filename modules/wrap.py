@@ -197,6 +197,29 @@ def _extract_params_from_geometry_light(atomlist, xyz: np.ndarray):
     return bond_param_array, angle_param_array, torsion_param_array
 
 
+def _read_scattering_dat(path: str):
+    """
+    Read scattering data as either:
+    - 1 column: I(q) only (q is index-based)
+    - >=2 columns: first column q, second column I(q)
+    """
+    data = np.loadtxt(path)
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim == 0:
+        arr = arr.reshape(1)
+    if arr.ndim == 1:
+        q = np.arange(arr.size, dtype=np.float64)
+        intensity = arr.astype(np.float64)
+    else:
+        if arr.shape[1] >= 2:
+            q = arr[:, 0].astype(np.float64)
+            intensity = arr[:, 1].astype(np.float64)
+        else:
+            q = np.arange(arr.shape[0], dtype=np.float64)
+            intensity = arr[:, 0].astype(np.float64)
+    return q, intensity
+
+
 #############################
 class Wrapper:
     """wrapper functions for simulated annealing strategies"""
@@ -767,7 +790,16 @@ class Wrapper:
 
         elif p.mode == "normal":
             # if target file is a data file, read as target_function
-            target_function_ = np.loadtxt(target_file)
+            target_q, target_iq = _read_scattering_dat(target_file)
+            if target_q.size != p.qvector.size or not np.allclose(target_q, p.qvector):
+                print(
+                    f"Interpolating target data from {target_q.size} points to {p.qvector.size} q-points"
+                )
+                target_function_ = np.interp(
+                    p.qvector, target_q, target_iq, left=target_iq[0], right=target_iq[-1]
+                )
+            else:
+                target_function_ = target_iq
             excitation_factor = p.excitation_factor
             print(f"EXCITATION FACTOR = {excitation_factor}")
             target_function_ /= excitation_factor  # scale target function up to 100% to fit the calculations
