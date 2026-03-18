@@ -964,6 +964,12 @@ class Annealing:
         else:
             backend_info = get_backend(backend_name, emulate=gpu_emulation)
             if gpu_chains > 1:
+                print(
+                    f"[GPU] Multi-chain mode enabled: launching {gpu_chains} chains "
+                    f"(nsteps={nsteps}, backend={backend_name})"
+                )
+                for chain_idx in range(gpu_chains):
+                    print(f"[GPU] Starting chain {chain_idx + 1}/{gpu_chains}")
                 if ewald_mode:
                     if verbose:
                         print(
@@ -1009,6 +1015,10 @@ class Annealing:
                         "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
                         "best_chain_idx": int(best_chain_idx),
                     }
+                    print(
+                        f"[GPU] All {gpu_chains} chains finished. "
+                        f"Best chain index: {best_chain_idx}"
+                    )
             else:
                 (
                     f_best,
