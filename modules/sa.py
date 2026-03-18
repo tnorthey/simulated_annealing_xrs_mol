@@ -13,6 +13,8 @@ class Annealing:
     def __init__(self):
         # Populated by GPU batched runs (gpu_chains > 1).
         self.last_chain_results = None
+        # Cache for static host->device array conversions.
+        self._gpu_array_cache = {}
 
     def simulated_annealing_modes_ho(
         self,
@@ -48,6 +50,7 @@ class Annealing:
         backend: str = "cpu",
         gpu_emulation: bool = False,
         gpu_chains: int = 1,
+        keep_on_device: bool = False,
     ):
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
@@ -78,6 +81,21 @@ class Annealing:
         natoms = starting_xyz.shape[0]  # number of atoms
         c_tuning = c_tuning_initial  # initialise C_tuning
         gpu_chains = max(1, int(gpu_chains))
+
+        def _as_backend_array(xp, arr, dtype=None):
+            """Convert to backend array, reusing cached static transfers when possible."""
+            xp_ndarray = getattr(xp, "ndarray", None)
+            if xp_ndarray is not None and isinstance(arr, xp_ndarray):
+                if dtype is None:
+                    return arr
+                return arr.astype(dtype, copy=False)
+            key = (id(xp), id(arr), str(dtype))
+            cached = self._gpu_array_cache.get(key)
+            if cached is not None:
+                return cached
+            out = xp.asarray(arr, dtype=dtype)
+            self._gpu_array_cache[key] = out
+            return out
         # nmodes = displacements.shape[0]  # number of displacement vectors
         # nmode_indices = len(mode_indices)
         # print((nmodes, nmode_indices))
@@ -415,6 +433,7 @@ class Annealing:
             def _to_scalar(value):
                 return float(to_numpy(value, xp))
 
+            prep_start = default_timer()
             # Backend arrays
             xyz = xp.asarray(starting_xyz, dtype=xp.float64).copy()
             xyz_trial = xp.empty_like(xyz)
@@ -424,15 +443,15 @@ class Annealing:
             f = 1e9  # high initial value so 1st step will be accepted
             c = 0
             n_mode_indices = len(mode_indices)
-            mdisp = xp.asarray(displacements, dtype=xp.float64)
-            step_size_xp = xp.asarray(step_size_array, dtype=xp.float64)
-            qvector_xp = xp.asarray(qvector, dtype=xp.float64)
-            target_function_xp = xp.asarray(target_function, dtype=xp.float64)
-            reference_iam_xp = xp.asarray(reference_iam, dtype=xp.float64)
-            abs_target_function_xp = xp.asarray(abs_target_function, dtype=xp.float64)
-            atomic_total_xp = xp.asarray(atomic_total, dtype=xp.float64)
-            compton_xp = xp.asarray(compton, dtype=xp.float64)
-            pre_molecular_xp = xp.asarray(pre_molecular, dtype=xp.float64)
+            mdisp = _as_backend_array(xp, displacements, xp.float64)
+            step_size_xp = _as_backend_array(xp, step_size_array, xp.float64)
+            qvector_xp = _as_backend_array(xp, qvector, xp.float64)
+            target_function_xp = _as_backend_array(xp, target_function, xp.float64)
+            reference_iam_xp = _as_backend_array(xp, reference_iam, xp.float64)
+            abs_target_function_xp = _as_backend_array(xp, abs_target_function, xp.float64)
+            atomic_total_xp = _as_backend_array(xp, atomic_total, xp.float64)
+            compton_xp = _as_backend_array(xp, compton, xp.float64)
+            pre_molecular_xp = _as_backend_array(xp, pre_molecular, xp.float64)
 
             # Constraints arrays
             bond_atom1_idx = bond_atom1_idx_arr
@@ -444,12 +463,12 @@ class Annealing:
             torsion_atom2_idx = torsion_atom2_idx_arr
             torsion_atom3_idx = torsion_atom3_idx_arr
             torsion_atom4_idx = torsion_atom4_idx_arr
-            r0_xp = xp.asarray(r0_arr, dtype=xp.float64)
-            k_xp = xp.asarray(k_arr, dtype=xp.float64)
-            theta0_xp = xp.asarray(theta0_arr, dtype=xp.float64)
-            k_theta_xp = xp.asarray(k_theta_arr, dtype=xp.float64)
-            delta0_xp = xp.asarray(delta0_arr, dtype=xp.float64)
-            k_delta_xp = xp.asarray(k_delta_arr, dtype=xp.float64)
+            r0_xp = _as_backend_array(xp, r0_arr, xp.float64)
+            k_xp = _as_backend_array(xp, k_arr, xp.float64)
+            theta0_xp = _as_backend_array(xp, theta0_arr, xp.float64)
+            k_theta_xp = _as_backend_array(xp, k_theta_arr, xp.float64)
+            delta0_xp = _as_backend_array(xp, delta0_arr, xp.float64)
+            k_delta_xp = _as_backend_array(xp, k_delta_arr, xp.float64)
 
             total_bonding_contrib = 0.0
             total_angular_contrib = 0.0
@@ -468,6 +487,8 @@ class Annealing:
                 qy = r_grid * xp.sin(th_grid) * xp.sin(ph_grid)
                 qz = r_grid * xp.cos(th_grid)
 
+            prep_time_s = default_timer() - prep_start
+            loop_start = default_timer()
             for i in range(nsteps):
                 tmp = 1.0 - i * inv_nsteps
                 temp = starting_temp * tmp
@@ -633,6 +654,7 @@ class Annealing:
                     torsional_ratio,
                     c_tuning_adjusted,
                 ) = (0, 0, 0, 0, 0)
+            loop_time_s = default_timer() - loop_start
 
             return (
                 f_best,
@@ -645,6 +667,8 @@ class Annealing:
                 torsional_ratio,
                 c,
                 c_tuning_adjusted,
+                prep_time_s,
+                loop_time_s,
             )
 
         def run_annealing_gpu_batched(nsteps, xp, n_chains):
@@ -652,6 +676,7 @@ class Annealing:
             Run multiple independent SA chains in parallel on GPU and
             return the best chain outcome.
             """
+            prep_start = default_timer()
             # Backend arrays with chain dimension
             xyz = xp.repeat(
                 xp.asarray(starting_xyz, dtype=xp.float64)[xp.newaxis, :, :],
@@ -679,15 +704,15 @@ class Annealing:
             c = 0
 
             n_mode_indices = len(mode_indices)
-            mdisp = xp.asarray(displacements, dtype=xp.float64)
-            step_size_xp = xp.asarray(step_size_array, dtype=xp.float64)
-            qvector_xp = xp.asarray(qvector, dtype=xp.float64)
-            target_function_xp = xp.asarray(target_function, dtype=xp.float64)
-            reference_iam_xp = xp.asarray(reference_iam, dtype=xp.float64)
-            abs_target_function_xp = xp.asarray(abs_target_function, dtype=xp.float64)
-            atomic_total_xp = xp.asarray(atomic_total, dtype=xp.float64)
-            compton_xp = xp.asarray(compton, dtype=xp.float64)
-            pre_molecular_xp = xp.asarray(pre_molecular, dtype=xp.float64)
+            mdisp = _as_backend_array(xp, displacements, xp.float64)
+            step_size_xp = _as_backend_array(xp, step_size_array, xp.float64)
+            qvector_xp = _as_backend_array(xp, qvector, xp.float64)
+            target_function_xp = _as_backend_array(xp, target_function, xp.float64)
+            reference_iam_xp = _as_backend_array(xp, reference_iam, xp.float64)
+            abs_target_function_xp = _as_backend_array(xp, abs_target_function, xp.float64)
+            atomic_total_xp = _as_backend_array(xp, atomic_total, xp.float64)
+            compton_xp = _as_backend_array(xp, compton, xp.float64)
+            pre_molecular_xp = _as_backend_array(xp, pre_molecular, xp.float64)
 
             # Constraints arrays
             bond_atom1_idx = bond_atom1_idx_arr
@@ -699,12 +724,12 @@ class Annealing:
             torsion_atom2_idx = torsion_atom2_idx_arr
             torsion_atom3_idx = torsion_atom3_idx_arr
             torsion_atom4_idx = torsion_atom4_idx_arr
-            r0_xp = xp.asarray(r0_arr, dtype=xp.float64)
-            k_xp = xp.asarray(k_arr, dtype=xp.float64)
-            theta0_xp = xp.asarray(theta0_arr, dtype=xp.float64)
-            k_theta_xp = xp.asarray(k_theta_arr, dtype=xp.float64)
-            delta0_xp = xp.asarray(delta0_arr, dtype=xp.float64)
-            k_delta_xp = xp.asarray(k_delta_arr, dtype=xp.float64)
+            r0_xp = _as_backend_array(xp, r0_arr, xp.float64)
+            k_xp = _as_backend_array(xp, k_arr, xp.float64)
+            theta0_xp = _as_backend_array(xp, theta0_arr, xp.float64)
+            k_theta_xp = _as_backend_array(xp, k_theta_arr, xp.float64)
+            delta0_xp = _as_backend_array(xp, delta0_arr, xp.float64)
+            k_delta_xp = _as_backend_array(xp, k_delta_arr, xp.float64)
 
             total_bonding_contrib = 0.0
             total_angular_contrib = 0.0
@@ -721,6 +746,8 @@ class Annealing:
                     "gpu_chains > 1 is not implemented for ewald_mode yet."
                 )
 
+            prep_time_s = default_timer() - prep_start
+            loop_start = default_timer()
             for i in range(nsteps):
                 tmp = 1.0 - i * inv_nsteps
                 temp = starting_temp * tmp
@@ -926,6 +953,7 @@ class Annealing:
             f_xray_best_scalar = float(to_numpy(f_xray_best[best_chain_idx], xp))
             predicted_best_chain = predicted_best[best_chain_idx]
             xyz_best_chain = xyz_best[best_chain_idx]
+            loop_time_s = default_timer() - loop_start
 
             return (
                 f_best_scalar,
@@ -943,6 +971,8 @@ class Annealing:
                 predicted_best,
                 xyz_best,
                 best_chain_idx,
+                prep_time_s,
+                loop_time_s,
             )
 
         ### Call the run_annealing() function...
@@ -963,6 +993,7 @@ class Annealing:
             ) = run_annealing(nsteps)
         else:
             backend_info = get_backend(backend_name, emulate=gpu_emulation)
+            gpu_d2h_time_s = 0.0
             if gpu_chains > 1:
                 print(
                     f"[GPU] Multi-chain mode enabled: launching {gpu_chains} chains "
@@ -987,6 +1018,8 @@ class Annealing:
                         torsional_ratio,
                         c,
                         c_tuning_adjusted,
+                        prep_time_s,
+                        loop_time_s,
                     ) = run_annealing_gpu(nsteps, backend_info.xp)
                 else:
                     (
@@ -1005,16 +1038,27 @@ class Annealing:
                         predicted_best_all,
                         xyz_best_all,
                         best_chain_idx,
+                        prep_time_s,
+                        loop_time_s,
                     ) = run_annealing_gpu_batched(nsteps, backend_info.xp, gpu_chains)
-                    self.last_chain_results = {
-                        "f_best_all": to_numpy(f_best_all, backend_info.xp),
-                        "f_xray_best_all": to_numpy(f_xray_best_all, backend_info.xp),
-                        "predicted_best_all": to_numpy(
-                            predicted_best_all, backend_info.xp
-                        ),
-                        "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
-                        "best_chain_idx": int(best_chain_idx),
-                    }
+                    if keep_on_device:
+                        self.last_chain_results = {
+                            "f_best_all": f_best_all,
+                            "f_xray_best_all": f_xray_best_all,
+                            "predicted_best_all": predicted_best_all,
+                            "xyz_best_all": xyz_best_all,
+                            "best_chain_idx": int(best_chain_idx),
+                        }
+                    else:
+                        self.last_chain_results = {
+                            "f_best_all": to_numpy(f_best_all, backend_info.xp),
+                            "f_xray_best_all": to_numpy(f_xray_best_all, backend_info.xp),
+                            "predicted_best_all": to_numpy(
+                                predicted_best_all, backend_info.xp
+                            ),
+                            "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
+                            "best_chain_idx": int(best_chain_idx),
+                        }
                     print(
                         f"[GPU] All {gpu_chains} chains finished. "
                         f"Best chain index: {best_chain_idx}"
@@ -1031,9 +1075,24 @@ class Annealing:
                     torsional_ratio,
                     c,
                     c_tuning_adjusted,
+                    prep_time_s,
+                    loop_time_s,
                 ) = run_annealing_gpu(nsteps, backend_info.xp)
-            predicted_best = to_numpy(predicted_best, backend_info.xp)
-            xyz_best = to_numpy(xyz_best, backend_info.xp)
+            if not keep_on_device:
+                d2h_start = default_timer()
+                predicted_best = to_numpy(predicted_best, backend_info.xp)
+                xyz_best = to_numpy(xyz_best, backend_info.xp)
+                gpu_d2h_time_s = default_timer() - d2h_start
+            gpu_total_time_s = float(default_timer() - start)
+            print(
+                "[GPU-TIMING] prep(H2D+init): "
+                f"{prep_time_s:6.3f}s | compute(loop): {loop_time_s:6.3f}s | "
+                f"copy-back(D2H): {gpu_d2h_time_s:6.3f}s | total: {gpu_total_time_s:6.3f}s"
+            )
+            if keep_on_device:
+                print(
+                    "[GPU-TIMING] D2H copy deferred (persistent GPU mode keeps arrays on device)."
+                )
         if verbose:
             print("run_annealing() time: %3.2f s" % float(default_timer() - start))
             print("xray contrib ratio: %f" % xray_ratio)

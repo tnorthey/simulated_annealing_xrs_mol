@@ -843,6 +843,12 @@ class Wrapper:
         xyz_start_ = xyz_start  # save original xyz_start as xyz_start_
         # Tuning parameter
         c_tuning = p.c_tuning_initial  # initialise C_tuning
+        use_gpu_persistent = (
+            getattr(p, "gpu_backend", "cpu") == "cuda"
+            and not getattr(p, "gpu_emulation_bool", False)
+        )
+        if use_gpu_persistent:
+            print("GPU persistent mode enabled: keeping SA/GA state on device across restarts.")
         print("tuning_ratio_target = %3.2f" % p.tuning_ratio_target)
         for k in range(p.ntotalruns):
             #################################
@@ -943,12 +949,19 @@ class Wrapper:
                     backend=getattr(p, "gpu_backend", "cpu"),
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
                     gpu_chains=getattr(p, "gpu_chains", 1),
+                    keep_on_device=use_gpu_persistent,
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")
                 print("c_tuning: %9.8f" % c_tuning)
                 c_tuning = c_tuning_adjusted
                 print("c_tuning_adjusted: %9.8f" % c_tuning_adjusted)
+
+            if use_gpu_persistent:
+                if hasattr(xyz_best, "get"):
+                    xyz_best = xyz_best.get()
+                if hasattr(predicted_best, "get"):
+                    predicted_best = predicted_best.get()
 
             ### analysis on xyz_best
             # bond-length of interest
@@ -1006,31 +1019,37 @@ class Wrapper:
                 e_mol,
                 mapd,
             )
-            ### write best structure to xyz file
-            print("writing to xyz... (f: %10.8f)" % f_xray_best)
-            f_best_str = ("%10.8f" % f_xray_best).zfill(12)
-            m.write_xyz(
-                "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
-                header_str,
-                atomlist,
-                xyz_best,
-            )
-            # If GPU multi-chain mode was used, also persist each chain result.
             chain_results = getattr(sa, "last_chain_results", None)
-            if (
+            multi_chain_mode = (
                 chain_results is not None
                 and "xyz_best_all" in chain_results
                 and np.ndim(chain_results["xyz_best_all"]) == 3
                 and chain_results["xyz_best_all"].shape[0] > 1
-            ):
-                xyz_best_all = np.asarray(chain_results["xyz_best_all"])
-                predicted_best_all = np.asarray(chain_results["predicted_best_all"])
-                f_xray_best_all = np.asarray(chain_results["f_xray_best_all"])
-                best_chain_idx = int(chain_results.get("best_chain_idx", -1))
+            )
+
+            # In multi-chain mode, write all chains and do not emit a special
+            # best-chain file; otherwise keep legacy single-output behavior.
+            if multi_chain_mode:
+                xyz_best_all = chain_results["xyz_best_all"]
+                predicted_best_all = chain_results["predicted_best_all"]
+                f_xray_best_all = chain_results["f_xray_best_all"]
+                if hasattr(xyz_best_all, "get"):
+                    xyz_best_all = xyz_best_all.get()
+                else:
+                    xyz_best_all = np.asarray(xyz_best_all)
+                if hasattr(predicted_best_all, "get"):
+                    predicted_best_all = predicted_best_all.get()
+                else:
+                    predicted_best_all = np.asarray(predicted_best_all)
+                if hasattr(f_xray_best_all, "get"):
+                    f_xray_best_all = f_xray_best_all.get()
+                else:
+                    f_xray_best_all = np.asarray(f_xray_best_all)
                 print(
-                    f"Writing per-chain outputs for {xyz_best_all.shape[0]} GPU chains "
-                    f"(best chain index: {best_chain_idx})"
+                    f"Writing outputs for {xyz_best_all.shape[0]} GPU chains "
+                    "(no chain IDs in filenames)"
                 )
+                filename_counts = {}
                 for chain_idx in range(xyz_best_all.shape[0]):
                     xyz_chain = xyz_best_all[chain_idx]
                     f_xray_chain = float(f_xray_best_all[chain_idx])
@@ -1076,9 +1095,15 @@ class Wrapper:
                         )
                     )
                     f_chain_str = ("%10.8f" % f_xray_chain).zfill(12)
-                    chain_tag = f"c{chain_idx:03d}"
+                    base_stub = "%s_%s" % (run_id, f_chain_str)
+                    count = filename_counts.get(base_stub, 0)
+                    filename_counts[base_stub] = count + 1
+                    if count == 0:
+                        file_stub = base_stub
+                    else:
+                        file_stub = "%s_dup%d" % (base_stub, count)
                     m.write_xyz(
-                        "%s/%s_%s_%s.xyz" % (p.results_dir, run_id, f_chain_str, chain_tag),
+                        "%s/%s.xyz" % (p.results_dir, file_stub),
                         header_str_chain,
                         atomlist,
                         xyz_chain,
@@ -1090,10 +1115,19 @@ class Wrapper:
                                 predicted_chain, p.th, p.ph
                             )
                         np.savetxt(
-                            "%s/%s_%s_%s.dat"
-                            % (p.results_dir, run_id, f_chain_str, chain_tag),
+                            "%s/%s.dat" % (p.results_dir, file_stub),
                             np.column_stack((p.qvector, predicted_chain)),
                         )
+            else:
+                ### write best structure to xyz file (single-chain/CPU behavior)
+                print("writing to xyz... (f: %10.8f)" % f_xray_best)
+                f_best_str = ("%10.8f" % f_xray_best).zfill(12)
+                m.write_xyz(
+                    "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
+                    header_str,
+                    atomlist,
+                    xyz_best,
+                )
             ### analysis values dictionary for final print out
             A = {
                 "f_xray_best": "%10.8f" % f_xray_best,
@@ -1119,7 +1153,7 @@ class Wrapper:
                 predicted_best_r = x.spherical_rotavg(predicted_best, p.th, p.ph)
                 predicted_best = predicted_best_r
             ### write predicted data to file
-            if p.write_dat_file_bool:
+            if p.write_dat_file_bool and not multi_chain_mode:
                 np.savetxt(
                     "%s/%s_%s.dat" % (p.results_dir, run_id, f_best_str),
                     np.column_stack((p.qvector, predicted_best)),
