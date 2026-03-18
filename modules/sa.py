@@ -56,27 +56,56 @@ class Annealing:
         # Clear stale results from prior invocations.
         self.last_chain_results = None
         ######## READ BOND/ANGLE PARAMS #######
-        # Bonds
-        bond_atom1_idx_arr = bond_param_array[:, 0].astype(int)
-        bond_atom2_idx_arr = bond_param_array[:, 1].astype(int)
-        r0_arr = bond_param_array[:, 2]
-        k_arr = bond_param_array[:, 3]
-        nbonds = len(r0_arr)
-        # Angles
-        angle_atom1_idx_arr = angle_param_array[:, 0].astype(int)
-        angle_atom2_idx_arr = angle_param_array[:, 1].astype(int)
-        angle_atom3_idx_arr = angle_param_array[:, 2].astype(int)
-        theta0_arr = angle_param_array[:, 3]
-        k_theta_arr = angle_param_array[:, 4]
-        nangles = len(theta0_arr)
-        # Torsions
-        torsion_atom1_idx_arr = torsion_param_array[:, 0].astype(int)
-        torsion_atom2_idx_arr = torsion_param_array[:, 1].astype(int)
-        torsion_atom3_idx_arr = torsion_param_array[:, 2].astype(int)
-        torsion_atom4_idx_arr = torsion_param_array[:, 3].astype(int)
-        delta0_arr = torsion_param_array[:, 4]
-        k_delta_arr = torsion_param_array[:, 5]
-        ntorsions = len(delta0_arr)
+        # Cache derived arrays on self so their id()s stay stable across
+        # calls, allowing _as_backend_array to reuse GPU copies.
+        _param_key = (
+            id(bond_param_array), bond_param_array.shape,
+            id(angle_param_array), angle_param_array.shape,
+            id(torsion_param_array), torsion_param_array.shape,
+        )
+        if getattr(self, '_param_cache_key', None) == _param_key:
+            (
+                bond_atom1_idx_arr, bond_atom2_idx_arr, r0_arr, k_arr,
+                angle_atom1_idx_arr, angle_atom2_idx_arr, angle_atom3_idx_arr,
+                theta0_arr, k_theta_arr,
+                torsion_atom1_idx_arr, torsion_atom2_idx_arr,
+                torsion_atom3_idx_arr, torsion_atom4_idx_arr,
+                delta0_arr, k_delta_arr,
+            ) = self._param_arrays
+            nbonds, nangles, ntorsions = (
+                len(r0_arr), len(theta0_arr), len(delta0_arr),
+            )
+        else:
+            # Bonds
+            bond_atom1_idx_arr = bond_param_array[:, 0].astype(int)
+            bond_atom2_idx_arr = bond_param_array[:, 1].astype(int)
+            r0_arr = bond_param_array[:, 2]
+            k_arr = bond_param_array[:, 3]
+            nbonds = len(r0_arr)
+            # Angles
+            angle_atom1_idx_arr = angle_param_array[:, 0].astype(int)
+            angle_atom2_idx_arr = angle_param_array[:, 1].astype(int)
+            angle_atom3_idx_arr = angle_param_array[:, 2].astype(int)
+            theta0_arr = angle_param_array[:, 3]
+            k_theta_arr = angle_param_array[:, 4]
+            nangles = len(theta0_arr)
+            # Torsions
+            torsion_atom1_idx_arr = torsion_param_array[:, 0].astype(int)
+            torsion_atom2_idx_arr = torsion_param_array[:, 1].astype(int)
+            torsion_atom3_idx_arr = torsion_param_array[:, 2].astype(int)
+            torsion_atom4_idx_arr = torsion_param_array[:, 3].astype(int)
+            delta0_arr = torsion_param_array[:, 4]
+            k_delta_arr = torsion_param_array[:, 5]
+            ntorsions = len(delta0_arr)
+            self._param_cache_key = _param_key
+            self._param_arrays = (
+                bond_atom1_idx_arr, bond_atom2_idx_arr, r0_arr, k_arr,
+                angle_atom1_idx_arr, angle_atom2_idx_arr, angle_atom3_idx_arr,
+                theta0_arr, k_theta_arr,
+                torsion_atom1_idx_arr, torsion_atom2_idx_arr,
+                torsion_atom3_idx_arr, torsion_atom4_idx_arr,
+                delta0_arr, k_delta_arr,
+            )
         ##=#=#=# DEFINITIONS #=#=#=##
         natoms = starting_xyz.shape[0]  # number of atoms
         c_tuning = c_tuning_initial  # initialise C_tuning
@@ -110,8 +139,15 @@ class Annealing:
 
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
-        # Pre-compute abs(target_function) to avoid repeated abs() calls in loop
-        abs_target_function = np.abs(target_function)
+        # Cache the shifted target_function and abs so the same numpy
+        # objects persist across calls → _as_backend_array cache hits.
+        _tf_key = (id(target_function), inelastic, pcd_mode,
+                   id(atomic_total), id(compton), id(reference_iam))
+        _tf_cached = getattr(self, '_tf_cache_key', None) == _tf_key
+        if _tf_cached:
+            abs_target_function = self._abs_target_function
+        else:
+            abs_target_function = np.abs(target_function)
         ### define qx, qy, qz for Ewald mode (CPU path)
         if ewald_mode:
             r_grid, th_grid, ph_grid = np.meshgrid(qvector, th, ph, indexing="ij")
@@ -120,15 +156,21 @@ class Annealing:
             qy = r_grid * np.sin(th_grid) * np.sin(ph_grid)
             qz = r_grid * np.cos(th_grid)
         # Shift target function to remove constant IAM terms outside the SA loop
-        if inelastic:
-            iam_offset = atomic_total + compton
+        if _tf_cached:
+            target_function = self._target_function_modified
         else:
-            iam_offset = atomic_total
-        if pcd_mode:
-            pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
-            target_function = target_function - pcd_offset
-        else:
-            target_function = target_function - iam_offset
+            if inelastic:
+                iam_offset = atomic_total + compton
+            else:
+                iam_offset = atomic_total
+            if pcd_mode:
+                pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
+                target_function = target_function - pcd_offset
+            else:
+                target_function = target_function - iam_offset
+            self._tf_cache_key = _tf_key
+            self._abs_target_function = abs_target_function
+            self._target_function_modified = target_function
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Ensure predicted_start has the right shape/type (avoid int sentinel inside njit)
         if isinstance(predicted_start, (int, float)) and predicted_start == 0:
@@ -453,12 +495,13 @@ class Annealing:
             compton_xp = _as_backend_array(xp, compton, xp.float64)
             pre_molecular_xp = _as_backend_array(xp, pre_molecular, xp.float64)
 
-            # Constraints arrays
-            bond_atom1_idx = bond_atom1_idx_arr
-            bond_atom2_idx = bond_atom2_idx_arr
-            angle_atom1_idx = angle_atom1_idx_arr
-            angle_atom2_idx = angle_atom2_idx_arr
-            angle_atom3_idx = angle_atom3_idx_arr
+            # Constraints arrays – keep on GPU for fancy indexing;
+            # torsion indices stay numpy for scalar loop access.
+            bond_atom1_idx = _as_backend_array(xp, bond_atom1_idx_arr, xp.int64)
+            bond_atom2_idx = _as_backend_array(xp, bond_atom2_idx_arr, xp.int64)
+            angle_atom1_idx = _as_backend_array(xp, angle_atom1_idx_arr, xp.int64)
+            angle_atom2_idx = _as_backend_array(xp, angle_atom2_idx_arr, xp.int64)
+            angle_atom3_idx = _as_backend_array(xp, angle_atom3_idx_arr, xp.int64)
             torsion_atom1_idx = torsion_atom1_idx_arr
             torsion_atom2_idx = torsion_atom2_idx_arr
             torsion_atom3_idx = torsion_atom3_idx_arr
@@ -714,12 +757,13 @@ class Annealing:
             compton_xp = _as_backend_array(xp, compton, xp.float64)
             pre_molecular_xp = _as_backend_array(xp, pre_molecular, xp.float64)
 
-            # Constraints arrays
-            bond_atom1_idx = bond_atom1_idx_arr
-            bond_atom2_idx = bond_atom2_idx_arr
-            angle_atom1_idx = angle_atom1_idx_arr
-            angle_atom2_idx = angle_atom2_idx_arr
-            angle_atom3_idx = angle_atom3_idx_arr
+            # Constraints arrays – keep on GPU for fancy indexing;
+            # torsion indices stay numpy for scalar loop access.
+            bond_atom1_idx = _as_backend_array(xp, bond_atom1_idx_arr, xp.int64)
+            bond_atom2_idx = _as_backend_array(xp, bond_atom2_idx_arr, xp.int64)
+            angle_atom1_idx = _as_backend_array(xp, angle_atom1_idx_arr, xp.int64)
+            angle_atom2_idx = _as_backend_array(xp, angle_atom2_idx_arr, xp.int64)
+            angle_atom3_idx = _as_backend_array(xp, angle_atom3_idx_arr, xp.int64)
             torsion_atom1_idx = torsion_atom1_idx_arr
             torsion_atom2_idx = torsion_atom2_idx_arr
             torsion_atom3_idx = torsion_atom3_idx_arr
