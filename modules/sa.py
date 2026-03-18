@@ -471,249 +471,6 @@ class Annealing:
 
         ### END run_annealing() function ###
 
-        def run_annealing_gpu(nsteps, xp):
-            def _to_scalar(value):
-                return float(to_numpy(value, xp))
-
-            prep_start = default_timer()
-            # Backend arrays
-            xyz = xp.asarray(starting_xyz, dtype=xp.float64).copy()
-            xyz_trial = xp.empty_like(xyz)
-            xyz_best = xyz.copy()
-            predicted_best = xp.asarray(predicted_start, dtype=xp.float64).copy()
-            f_best, f_xray_best = f_start, f_xray_start
-            f = 1e9  # high initial value so 1st step will be accepted
-            c = 0
-            n_mode_indices = len(mode_indices)
-            mdisp = _as_backend_array(xp, displacements, xp.float64)
-            step_size_xp = _as_backend_array(xp, step_size_array, xp.float64)
-            qvector_xp = _as_backend_array(xp, qvector, xp.float64)
-            target_function_xp = _as_backend_array(xp, target_function, xp.float64)
-            reference_iam_xp = _as_backend_array(xp, reference_iam, xp.float64)
-            abs_target_function_xp = _as_backend_array(xp, abs_target_function, xp.float64)
-            atomic_total_xp = _as_backend_array(xp, atomic_total, xp.float64)
-            compton_xp = _as_backend_array(xp, compton, xp.float64)
-            pre_molecular_xp = _as_backend_array(xp, pre_molecular, xp.float64)
-
-            # Constraints arrays – keep on GPU for fancy indexing;
-            # torsion indices stay numpy for scalar loop access.
-            bond_atom1_idx = _as_backend_array(xp, bond_atom1_idx_arr, xp.int64)
-            bond_atom2_idx = _as_backend_array(xp, bond_atom2_idx_arr, xp.int64)
-            angle_atom1_idx = _as_backend_array(xp, angle_atom1_idx_arr, xp.int64)
-            angle_atom2_idx = _as_backend_array(xp, angle_atom2_idx_arr, xp.int64)
-            angle_atom3_idx = _as_backend_array(xp, angle_atom3_idx_arr, xp.int64)
-            torsion_atom1_idx = torsion_atom1_idx_arr
-            torsion_atom2_idx = torsion_atom2_idx_arr
-            torsion_atom3_idx = torsion_atom3_idx_arr
-            torsion_atom4_idx = torsion_atom4_idx_arr
-            r0_xp = _as_backend_array(xp, r0_arr, xp.float64)
-            k_xp = _as_backend_array(xp, k_arr, xp.float64)
-            theta0_xp = _as_backend_array(xp, theta0_arr, xp.float64)
-            k_theta_xp = _as_backend_array(xp, k_theta_arr, xp.float64)
-            delta0_xp = _as_backend_array(xp, delta0_arr, xp.float64)
-            k_delta_xp = _as_backend_array(xp, k_delta_arr, xp.float64)
-
-            total_bonding_contrib = 0.0
-            total_angular_contrib = 0.0
-            total_torsional_contrib = 0.0
-            total_xray_contrib = 0.0
-
-            inv_nsteps = 1.0 / nsteps
-            inv_qlen = 1.0 / qlen
-            HALF = 0.5
-
-            if ewald_mode:
-                r_grid, th_grid, ph_grid = xp.meshgrid(
-                    qvector_xp, xp.asarray(th), xp.asarray(ph), indexing="ij"
-                )
-                qx = r_grid * xp.sin(th_grid) * xp.cos(ph_grid)
-                qy = r_grid * xp.sin(th_grid) * xp.sin(ph_grid)
-                qz = r_grid * xp.cos(th_grid)
-
-            prep_time_s = default_timer() - prep_start
-            loop_start = default_timer()
-            for i in range(nsteps):
-                tmp = 1.0 - i * inv_nsteps
-                temp = starting_temp * tmp
-
-                # Displace xyz along displacement vectors
-                summed_displacement = xp.zeros_like(xyz)
-                for mi in range(n_mode_indices):
-                    n = mode_indices[mi]
-                    scale = step_size_xp[n] * tmp * (2.0 * xp.random.random() - 1.0)
-                    summed_displacement += mdisp[n] * scale
-                xyz_trial = xyz + summed_displacement
-
-                if temp > _to_scalar(xp.random.random()):
-                    c += 1
-                    xyz, xyz_trial = xyz_trial, xyz
-                    continue
-
-                # IAM calculation
-                if ewald_mode:
-                    molecular = xp.zeros((qlen, tlen, plen), dtype=xp.float64)
-                    k = 0
-                    for n in range(natoms - 1):
-                        for m in range(n + 1, natoms):
-                            fnm = pre_molecular_xp[k]
-                            k += 1
-                            xnm = xyz[n, 0] - xyz[m, 0]
-                            ynm = xyz[n, 1] - xyz[m, 1]
-                            znm = xyz[n, 2] - xyz[m, 2]
-                            molecular += 2 * fnm * xp.cos(
-                                (qx * xnm + qy * ynm + qz * znm)
-                            )
-                    iam = molecular
-                else:
-                    molecular = xp.zeros(qlen, dtype=xp.float64)
-                    k = 0
-                    for ii in range(natoms):
-                        for jj in range(ii + 1, natoms):
-                            dx = xyz_trial[ii, 0] - xyz_trial[jj, 0]
-                            dy = xyz_trial[ii, 1] - xyz_trial[jj, 1]
-                            dz = xyz_trial[ii, 2] - xyz_trial[jj, 2]
-                            r = xp.sqrt(dx * dx + dy * dy + dz * dz)
-                            qd = qvector_xp * r
-                            molecular += 2.0 * pre_molecular_xp[k] * xp.sin(qd) / qd
-                            k += 1
-                    iam = molecular
-
-                # Objective function (PCD or IAM)
-                if pcd_mode:
-                    pred_mol = 100.0 * (iam / reference_iam_xp)
-                    diff = pred_mol - target_function_xp
-                    sse = xp.sum(diff * diff)
-                    if inelastic:
-                        offset = atomic_total_xp + compton_xp
-                    else:
-                        offset = atomic_total_xp
-                    predicted_function_ = pred_mol + 100.0 * (
-                        offset / reference_iam_xp - 1.0
-                    )
-                    xray_contrib = _to_scalar(sse) * inv_qlen
-                else:
-                    if ewald_mode:
-                        n = qlen * tlen * plen
-                    else:
-                        n = qlen
-                    inv_n = 1.0 / n
-                    diff = iam - target_function_xp
-                    sse = xp.sum((diff * diff) / abs_target_function_xp)
-                    if inelastic:
-                        predicted_function_ = iam + atomic_total_xp + compton_xp
-                    else:
-                        predicted_function_ = iam + atomic_total_xp
-                    xray_contrib = _to_scalar(sse) * inv_n
-
-                bonding_contrib = 0.0
-                if bonds_bool and nbonds > 0:
-                    vec = xyz_trial[bond_atom1_idx] - xyz_trial[bond_atom2_idx]
-                    r = xp.sqrt(xp.sum(vec * vec, axis=1))
-                    bonding_contrib = _to_scalar(
-                        xp.sum(k_xp * HALF * (r - r0_xp) ** 2)
-                    )
-
-                angular_contrib = 0.0
-                if angles_bool and nangles > 0:
-                    ba = xyz_trial[angle_atom1_idx] - xyz_trial[angle_atom2_idx]
-                    bc = xyz_trial[angle_atom3_idx] - xyz_trial[angle_atom2_idx]
-                    norm_ba = xp.sqrt(xp.sum(ba * ba, axis=1))
-                    norm_bc = xp.sqrt(xp.sum(bc * bc, axis=1))
-                    cos_theta = xp.sum(ba * bc, axis=1) / (norm_ba * norm_bc)
-                    cos_theta = xp.clip(cos_theta, -1.0, 1.0)
-                    theta = xp.arccos(cos_theta)
-                    angular_contrib = _to_scalar(
-                        xp.sum(k_theta_xp * HALF * (theta - theta0_xp) ** 2)
-                    )
-
-                torsion_contrib = 0.0
-                if torsions_bool and ntorsions > 0:
-                    for i_tors in range(ntorsions):
-                        idx1 = torsion_atom1_idx[i_tors]
-                        idx2 = torsion_atom2_idx[i_tors]
-                        idx3 = torsion_atom3_idx[i_tors]
-                        idx4 = torsion_atom4_idx[i_tors]
-                        p0 = xyz_trial[idx1, :]
-                        p1 = xyz_trial[idx2, :]
-                        p2 = xyz_trial[idx3, :]
-                        p3 = xyz_trial[idx4, :]
-
-                        b0 = -1.0 * (p1 - p0)
-                        b1 = p2 - p1
-                        b2 = p3 - p2
-
-                        b1_norm = xp.sqrt(xp.sum(b1 * b1))
-                        b1 = b1 / b1_norm
-
-                        v = b0 - xp.dot(b0, b1) * b1
-                        w = b2 - xp.dot(b2, b1) * b1
-
-                        x = xp.dot(v, w)
-                        y = xp.dot(xp.cross(b1, v), w)
-                        torsion = xp.arctan2(y, x)
-
-                        torsion_contrib += _to_scalar(
-                            k_delta_xp[i_tors]
-                            * (1 + xp.cos(torsion - delta0_xp[i_tors]))
-                        )
-
-                f_ = xray_contrib + c_tuning * (
-                    bonding_contrib + angular_contrib + torsion_contrib
-                )
-
-                if f_ < f * 0.999:
-                    c += 1
-                    f = f_
-                    xyz, xyz_trial = xyz_trial, xyz
-                    if f < f_best:
-                        f_best = f
-                        xyz_best[:, :] = xyz[:, :]
-                        predicted_best = predicted_function_.copy()
-                        f_xray_best = xray_contrib
-                    total_bonding_contrib += c_tuning * bonding_contrib
-                    total_angular_contrib += c_tuning * angular_contrib
-                    total_torsional_contrib += c_tuning * torsion_contrib
-                    total_xray_contrib += xray_contrib
-
-            priors_contrib = (
-                total_bonding_contrib + total_angular_contrib + total_torsional_contrib
-            )
-            total_contrib = total_xray_contrib + priors_contrib
-            if total_contrib > 0 and priors_contrib > 0:
-                xray_ratio = total_xray_contrib / total_contrib
-                bonding_ratio = total_bonding_contrib / total_contrib
-                angular_ratio = total_angular_contrib / total_contrib
-                torsional_ratio = total_torsional_contrib / total_contrib
-                c_tuning_adjusted = (
-                    (1 - tuning_ratio_target)
-                    * c_tuning
-                    / (1 - total_xray_contrib / total_contrib)
-                )
-            else:
-                (
-                    xray_ratio,
-                    bonding_ratio,
-                    angular_ratio,
-                    torsional_ratio,
-                    c_tuning_adjusted,
-                ) = (0, 0, 0, 0, 0)
-            loop_time_s = default_timer() - loop_start
-
-            return (
-                f_best,
-                f_xray_best,
-                predicted_best,
-                xyz_best,
-                xray_ratio,
-                bonding_ratio,
-                angular_ratio,
-                torsional_ratio,
-                c,
-                c_tuning_adjusted,
-                prep_time_s,
-                loop_time_s,
-            )
-
         def run_annealing_gpu_batched(nsteps, xp, n_chains):
             """
             Run multiple independent SA chains in parallel on GPU and
@@ -810,6 +567,22 @@ class Annealing:
             total_torsional_xp = xp.zeros(n_chains, dtype=xp.float64)
             total_xray_xp = xp.zeros(n_chains, dtype=xp.float64)
 
+            if pcd_mode:
+                if inelastic:
+                    _pcd_offset = atomic_total_xp + compton_xp
+                else:
+                    _pcd_offset = atomic_total_xp
+                _pcd_offset_correction = 100.0 * (
+                    _pcd_offset[xp.newaxis, :] / reference_iam_xp[xp.newaxis, :] - 1.0
+                )
+            else:
+                if inelastic:
+                    _iam_offset = (
+                        atomic_total_xp[xp.newaxis, :] + compton_xp[xp.newaxis, :]
+                    )
+                else:
+                    _iam_offset = atomic_total_xp[xp.newaxis, :]
+
             prep_time_s = default_timer() - prep_start
             loop_start = default_timer()
             for i in range(nsteps):
@@ -847,27 +620,14 @@ class Annealing:
                     pred_mol = 100.0 * (iam / reference_iam_xp[xp.newaxis, :])
                     diff = pred_mol - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(diff * diff, axis=1)
-                    if inelastic:
-                        offset = atomic_total_xp + compton_xp
-                    else:
-                        offset = atomic_total_xp
-                    predicted_function_ = pred_mol + 100.0 * (
-                        offset[xp.newaxis, :] / reference_iam_xp[xp.newaxis, :] - 1.0
-                    )
+                    predicted_function_ = pred_mol + _pcd_offset_correction
                     xray_contrib = sse * inv_qlen
                 else:
                     diff = iam - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(
                         (diff * diff) / abs_target_function_xp[xp.newaxis, :], axis=1
                     )
-                    if inelastic:
-                        predicted_function_ = (
-                            iam
-                            + atomic_total_xp[xp.newaxis, :]
-                            + compton_xp[xp.newaxis, :]
-                        )
-                    else:
-                        predicted_function_ = iam + atomic_total_xp[xp.newaxis, :]
+                    predicted_function_ = iam + _iam_offset
                     xray_contrib = sse * inv_qlen
 
                 bonding_contrib = xp.zeros(n_chains, dtype=xp.float64)
@@ -1038,83 +798,48 @@ class Annealing:
                 )
                 for chain_idx in range(gpu_chains):
                     print(f"[GPU] Starting chain {chain_idx + 1}/{gpu_chains}")
-                if ewald_mode:
-                    if verbose:
-                        print(
-                            "gpu_chains > 1 currently supports isotropic mode only; "
-                            "falling back to single-chain CUDA."
-                        )
-                    (
-                        f_best,
-                        f_xray_best,
-                        predicted_best,
-                        xyz_best,
-                        xray_ratio,
-                        bonding_ratio,
-                        angular_ratio,
-                        torsional_ratio,
-                        c,
-                        c_tuning_adjusted,
-                        prep_time_s,
-                        loop_time_s,
-                    ) = run_annealing_gpu(nsteps, backend_info.xp)
+            (
+                f_best,
+                f_xray_best,
+                predicted_best,
+                xyz_best,
+                xray_ratio,
+                bonding_ratio,
+                angular_ratio,
+                torsional_ratio,
+                c,
+                c_tuning_adjusted,
+                f_best_all,
+                f_xray_best_all,
+                predicted_best_all,
+                xyz_best_all,
+                best_chain_idx,
+                prep_time_s,
+                loop_time_s,
+            ) = run_annealing_gpu_batched(nsteps, backend_info.xp, gpu_chains)
+            if gpu_chains > 1:
+                if keep_on_device:
+                    self.last_chain_results = {
+                        "f_best_all": f_best_all,
+                        "f_xray_best_all": f_xray_best_all,
+                        "predicted_best_all": predicted_best_all,
+                        "xyz_best_all": xyz_best_all,
+                        "best_chain_idx": int(best_chain_idx),
+                    }
                 else:
-                    (
-                        f_best,
-                        f_xray_best,
-                        predicted_best,
-                        xyz_best,
-                        xray_ratio,
-                        bonding_ratio,
-                        angular_ratio,
-                        torsional_ratio,
-                        c,
-                        c_tuning_adjusted,
-                        f_best_all,
-                        f_xray_best_all,
-                        predicted_best_all,
-                        xyz_best_all,
-                        best_chain_idx,
-                        prep_time_s,
-                        loop_time_s,
-                    ) = run_annealing_gpu_batched(nsteps, backend_info.xp, gpu_chains)
-                    if keep_on_device:
-                        self.last_chain_results = {
-                            "f_best_all": f_best_all,
-                            "f_xray_best_all": f_xray_best_all,
-                            "predicted_best_all": predicted_best_all,
-                            "xyz_best_all": xyz_best_all,
-                            "best_chain_idx": int(best_chain_idx),
-                        }
-                    else:
-                        self.last_chain_results = {
-                            "f_best_all": to_numpy(f_best_all, backend_info.xp),
-                            "f_xray_best_all": to_numpy(f_xray_best_all, backend_info.xp),
-                            "predicted_best_all": to_numpy(
-                                predicted_best_all, backend_info.xp
-                            ),
-                            "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
-                            "best_chain_idx": int(best_chain_idx),
-                        }
-                    print(
-                        f"[GPU] All {gpu_chains} chains finished. "
-                        f"Best chain index: {best_chain_idx}"
-                    )
-            else:
-                (
-                    f_best,
-                    f_xray_best,
-                    predicted_best,
-                    xyz_best,
-                    xray_ratio,
-                    bonding_ratio,
-                    angular_ratio,
-                    torsional_ratio,
-                    c,
-                    c_tuning_adjusted,
-                    prep_time_s,
-                    loop_time_s,
-                ) = run_annealing_gpu(nsteps, backend_info.xp)
+                    self.last_chain_results = {
+                        "f_best_all": to_numpy(f_best_all, backend_info.xp),
+                        "f_xray_best_all": to_numpy(f_xray_best_all, backend_info.xp),
+                        "predicted_best_all": to_numpy(
+                            predicted_best_all, backend_info.xp
+                        ),
+                        "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
+                        "best_chain_idx": int(best_chain_idx),
+                    }
+                print(
+                    f"[GPU] All {gpu_chains} chains finished. "
+                    f"Best chain index: {best_chain_idx}"
+                )
             if not keep_on_device:
                 d2h_start = default_timer()
                 predicted_best = to_numpy(predicted_best, backend_info.xp)
