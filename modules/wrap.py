@@ -824,9 +824,7 @@ class Wrapper:
                 )
             else:
                 target_function_ = target_iq
-            excitation_factor = p.excitation_factor
-            print(f"EXCITATION FACTOR = {excitation_factor}")
-            target_function_ /= excitation_factor  # scale target function up to 100% to fit the calculations
+            print(f"EXCITATION FACTOR = {p.excitation_factor}")
             target_xyz = xyz_start  # added simply to run the rmsd analysis later compared to this
         else:
             print('Error: mode value must be "test" or "normal"!')
@@ -974,6 +972,7 @@ class Wrapper:
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
                     gpu_chains=getattr(p, "gpu_chains", 1),
                     keep_on_device=use_gpu_persistent,
+                    excitation_factor=p.excitation_factor,
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")
