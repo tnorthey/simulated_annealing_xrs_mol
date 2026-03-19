@@ -835,10 +835,7 @@ class Annealing:
                         "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
                         "best_chain_idx": int(best_chain_idx),
                     }
-                print(
-                    f"[GPU] All {gpu_chains} chains finished. "
-                    f"Best chain index: {best_chain_idx}"
-                )
+                print(f"[GPU] All {gpu_chains} chains finished.")
             if not keep_on_device:
                 d2h_start = default_timer()
                 predicted_best = to_numpy(predicted_best, backend_info.xp)
