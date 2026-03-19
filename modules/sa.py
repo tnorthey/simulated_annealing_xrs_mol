@@ -182,7 +182,7 @@ class Annealing:
                 predicted_start = np.zeros(qlen, dtype=np.float64)
 
         @njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
-        def run_annealing(nsteps):
+        def run_annealing(nsteps, _excitation_factor):
 
             ##=#=#=# INITIATE LOOP VARIABLES #=#=#=#=#
             xyz = starting_xyz.copy()
@@ -291,7 +291,7 @@ class Annealing:
                     for qi in range(qlen):
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = excitation_factor * 100.0 * (iam[qi] / reference_iam[qi])
+                        pred_mol = _excitation_factor * 100.0 * (iam[qi] / reference_iam[qi])
                         diff = pred_mol - target_function[qi]
                         sse += diff * diff
                         # For output, store the full PCD curve (incl. constant atomic/compton term)
@@ -299,7 +299,7 @@ class Annealing:
                             offset = atomic_total[qi] + compton[qi]
                         else:
                             offset = atomic_total[qi]
-                        predicted_function_[qi] = pred_mol + excitation_factor * 100.0 * (
+                        predicted_function_[qi] = pred_mol + _excitation_factor * 100.0 * (
                             offset / reference_iam[qi] - 1.0
                         )
                     xray_contrib = sse * inv_qlen
@@ -316,14 +316,14 @@ class Annealing:
                     for qi in range(qlen):
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = excitation_factor * iam[qi]
+                        pred_mol = _excitation_factor * iam[qi]
                         diff = pred_mol - target_function[qi]
                         sse += (diff * diff) / abs_target_function[qi]
                         # For output, store the full IAM curve (incl. constant atomic/compton term)
                         if inelastic:
-                            predicted_function_[qi] = pred_mol + excitation_factor * (atomic_total[qi] + compton[qi])
+                            predicted_function_[qi] = pred_mol + _excitation_factor * (atomic_total[qi] + compton[qi])
                         else:
-                            predicted_function_[qi] = pred_mol + excitation_factor * atomic_total[qi]
+                            predicted_function_[qi] = pred_mol + _excitation_factor * atomic_total[qi]
                     xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
@@ -790,7 +790,7 @@ class Annealing:
                 torsional_ratio,
                 c,
                 c_tuning_adjusted,
-            ) = run_annealing(nsteps)
+            ) = run_annealing(nsteps, excitation_factor)
         else:
             backend_info = get_backend(backend_name, emulate=gpu_emulation)
             gpu_d2h_time_s = 0.0
