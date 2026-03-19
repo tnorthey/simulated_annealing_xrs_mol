@@ -796,8 +796,7 @@ class Annealing:
                     f"[GPU] Multi-chain mode enabled: launching {gpu_chains} chains "
                     f"(nsteps={nsteps}, backend={backend_name})"
                 )
-                for chain_idx in range(gpu_chains):
-                    print(f"[GPU] Starting chain {chain_idx + 1}/{gpu_chains}")
+                
             (
                 f_best,
                 f_xray_best,
