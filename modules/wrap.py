@@ -850,7 +850,11 @@ class Wrapper:
             np.savetxt(
                 target_function_file, np.column_stack((p.qvector, target_function_))
             )
-        # print(target_function)
+        # Scale target for SA internally (keeps saved target_function_ unchanged)
+        if p.mode == "normal":
+            target_for_sa = target_function_ / p.excitation_factor
+        else:
+            target_for_sa = target_function_
 
         # load target function from file
         # if os.path.exists(target_function_file):
@@ -943,7 +947,7 @@ class Wrapper:
                     xyz_start,
                     displacements,
                     mode_indices,
-                    target_function_,
+                    target_for_sa,
                     reference_iam,
                     p.qvector,
                     p.th,
@@ -972,7 +976,6 @@ class Wrapper:
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
                     gpu_chains=getattr(p, "gpu_chains", 1),
                     keep_on_device=use_gpu_persistent,
-                    excitation_factor=p.excitation_factor,
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")
@@ -985,6 +988,19 @@ class Wrapper:
                     xyz_best = xyz_best.get()
                 if hasattr(predicted_best, "get"):
                     predicted_best = predicted_best.get()
+
+            # Scale predicted output from 100% excitation level back to
+            # the experimental excitation level so it matches the raw target.
+            if p.mode == "normal":
+                predicted_best = predicted_best * p.excitation_factor
+                chain_results = getattr(sa, "last_chain_results", None)
+                if (
+                    chain_results is not None
+                    and "predicted_best_all" in chain_results
+                ):
+                    chain_results["predicted_best_all"] = (
+                        chain_results["predicted_best_all"] * p.excitation_factor
+                    )
 
             ### analysis on xyz_best
             # bond-length of interest

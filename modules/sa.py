@@ -51,7 +51,6 @@ class Annealing:
         gpu_emulation: bool = False,
         gpu_chains: int = 1,
         keep_on_device: bool = False,
-        excitation_factor: float = 1.0,
     ):
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
@@ -143,8 +142,7 @@ class Annealing:
         # Cache the shifted target_function and abs so the same numpy
         # objects persist across calls → _as_backend_array cache hits.
         _tf_key = (id(target_function), inelastic, pcd_mode,
-                   id(atomic_total), id(compton), id(reference_iam),
-                   excitation_factor)
+                   id(atomic_total), id(compton), id(reference_iam))
         _tf_cached = getattr(self, '_tf_cache_key', None) == _tf_key
         if _tf_cached:
             abs_target_function = self._abs_target_function
@@ -166,10 +164,10 @@ class Annealing:
             else:
                 iam_offset = atomic_total
             if pcd_mode:
-                pcd_offset = excitation_factor * 100.0 * (iam_offset / reference_iam - 1.0)
+                pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
                 target_function = target_function - pcd_offset
             else:
-                target_function = target_function - excitation_factor * iam_offset
+                target_function = target_function - iam_offset
             self._tf_cache_key = _tf_key
             self._abs_target_function = abs_target_function
             self._target_function_modified = target_function
@@ -182,7 +180,7 @@ class Annealing:
                 predicted_start = np.zeros(qlen, dtype=np.float64)
 
         @njit(nogil=True, fastmath=False)  # numba decorator to compile to machine code
-        def run_annealing(nsteps, _excitation_factor):
+        def run_annealing(nsteps):
 
             ##=#=#=# INITIATE LOOP VARIABLES #=#=#=#=#
             xyz = starting_xyz.copy()
@@ -291,7 +289,7 @@ class Annealing:
                     for qi in range(qlen):
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = _excitation_factor * 100.0 * (iam[qi] / reference_iam[qi])
+                        pred_mol = 100.0 * (iam[qi] / reference_iam[qi])
                         diff = pred_mol - target_function[qi]
                         sse += diff * diff
                         # For output, store the full PCD curve (incl. constant atomic/compton term)
@@ -299,7 +297,7 @@ class Annealing:
                             offset = atomic_total[qi] + compton[qi]
                         else:
                             offset = atomic_total[qi]
-                        predicted_function_[qi] = pred_mol + _excitation_factor * 100.0 * (
+                        predicted_function_[qi] = pred_mol + 100.0 * (
                             offset / reference_iam[qi] - 1.0
                         )
                     xray_contrib = sse * inv_qlen
@@ -316,14 +314,14 @@ class Annealing:
                     for qi in range(qlen):
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = _excitation_factor * iam[qi]
+                        pred_mol = iam[qi]
                         diff = pred_mol - target_function[qi]
                         sse += (diff * diff) / abs_target_function[qi]
                         # For output, store the full IAM curve (incl. constant atomic/compton term)
                         if inelastic:
-                            predicted_function_[qi] = pred_mol + _excitation_factor * (atomic_total[qi] + compton[qi])
+                            predicted_function_[qi] = pred_mol + atomic_total[qi] + compton[qi]
                         else:
-                            predicted_function_[qi] = pred_mol + _excitation_factor * atomic_total[qi]
+                            predicted_function_[qi] = pred_mol + atomic_total[qi]
                     xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
@@ -574,16 +572,16 @@ class Annealing:
                     _pcd_offset = atomic_total_xp + compton_xp
                 else:
                     _pcd_offset = atomic_total_xp
-                _pcd_offset_correction = excitation_factor * 100.0 * (
+                _pcd_offset_correction = 100.0 * (
                     _pcd_offset[xp.newaxis, :] / reference_iam_xp[xp.newaxis, :] - 1.0
                 )
             else:
                 if inelastic:
-                    _iam_offset = excitation_factor * (
+                    _iam_offset = (
                         atomic_total_xp[xp.newaxis, :] + compton_xp[xp.newaxis, :]
                     )
                 else:
-                    _iam_offset = excitation_factor * atomic_total_xp[xp.newaxis, :]
+                    _iam_offset = atomic_total_xp[xp.newaxis, :]
 
             prep_time_s = default_timer() - prep_start
             loop_start = default_timer()
@@ -619,18 +617,17 @@ class Annealing:
 
                 # Objective function (PCD or IAM)
                 if pcd_mode:
-                    pred_mol = excitation_factor * 100.0 * (iam / reference_iam_xp[xp.newaxis, :])
+                    pred_mol = 100.0 * (iam / reference_iam_xp[xp.newaxis, :])
                     diff = pred_mol - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(diff * diff, axis=1)
                     predicted_function_ = pred_mol + _pcd_offset_correction
                     xray_contrib = sse * inv_qlen
                 else:
-                    pred_mol = excitation_factor * iam
-                    diff = pred_mol - target_function_xp[xp.newaxis, :]
+                    diff = iam - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(
                         (diff * diff) / abs_target_function_xp[xp.newaxis, :], axis=1
                     )
-                    predicted_function_ = pred_mol + _iam_offset
+                    predicted_function_ = iam + _iam_offset
                     xray_contrib = sse * inv_qlen
 
                 bonding_contrib = xp.zeros(n_chains, dtype=xp.float64)
@@ -790,7 +787,7 @@ class Annealing:
                 torsional_ratio,
                 c,
                 c_tuning_adjusted,
-            ) = run_annealing(nsteps, excitation_factor)
+            ) = run_annealing(nsteps)
         else:
             backend_info = get_backend(backend_name, emulate=gpu_emulation)
             gpu_d2h_time_s = 0.0
