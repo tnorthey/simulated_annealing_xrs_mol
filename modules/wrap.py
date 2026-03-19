@@ -1175,6 +1175,19 @@ class Wrapper:
                     np.save("%s/predicted_function.npy" % p.results_dir, predicted_best)
                 predicted_best_r = x.spherical_rotavg(predicted_best, p.th, p.ph)
                 predicted_best = predicted_best_r
+            ### DIAGNOSTIC: compare predicted_best vs target_function_
+            _tf_flat = target_function_.ravel() if hasattr(target_function_, 'ravel') else target_function_
+            _pb_flat = predicted_best.ravel() if hasattr(predicted_best, 'ravel') else predicted_best
+            _mid = len(_pb_flat) // 2
+            print("=== DIAGNOSTIC: predicted_best vs target_function_ ===")
+            print(f"  target_function_[0, mid, -1] = {_tf_flat[0]:.6f}, {_tf_flat[_mid]:.6f}, {_tf_flat[-1]:.6f}")
+            print(f"  predicted_best [0, mid, -1] = {_pb_flat[0]:.6f}, {_pb_flat[_mid]:.6f}, {_pb_flat[-1]:.6f}")
+            _nonzero = _pb_flat != 0
+            if np.any(_nonzero):
+                _ratio = _tf_flat[_nonzero] / _pb_flat[_nonzero]
+                print(f"  ratio target/predicted: mean={np.mean(_ratio):.6f}, min={np.min(_ratio):.6f}, max={np.max(_ratio):.6f}")
+            print("=== END DIAGNOSTIC ===")
+
             ### write predicted data to file
             if p.write_dat_file_bool and not multi_chain_mode:
                 np.savetxt(
