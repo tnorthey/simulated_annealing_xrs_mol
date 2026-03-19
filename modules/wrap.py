@@ -202,6 +202,9 @@ def _read_scattering_dat(path: str):
     Read scattering data as either:
     - 1 column: I(q) only (q is index-based)
     - >=2 columns: first column q, second column I(q)
+
+    Returns (q, intensity, has_explicit_q) where has_explicit_q is False
+    when the file had only one column (q was synthesised from indices).
     """
     data = np.loadtxt(path)
     arr = np.asarray(data, dtype=np.float64)
@@ -210,14 +213,17 @@ def _read_scattering_dat(path: str):
     if arr.ndim == 1:
         q = np.arange(arr.size, dtype=np.float64)
         intensity = arr.astype(np.float64)
+        has_explicit_q = False
     else:
         if arr.shape[1] >= 2:
             q = arr[:, 0].astype(np.float64)
             intensity = arr[:, 1].astype(np.float64)
+            has_explicit_q = True
         else:
             q = np.arange(arr.shape[0], dtype=np.float64)
             intensity = arr[:, 0].astype(np.float64)
-    return q, intensity
+            has_explicit_q = False
+    return q, intensity, has_explicit_q
 
 
 #############################
@@ -660,23 +666,30 @@ class Wrapper:
         if p.pcd_mode and p.reference_dat_file is not None and p.reference_dat_file != "":
             # Load reference IAM from DAT file
             print(f"Loading reference IAM from DAT file: {p.reference_dat_file}")
-            ref_data = np.loadtxt(p.reference_dat_file)
-            if ref_data.ndim == 1:
-                # Single column: assume it's I(q) and q is index-based
-                ref_q = np.arange(ref_data.size, dtype=np.float64)
-                ref_iam = ref_data.astype(np.float64)
+            ref_q, ref_iam, ref_has_explicit_q = _read_scattering_dat(p.reference_dat_file)
+
+            if not ref_has_explicit_q:
+                if ref_iam.size != p.qvector.size:
+                    raise ValueError(
+                        f"Single-column reference DAT has {ref_iam.size} points "
+                        f"but qvector has {p.qvector.size} points. They must match."
+                    )
+                reference_iam = ref_iam
+                print(
+                    f"Using single-column reference DAT directly "
+                    f"({ref_iam.size} points, no interpolation)"
+                )
+            elif ref_q.size != p.qvector.size or not np.allclose(ref_q, p.qvector):
+                reference_iam = np.interp(
+                    p.qvector, ref_q, ref_iam, left=ref_iam[0], right=ref_iam[-1]
+                )
+                print(
+                    f"Interpolated reference IAM from {len(ref_q)} points "
+                    f"to {len(p.qvector)} points"
+                )
             else:
-                # Two or more columns: first is q, second is I
-                if ref_data.shape[1] >= 2:
-                    ref_q = ref_data[:, 0].astype(np.float64)
-                    ref_iam = ref_data[:, 1].astype(np.float64)
-                else:
-                    ref_q = np.arange(ref_data.shape[0], dtype=np.float64)
-                    ref_iam = ref_data[:, 0].astype(np.float64)
-            
-            # Interpolate to match current q-vector
-            reference_iam = np.interp(p.qvector, ref_q, ref_iam, left=ref_iam[0], right=ref_iam[-1])
-            print(f"Interpolated reference IAM from {len(ref_q)} points to {len(p.qvector)} points")
+                reference_iam = ref_iam
+                print(f"Reference DAT q-grid matches qvector ({len(ref_q)} points)")
         else:
             # Calculate reference IAM from XYZ file (default behavior)
             reference_iam, atomic, compton, pre_molecular = xyz2iam(
@@ -790,8 +803,19 @@ class Wrapper:
 
         elif p.mode == "normal":
             # if target file is a data file, read as target_function
-            target_q, target_iq = _read_scattering_dat(target_file)
-            if target_q.size != p.qvector.size or not np.allclose(target_q, p.qvector):
+            target_q, target_iq, has_explicit_q = _read_scattering_dat(target_file)
+            if p.pcd_mode and not has_explicit_q:
+                if target_iq.size != p.qvector.size:
+                    raise ValueError(
+                        f"Single-column PCD target has {target_iq.size} points "
+                        f"but qvector has {p.qvector.size} points. They must match."
+                    )
+                print(
+                    f"PCD mode: using single-column target data directly "
+                    f"({target_iq.size} points, no interpolation)"
+                )
+                target_function_ = target_iq
+            elif target_q.size != p.qvector.size or not np.allclose(target_q, p.qvector):
                 print(
                     f"Interpolating target data from {target_q.size} points to {p.qvector.size} q-points"
                 )

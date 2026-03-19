@@ -53,8 +53,9 @@ class TestWrapper:
         iq = np.array([10.0, 20.0, 30.0], dtype=np.float64)
         np.savetxt(dat_path, np.column_stack((q, iq)))
 
-        q_read, iq_read = _read_scattering_dat(str(dat_path))
+        q_read, iq_read, has_q = _read_scattering_dat(str(dat_path))
 
+        assert has_q is True
         assert np.allclose(q_read, q)
         assert np.allclose(iq_read, iq)
 
@@ -64,7 +65,8 @@ class TestWrapper:
         iq = np.array([5.0, 6.0, 7.0], dtype=np.float64)
         np.savetxt(dat_path, iq)
 
-        q_read, iq_read = _read_scattering_dat(str(dat_path))
+        q_read, iq_read, has_q = _read_scattering_dat(str(dat_path))
 
+        assert has_q is False
         assert np.allclose(q_read, np.arange(iq.size, dtype=np.float64))
         assert np.allclose(iq_read, iq)
