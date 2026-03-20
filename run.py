@@ -49,6 +49,9 @@ def create_parser():
                             help='Reference XYZ file')
     files_group.add_argument('--reference-dat-file', type=str, dest='files.reference_dat_file',
                             help='Reference DAT file for PCD mode (optional, overrides reference_xyz_file calculation)')
+    files_group.add_argument('--correction-factor-dat-file', type=str,
+                            dest='files.correction_factor_dat_file',
+                            help='Optional DAT: col1=q, col2=multiplicative correction; interpolated to qvector and applied to predicted signal')
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
     

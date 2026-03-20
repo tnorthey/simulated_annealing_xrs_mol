@@ -856,6 +856,46 @@ class Wrapper:
         else:
             target_for_sa = target_function_
 
+        if p.ewald_mode and p.correction_factor_dat_file:
+            raise ValueError(
+                "correction_factor_dat_file is only supported for isotropic (non-Ewald) q; "
+                "disable ewald_mode or omit the correction factor file."
+            )
+        if p.correction_factor_dat_file:
+            print(
+                f"Loading q-dependent correction factors from "
+                f"{p.correction_factor_dat_file}"
+            )
+            cf_q, cf_vals, cf_has_q = _read_scattering_dat(
+                p.correction_factor_dat_file
+            )
+            if not cf_has_q:
+                if cf_vals.size != p.qvector.size:
+                    raise ValueError(
+                        f"Single-column correction DAT has {cf_vals.size} points "
+                        f"but qvector has {p.qvector.size} points. They must match."
+                    )
+                correction_factor_q = np.asarray(cf_vals, dtype=np.float64)
+                print(
+                    f"Using single-column correction DAT directly "
+                    f"({cf_vals.size} points, no interpolation)"
+                )
+            elif cf_q.size != p.qvector.size or not np.allclose(cf_q, p.qvector):
+                correction_factor_q = np.interp(
+                    p.qvector, cf_q, cf_vals, left=cf_vals[0], right=cf_vals[-1]
+                )
+                print(
+                    f"Interpolated correction factors from {len(cf_q)} points "
+                    f"to {len(p.qvector)} q-points"
+                )
+            else:
+                correction_factor_q = np.asarray(cf_vals, dtype=np.float64)
+                print(
+                    f"Correction DAT q-grid matches qvector ({len(cf_q)} points)"
+                )
+        else:
+            correction_factor_q = np.ones(p.qlen, dtype=np.float64)
+
         # load target function from file
         # if os.path.exists(target_function_file):
         #    print("Loading data from %s ..." % target_function_file)
@@ -976,6 +1016,7 @@ class Wrapper:
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
                     gpu_chains=getattr(p, "gpu_chains", 1),
                     keep_on_device=use_gpu_persistent,
+                    correction_factor_q=correction_factor_q,
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")

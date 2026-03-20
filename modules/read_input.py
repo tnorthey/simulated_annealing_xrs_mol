@@ -58,6 +58,10 @@ class Input_to_params:
             ref_dat = str(data["files"]["reference_dat_file"])
             if ref_dat == "":
                 data["files"]["reference_dat_file"] = None
+        if "files" in data and "correction_factor_dat_file" in data["files"]:
+            cf_dat = str(data["files"]["correction_factor_dat_file"])
+            if cf_dat == "":
+                data["files"]["correction_factor_dat_file"] = None
         
         ### Parameters
         # mode
@@ -159,6 +163,14 @@ class Input_to_params:
                 self.reference_dat_file = None
         else:
             self.reference_dat_file = None
+        if "correction_factor_dat_file" in data["files"]:
+            self.correction_factor_dat_file = str(
+                data["files"]["correction_factor_dat_file"]
+            )
+            if self.correction_factor_dat_file == "":
+                self.correction_factor_dat_file = None
+        else:
+            self.correction_factor_dat_file = None
         self.target_file = str(data["files"]["target_file"])
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from numba import njit
 import numpy as np
 from numpy.typing import NDArray
@@ -51,6 +53,7 @@ class Annealing:
         gpu_emulation: bool = False,
         gpu_chains: int = 1,
         keep_on_device: bool = False,
+        correction_factor_q: NDArray | None = None,
     ):
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
@@ -134,6 +137,15 @@ class Annealing:
         qmin, qmax, qlen = qvector[0], qvector[-1], len(qvector)
         tmin, tmax, tlen = th[0], th[-1], len(th)
         pmin, pmax, plen = ph[0], ph[-1], len(ph)
+        if correction_factor_q is None:
+            _cfq = np.ones(qlen, dtype=np.float64)
+        else:
+            _cfq = np.asarray(correction_factor_q, dtype=np.float64).reshape(-1)
+            if _cfq.size != qlen:
+                raise ValueError(
+                    f"correction_factor_q length ({_cfq.size}) must match qlen ({qlen})"
+                )
+        correction_factor_q = _cfq
         ##=#=#=# END DEFINITIONS #=#=#=#
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
@@ -287,19 +299,21 @@ class Annealing:
                     inv_qlen = 1.0 / qlen
                     sse = 0.0
                     for qi in range(qlen):
+                        cq = correction_factor_q[qi]
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
                         pred_mol = 100.0 * (iam[qi] / reference_iam[qi])
-                        diff = pred_mol - target_function[qi]
+                        pred_mol_c = pred_mol * cq
+                        diff = pred_mol_c - target_function[qi]
                         sse += diff * diff
                         # For output, store the full PCD curve (incl. constant atomic/compton term)
                         if inelastic:
                             offset = atomic_total[qi] + compton[qi]
                         else:
                             offset = atomic_total[qi]
-                        predicted_function_[qi] = pred_mol + 100.0 * (
-                            offset / reference_iam[qi] - 1.0
-                        )
+                        predicted_function_[qi] = (
+                            pred_mol + 100.0 * (offset / reference_iam[qi] - 1.0)
+                        ) * cq
                     xray_contrib = sse * inv_qlen
                 else:
                     ### x-ray part of objective function
@@ -312,16 +326,22 @@ class Annealing:
                     inv_n = 1.0 / n
                     sse = 0.0
                     for qi in range(qlen):
+                        cq = correction_factor_q[qi]
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
                         pred_mol = iam[qi]
-                        diff = pred_mol - target_function[qi]
+                        pred_mol_c = pred_mol * cq
+                        diff = pred_mol_c - target_function[qi]
                         sse += (diff * diff) / abs_target_function[qi]
                         # For output, store the full IAM curve (incl. constant atomic/compton term)
                         if inelastic:
-                            predicted_function_[qi] = pred_mol + atomic_total[qi] + compton[qi]
+                            predicted_function_[qi] = (
+                                pred_mol + atomic_total[qi] + compton[qi]
+                            ) * cq
                         else:
-                            predicted_function_[qi] = pred_mol + atomic_total[qi]
+                            predicted_function_[qi] = (
+                                pred_mol + atomic_total[qi]
+                            ) * cq
                     xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
@@ -507,6 +527,9 @@ class Annealing:
             mdisp = _as_backend_array(xp, displacements, xp.float64)
             step_size_xp = _as_backend_array(xp, step_size_array, xp.float64)
             qvector_xp = _as_backend_array(xp, qvector, xp.float64)
+            correction_factor_xp = _as_backend_array(
+                xp, correction_factor_q, xp.float64
+            )
             target_function_xp = _as_backend_array(xp, target_function, xp.float64)
             reference_iam_xp = _as_backend_array(xp, reference_iam, xp.float64)
             abs_target_function_xp = _as_backend_array(xp, abs_target_function, xp.float64)
@@ -618,16 +641,22 @@ class Annealing:
                 # Objective function (PCD or IAM)
                 if pcd_mode:
                     pred_mol = 100.0 * (iam / reference_iam_xp[xp.newaxis, :])
-                    diff = pred_mol - target_function_xp[xp.newaxis, :]
+                    pred_mol_c = pred_mol * correction_factor_xp[xp.newaxis, :]
+                    diff = pred_mol_c - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(diff * diff, axis=1)
-                    predicted_function_ = pred_mol + _pcd_offset_correction
+                    predicted_function_ = (
+                        pred_mol + _pcd_offset_correction
+                    ) * correction_factor_xp[xp.newaxis, :]
                     xray_contrib = sse * inv_qlen
                 else:
-                    diff = iam - target_function_xp[xp.newaxis, :]
+                    pred_mol_c = iam * correction_factor_xp[xp.newaxis, :]
+                    diff = pred_mol_c - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(
                         (diff * diff) / abs_target_function_xp[xp.newaxis, :], axis=1
                     )
-                    predicted_function_ = iam + _iam_offset
+                    predicted_function_ = (
+                        iam + _iam_offset
+                    ) * correction_factor_xp[xp.newaxis, :]
                     xray_contrib = sse * inv_qlen
 
                 bonding_contrib = xp.zeros(n_chains, dtype=xp.float64)
