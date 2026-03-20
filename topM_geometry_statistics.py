@@ -220,12 +220,6 @@ def wrap_dihedral_column(data: np.ndarray, col_idx: int) -> np.ndarray:
     return data
 
 
-def _dihedral_offset_stem_token(offset_deg: float) -> str:
-    """Filename-safe token for --dihedral-offset (e.g. dioff180, dioffm1p5)."""
-    s = f"{offset_deg:.10g}".replace("-", "m").replace(".", "p")
-    return f"dioff{s}"
-
-
 def circular_mean_deg(angles_deg: np.ndarray) -> float:
     """Circular (directional) mean of angles in degrees, returned in [0, 360)."""
     rad = np.deg2rad(angles_deg)
@@ -318,7 +312,8 @@ def main():
         metavar="DEG",
         help=(
             "Degrees added to the dihedral column after [0, 360) wrap; result is taken mod 360. "
-            "Only valid with --dihedral."
+            "Only valid with --dihedral. Changing this uses the same default output names as offset 0; "
+            "pass --recompute to refresh a cached CSV."
         ),
     )
     parser.add_argument(
@@ -421,8 +416,6 @@ def main():
                 f"dihedral-{args.dihedral[0]}-{args.dihedral[1]}"
                 f"-{args.dihedral[2]}-{args.dihedral[3]}"
             )
-            if args.dihedral_offset != 0.0:
-                parts.append(_dihedral_offset_stem_token(args.dihedral_offset))
         if args.topM is not None:
             parts.append(f"topM-{args.topM}")
         args.output_plot = "_".join(parts) + ".png"
