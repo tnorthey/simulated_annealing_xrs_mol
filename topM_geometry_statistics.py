@@ -13,10 +13,14 @@ The closest-to-mean frame can be selected either by:
 No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
 
+Dihedral convention: raw angles from arctan2 ([-180, 180]°) are mapped to
+[0, 360) when negative; an optional --dihedral-offset is then applied (mod 360).
+
 Usage:
     python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5
     python3 topM_geometry_statistics.py results/ --topM 100 --dihedral 2 3 4 5 --bond 0 1
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --show-individuals
+    python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --dihedral-offset 180
 """
 
 import argparse
@@ -216,6 +220,12 @@ def wrap_dihedral_column(data: np.ndarray, col_idx: int) -> np.ndarray:
     return data
 
 
+def _dihedral_offset_stem_token(offset_deg: float) -> str:
+    """Filename-safe token for --dihedral-offset (e.g. dioff180, dioffm1p5)."""
+    s = f"{offset_deg:.10g}".replace("-", "m").replace(".", "p")
+    return f"dioff{s}"
+
+
 def circular_mean_deg(angles_deg: np.ndarray) -> float:
     """Circular (directional) mean of angles in degrees, returned in [0, 360)."""
     rad = np.deg2rad(angles_deg)
@@ -302,6 +312,16 @@ def main():
         help="Dihedral atom indices I J K L (0-indexed)",
     )
     parser.add_argument(
+        "--dihedral-offset",
+        type=float,
+        default=0.0,
+        metavar="DEG",
+        help=(
+            "Degrees added to the dihedral column after [0, 360) wrap; result is taken mod 360. "
+            "Only valid with --dihedral."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default=None,
@@ -377,6 +397,8 @@ def main():
 
     if args.bond is None and args.angle is None and args.dihedral is None:
         parser.error("At least one of --bond, --angle, or --dihedral must be specified")
+    if args.dihedral is None and args.dihedral_offset != 0.0:
+        parser.error("--dihedral-offset requires --dihedral")
 
     rmsd_indices: list[int] | None = None
     if args.rmsd_indices is not None:
@@ -399,6 +421,8 @@ def main():
                 f"dihedral-{args.dihedral[0]}-{args.dihedral[1]}"
                 f"-{args.dihedral[2]}-{args.dihedral[3]}"
             )
+            if args.dihedral_offset != 0.0:
+                parts.append(_dihedral_offset_stem_token(args.dihedral_offset))
         if args.topM is not None:
             parts.append(f"topM-{args.topM}")
         args.output_plot = "_".join(parts) + ".png"
@@ -500,6 +524,10 @@ def main():
             )
             if dihedral_col is not None:
                 geom = wrap_dihedral_column(geom, dihedral_col)
+                if args.dihedral_offset != 0.0:
+                    geom[:, dihedral_col] = (
+                        geom[:, dihedral_col] + args.dihedral_offset
+                    ) % 360.0
             all_geom.append(geom)
 
             for ci in range(n_cols):
