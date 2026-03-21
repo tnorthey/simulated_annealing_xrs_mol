@@ -802,30 +802,45 @@ class Wrapper:
                 target_function_ = target_function
 
         elif p.mode == "normal":
-            # if target file is a data file, read as target_function
-            target_q, target_iq, has_explicit_q = _read_scattering_dat(target_file)
-            if p.pcd_mode and not has_explicit_q:
-                if target_iq.size != p.qvector.size:
-                    raise ValueError(
-                        f"Single-column PCD target has {target_iq.size} points "
-                        f"but qvector has {p.qvector.size} points. They must match."
-                    )
+            # Scattering DAT (q, I) or single-column I; alternatively .xyz → IAM/PCD on q-grid
+            if str(target_file).lower().endswith(".xyz"):
                 print(
-                    f"PCD mode: using single-column target data directly "
-                    f"({target_iq.size} points, no interpolation)"
+                    f"normal mode: target {target_file} is XYZ — computing "
+                    "target IAM/PCD on the configured q grid (use a .dat file for raw data)."
                 )
-                target_function_ = target_iq
-            elif target_q.size != p.qvector.size or not np.allclose(target_q, p.qvector):
-                print(
-                    f"Interpolating target data from {target_q.size} points to {p.qvector.size} q-points"
+                _, _, _tl, target_xyz = m.read_xyz(target_file)
+                target_iam, _ta, _tc, _tpm = xyz2iam(
+                    target_xyz, atomic_numbers, compton_array, p.ewald_mode
                 )
-                target_function_ = np.interp(
-                    p.qvector, target_q, target_iq, left=target_iq[0], right=target_iq[-1]
-                )
+                if p.pcd_mode:
+                    target_function_ = 100 * (target_iam / reference_iam - 1)
+                else:
+                    target_function_ = target_iam
+                print(f"EXCITATION FACTOR = {p.excitation_factor}")
             else:
-                target_function_ = target_iq
-            print(f"EXCITATION FACTOR = {p.excitation_factor}")
-            target_xyz = xyz_start  # added simply to run the rmsd analysis later compared to this
+                target_q, target_iq, has_explicit_q = _read_scattering_dat(target_file)
+                if p.pcd_mode and not has_explicit_q:
+                    if target_iq.size != p.qvector.size:
+                        raise ValueError(
+                            f"Single-column PCD target has {target_iq.size} points "
+                            f"but qvector has {p.qvector.size} points. They must match."
+                        )
+                    print(
+                        f"PCD mode: using single-column target data directly "
+                        f"({target_iq.size} points, no interpolation)"
+                    )
+                    target_function_ = target_iq
+                elif target_q.size != p.qvector.size or not np.allclose(target_q, p.qvector):
+                    print(
+                        f"Interpolating target data from {target_q.size} points to {p.qvector.size} q-points"
+                    )
+                    target_function_ = np.interp(
+                        p.qvector, target_q, target_iq, left=target_iq[0], right=target_iq[-1]
+                    )
+                else:
+                    target_function_ = target_iq
+                print(f"EXCITATION FACTOR = {p.excitation_factor}")
+                target_xyz = xyz_start  # RMSD reference when target is data, not a geometry
         else:
             print('Error: mode value must be "test" or "normal"!')
         ###########################################################
