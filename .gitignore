@@ -1,5 +1,15 @@
 # Custom
 results/*
+data/freqs.npy
+data/modes.npy
+chd+_data
+data/nmm_freqs.npy
+data/nmm_modes.npy
+nmm_data/
+plots_/
+plots_c0p1/
+results_nmm/
+results_tuningtargetratio0p9/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
