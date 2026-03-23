@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build a Kabsch mean of the best-fitting N structures from the previous timestep,
-# save as ${RESULTS_DIR}/${time_step}_mean.xyz, then run one CUDA job with many GPU chains.
+# save as ${RESULTS_DIR}/<prev>_mean.xyz (timestep ts-1), then run one CUDA job with many GPU chains.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,7 +15,7 @@ EXCITATION_FACTOR="${EXCITATION_FACTOR:-0.628}"
 TUNING_RATIO="${TUNING_RATIO:-0.5}"
 # Override previous source step (default: current - 1, two-digit)
 PREV_STEP="${PREV_STEP:-}"
-# If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to NN_mean.xyz)
+# If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to <prev>_mean.xyz)
 STARTING_XYZ="${STARTING_XYZ:-}"
 
 usage() {
@@ -24,7 +24,7 @@ Usage: $0 <time_step> [excitation_factor] [tuning_ratio_target]
 
 Kabsch-average the TOP_N lowest-f(xray) structures from the previous timestep in
 RESULTS_DIR (files named like NN_<padded f>.xyz from wrap.py), write
-  \${RESULTS_DIR}/<time_step>_mean.xyz
+  \${RESULTS_DIR}/<time_step - 1>_mean.xyz
 then run a single:
   $PYTHON run.py --gpu-backend cuda --gpu-chains ${GPU_CHAINS} ...
 
@@ -78,7 +78,7 @@ else
 fi
 
 TARGET_FILE="${TARGET_FILE:-chd+_data/eirik_data_${ts_padded}.dat}"
-mean_out="${RESULTS_DIR}/${ts_padded}_mean.xyz"
+mean_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
 
 mkdir -p "$RESULTS_DIR"
 
