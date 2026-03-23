@@ -196,10 +196,8 @@ def test_correction_factor_multiplies_pcd_prediction():
     bond_param_array = np.zeros((0, 4), dtype=np.float64)
     angle_param_array = np.zeros((0, 5), dtype=np.float64)
     torsion_param_array = np.zeros((0, 6), dtype=np.float64)
-    molecular_py = iam_py - atomic_total
-    pred_mol = 100.0 * (molecular_py / reference_iam)
-    pcd_uncorr = pred_mol + 100.0 * (atomic_total / reference_iam - 1.0)
-    # SA subtracts atomic/compton PCD offset from this full-PCD target internally
+    # Full PCD target (uncorrected); SA shifts by pcd_offset internally for χ²
+    pcd_uncorr = 100.0 * (iam_py / reference_iam - 1.0)
     target_function = pcd_uncorr.copy()
     th = np.array([0.0, np.pi], dtype=np.float64)
     ph = np.array([0.0, np.pi], dtype=np.float64)
@@ -238,9 +236,11 @@ def test_correction_factor_multiplies_pcd_prediction():
         verbose=False,
         correction_factor_q=cf,
     )
+    # Correction applies to total IAM, then PCD: 100 * (c * I_tot / ref - 1)
+    expected_pcd = 100.0 * (cf * iam_py / reference_iam - 1.0)
     np.testing.assert_allclose(
         np.asarray(predicted_best, dtype=np.float64),
-        2.0 * pcd_uncorr,
+        expected_pcd,
         rtol=1e-11,
         atol=1e-11,
     )

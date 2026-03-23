@@ -300,20 +300,21 @@ class Annealing:
                     sse = 0.0
                     for qi in range(qlen):
                         cq = correction_factor_q[qi]
-                        # Objective compares *molecular-only* contribution because
-                        # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = 100.0 * (iam[qi] / reference_iam[qi])
-                        pred_mol_c = pred_mol * cq
-                        diff = pred_mol_c - target_function[qi]
-                        sse += diff * diff
-                        # For output, store the full PCD curve (incl. constant atomic/compton term)
+                        # Correction applies to total IAM, then PCD is derived (not PCD × c).
                         if inelastic:
                             offset = atomic_total[qi] + compton[qi]
                         else:
                             offset = atomic_total[qi]
-                        predicted_function_[qi] = (
-                            pred_mol + 100.0 * (offset / reference_iam[qi] - 1.0)
-                        ) * cq
+                        I_tot = iam[qi] + offset
+                        I_corr = cq * I_tot
+                        PCD_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                        pcd_atom = 100.0 * (offset / reference_iam[qi] - 1.0)
+                        # Objective compares *molecular-only* contribution because
+                        # `target_function` was pre-shifted outside the SA loop.
+                        pred_mol = PCD_full - pcd_atom
+                        diff = pred_mol - target_function[qi]
+                        sse += diff * diff
+                        predicted_function_[qi] = PCD_full
                     xray_contrib = sse * inv_qlen
                 else:
                     ### x-ray part of objective function
@@ -640,13 +641,16 @@ class Annealing:
 
                 # Objective function (PCD or IAM)
                 if pcd_mode:
-                    pred_mol = 100.0 * (iam / reference_iam_xp[xp.newaxis, :])
-                    pred_mol_c = pred_mol * correction_factor_xp[xp.newaxis, :]
-                    diff = pred_mol_c - target_function_xp[xp.newaxis, :]
+                    # Correction on total IAM, then PCD (same decomposition as CPU path).
+                    I_tot = iam + _pcd_offset[xp.newaxis, :]
+                    I_corr = I_tot * correction_factor_xp[xp.newaxis, :]
+                    PCD_full = 100.0 * (
+                        I_corr / reference_iam_xp[xp.newaxis, :] - 1.0
+                    )
+                    pred_mol = PCD_full - _pcd_offset_correction
+                    diff = pred_mol - target_function_xp[xp.newaxis, :]
                     sse = xp.sum(diff * diff, axis=1)
-                    predicted_function_ = (
-                        pred_mol + _pcd_offset_correction
-                    ) * correction_factor_xp[xp.newaxis, :]
+                    predicted_function_ = PCD_full
                     xray_contrib = sse * inv_qlen
                 else:
                     pred_mol_c = iam * correction_factor_xp[xp.newaxis, :]

@@ -20,6 +20,7 @@ Optional multi-chain CUDA execution (independent SA chains in parallel):
 - Or use CLI: `python3 run.py --gpu-backend cuda --gpu-chains 8`
 - Outputs include one `.xyz/.dat` per chain (`..._c000`, `..._c001`, etc.) plus the best-chain file for compatibility
 - For timestep workflows, `run_start.sh` runs an initial step from a chosen XYZ; `run_gpu_from_previous_timestep.sh` averages the previous step’s best structures into `results/NN_mean.xyz`, then runs one GPU job (default 1024 chains).
+- If `correction_factor_dat_file` is set: in **PCD** mode the factor multiplies **total IAM** before forming PCD; in **non-PCD** mode it multiplies the predicted **total intensity** (same as before).
 
 ## Quick Start
 
