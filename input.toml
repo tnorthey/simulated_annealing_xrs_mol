@@ -24,16 +24,16 @@ results_dir = "results"
 # Force field file for molecular mechanics calculations (OpenFF format)
 forcefield_file = "forcefields/openff_unconstrained-2.0.0.offxml"
 # Starting structure in XYZ format
-start_xyz_file = "xyz/start.xyz"
+start_xyz_file = "chd+_data/CCSD-neut.xyz"
 # Starting structure in SDF format (alternative to XYZ)
-start_sdf_file = "sdf/chd_start.sdf"
+start_sdf_file = "sdf/CCSD-neut.sdf"
 # Reference structure for comparison (used for RMSD calculations)
 reference_xyz_file = "chd+_data/CCSD-neut.xyz"
 # Reference DAT file for PCD mode (optional, if provided, uses this instead of calculating from reference_xyz_file)
 # If empty string or not provided, reference IAM is calculated from reference_xyz_file
-reference_dat_file = "data/chd_reference.dat"
+reference_dat_file = "chd+_data/CCSD_neut_scat_plus44.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
-target_file = "xyz/target.xyz"
+target_file = "chd+_data/eirik_data_30.dat"
 # correction factor which gets multiplied by the IAM prediction to make it close to ab initio
 correction_factor_dat_file = "chd+_data/IAM_corr.dat"
 
@@ -76,16 +76,16 @@ inelastic_bool = true
 # Use ion-corrected atomic scattering factors (see `modules/x.py`)
 # - false: neutral atom factors (default)
 # - true: apply per-element ion correction term (currently defined for a subset, e.g. C+)
-ion_mode_bool = true
+ion_mode_bool = false
 # Use PCD (Percent Change Difference) mode for target function
 pcd_mode_bool = true
 # Excitation factor for scaling target function (used in "normal" mode)
-excitation_factor = 1.0
+excitation_factor = 0.628
 
 # Q-vector parameters (scattering vector magnitude)
 [scattering_params.q]
 # Minimum q value (Å⁻¹)
-qmin = 0.4
+qmin = 0.001
 # Maximum q value (Å⁻¹)
 qmax = 4.0
 # Number of q points
@@ -138,9 +138,9 @@ sa_step_size = 0.012
 # Step size for greedy algorithm
 ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
-nrestarts = 1
+nrestarts = 2
 # Total number of runs (repeats entire process ntotalruns times)
-ntotalruns = 100
+ntotalruns = 1
 # Enable bond length constraints (harmonic oscillator potential)
 bonds_bool = true
 # Enable bond angle constraints (harmonic oscillator potential)
@@ -150,9 +150,9 @@ torsions_bool = true
 # Target ratio of X-ray contribution to total objective function
 tuning_ratio_target = 0.5
 # Initial tuning constant (C_tuning) for balancing X-ray vs. geometric constraints
-c_tuning_initial = 0.01
+c_tuning_initial = 0.1
 # Only use non-hydrogen normal modes in optimization
-non_h_modes_only_bool = true
+non_h_modes_only_bool = false
 # Damping factor for hydrogen modes (multiplies step size for hydrogen modes, typically < 1.0)
 hydrogen_mode_damping_factor = 0.2
 # Run PySCF Hartree-Fock energy calculation

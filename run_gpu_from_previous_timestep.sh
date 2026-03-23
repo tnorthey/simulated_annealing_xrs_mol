@@ -8,10 +8,10 @@ cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python3}"
 RESULTS_DIR="${RESULTS_DIR:-results}"
-TOP_N="${TOP_N:-20}"
+TOP_N="${TOP_N:-250}"
 CONFIG="${CONFIG:-input.toml}"
 GPU_CHAINS="${GPU_CHAINS:-1024}"
-EXCITATION_FACTOR="${EXCITATION_FACTOR:-1.0}"
+EXCITATION_FACTOR="${EXCITATION_FACTOR:-0.628}"
 TUNING_RATIO="${TUNING_RATIO:-0.5}"
 # Override previous source step (default: current - 1, two-digit)
 PREV_STEP="${PREV_STEP:-}"
@@ -77,7 +77,7 @@ else
     fi
 fi
 
-TARGET_FILE="${TARGET_FILE:-nmm_data/target_${ts_padded}.dat}"
+TARGET_FILE="${TARGET_FILE:-chd+_data/eirik_data_${ts_padded}.dat}"
 mean_out="${RESULTS_DIR}/${ts_padded}_mean.xyz"
 
 mkdir -p "$RESULTS_DIR"
