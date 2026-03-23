@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import time
 import pprint
 import numpy as np
 from numpy import linalg as LA
@@ -11,6 +13,30 @@ try:
     HAVE_PYSCF = True
 except ImportError:
     HAVE_PYSCF = False
+
+# #region agent log
+def _agent_debug_log(hypothesis_id, location, message, data):
+    _p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug-11f1de.log")
+    try:
+        with open(_p, "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "11f1de",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
+# #endregion
 
 # my modules
 import modules.mol as mol
@@ -701,6 +727,22 @@ class Wrapper:
             np.savetxt("starting_iam.dat", np.column_stack((p.qvector, starting_iam)))
             np.savetxt("reference_iam.dat", np.column_stack((p.qvector, reference_iam)))
 
+        # #region agent log
+        if p.pcd_mode:
+            _ri = np.asarray(reference_iam, dtype=np.float64).ravel()
+            _agent_debug_log(
+                "H2",
+                "wrap.py:after_reference_iam",
+                "reference_iam stats",
+                {
+                    "min": float(np.nanmin(_ri)),
+                    "max": float(np.nanmax(_ri)),
+                    "mean": float(np.nanmean(_ri)),
+                    "qlen": int(_ri.size),
+                },
+            )
+        # #endregion
+
         natoms = xyz_start.shape[0]
         ###### mode displacements ######
         if p.run_pyscf_modes_bool:
@@ -911,6 +953,33 @@ class Wrapper:
         else:
             correction_factor_q = np.ones(p.qlen, dtype=np.float64)
 
+        # #region agent log
+        _cf = np.asarray(correction_factor_q, dtype=np.float64).ravel()
+        _cmin, _cmax = float(np.nanmin(_cf)), float(np.nanmax(_cf))
+        _agent_debug_log(
+            "H1",
+            "wrap.py:after_correction_factor_q",
+            "correction_factor_q stats",
+            {
+                "min": _cmin,
+                "max": _cmax,
+                "mean": float(np.nanmean(_cf)),
+                "median": float(np.median(_cf)),
+                "has_file": bool(p.correction_factor_dat_file),
+            },
+        )
+        if p.pcd_mode and _cmax > 1.01:
+            _agent_debug_log(
+                "H4",
+                "wrap.py:pcd_formula_sanity",
+                "if I_tot equals ref, new PCD_full is 100*(c-1) per q",
+                {
+                    "example_new_pcd_if_I_equals_ref": 100.0 * (_cmax - 1.0),
+                    "example_old_scaled_pcd_if_uncorr_0p04": 0.04 * _cmax,
+                },
+            )
+        # #endregion
+
         # load target function from file
         # if os.path.exists(target_function_file):
         #    print("Loading data from %s ..." % target_function_file)
@@ -1047,6 +1116,20 @@ class Wrapper:
 
             # Scale predicted output from 100% excitation level back to
             # the experimental excitation level so it matches the raw target.
+            # #region agent log
+            if p.pcd_mode:
+                _pb = np.asarray(predicted_best, dtype=np.float64).ravel()
+                _agent_debug_log(
+                    "H5",
+                    "wrap.py:predicted_before_excitation",
+                    "predicted_best before excitation_factor",
+                    {
+                        "min": float(np.nanmin(_pb)),
+                        "max": float(np.nanmax(_pb)),
+                        "mean": float(np.nanmean(_pb)),
+                    },
+                )
+            # #endregion
             if p.mode == "normal":
                 predicted_best = predicted_best * p.excitation_factor
                 chain_results = getattr(sa, "last_chain_results", None)
@@ -1057,6 +1140,27 @@ class Wrapper:
                     chain_results["predicted_best_all"] = (
                         chain_results["predicted_best_all"] * p.excitation_factor
                     )
+
+            # #region agent log
+            if p.pcd_mode:
+                _pb2 = np.asarray(predicted_best, dtype=np.float64).ravel()
+                _tgt = np.asarray(target_function_, dtype=np.float64).ravel()
+                _tfs = np.asarray(target_for_sa, dtype=np.float64).ravel()
+                _agent_debug_log(
+                    "H3",
+                    "wrap.py:predicted_vs_target_after_excitation",
+                    "compare scales",
+                    {
+                        "predicted_min": float(np.nanmin(_pb2)),
+                        "predicted_max": float(np.nanmax(_pb2)),
+                        "target_raw_min": float(np.nanmin(_tgt)),
+                        "target_raw_max": float(np.nanmax(_tgt)),
+                        "target_for_sa_min": float(np.nanmin(_tfs)),
+                        "target_for_sa_max": float(np.nanmax(_tfs)),
+                        "excitation_factor": float(p.excitation_factor),
+                    },
+                )
+            # #endregion
 
             ### analysis on xyz_best
             # bond-length of interest
