@@ -1,7 +1,27 @@
 import numpy as np
 from numpy.typing import NDArray, DTypeLike
+from scipy.interpolate import CubicSpline
 
 _COMPTON_DATA = None  # lazy-loaded cache: (q_compton, compton_array)
+
+
+def _interp_compton_row(q_compton, y_row, qvector):
+    """Cubic spline on tabulated Compton data; linear if too few points. Matches np.interp
+    boundary behaviour by evaluating the spline only on q clipped to the table range."""
+    q = np.asarray(q_compton, dtype=np.float64)
+    y = np.asarray(y_row, dtype=np.float64)
+    order = np.argsort(q)
+    q = q[order]
+    y = y[order]
+    inc = np.concatenate([[True], np.diff(q) > 0])
+    q = q[inc]
+    y = y[inc]
+    q_eval = np.asarray(qvector, dtype=np.float64)
+    if q.size < 4:
+        return np.interp(q_eval, q, y)
+    cs = CubicSpline(q, y)
+    q_clip = np.clip(q_eval, q[0], q[-1])
+    return cs(q_clip)
 
 
 def _load_compton_data():
@@ -325,15 +345,16 @@ class Xray:
         return atomfactor
 
     def compton_spline(self, atomic_numbers, qvector):
-        """spline the compton factors to correct qvector, outputs array (atoms, qvector)"""
+        """Cubic-spline Compton factors onto qvector; outputs array (atoms, qvector)."""
         natom = len(atomic_numbers)
         compton_array = np.zeros(
             (natom, len(qvector))
         )  # inelastic component for each atom
         q_compton, arr = _load_compton_data()
         for i in range(natom):
-            # Linear interpolation is sufficient here and avoids SciPy dependency.
-            compton_array[i, :] = np.interp(qvector, q_compton, arr[atomic_numbers[i] - 1, :])
+            compton_array[i, :] = _interp_compton_row(
+                q_compton, arr[atomic_numbers[i] - 1, :], qvector
+            )
         return compton_array
 
     ### other functions ... that may be called by the Gradient descent.
@@ -353,14 +374,16 @@ class Xray:
         return jq, atomic_factor_arr
 
     def compton_spline_calc(self, atomic_numbers, qvector):
-        """spline the compton factors to correct qvector, outputs array (atoms, qvector)"""
+        """Cubic-spline Compton factors onto qvector; returns total and per-atom rows."""
         natoms = len(atomic_numbers)
         compton_array = np.zeros(
             (natoms, len(qvector))
         )  # inelastic component for each atom
         q_compton, arr = _load_compton_data()
         for i in range(natoms):
-            compton_array[i, :] = np.interp(qvector, q_compton, arr[atomic_numbers[i] - 1, :])
+            compton_array[i, :] = _interp_compton_row(
+                q_compton, arr[atomic_numbers[i] - 1, :], qvector
+            )
         compton_total = np.sum(compton_array, axis=0)
         return compton_total, compton_array
 
