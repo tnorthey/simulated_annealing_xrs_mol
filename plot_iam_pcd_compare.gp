@@ -8,21 +8,21 @@
 # Override paths or output prefix:
 #   gnuplot -e "FILE_A='out_a.dat'; FILE_B='out_b.dat'; OUT_PREFIX='myfig'" plot_iam_pcd_compare.gp
 #
-# Build PDF (run twice if the .tex references change):
-#   pdflatex iam_pcd_compare.tex
-#
-# Produces: <OUT_PREFIX>.tex and <OUT_PREFIX>-inc.eps (standalone bundle for pdflatex).
+# Produces: <OUT_PREFIX>.png
 
 if (!exists("FILE_A")) FILE_A = "results/iam_pcd_corr_plus44.dat"
 if (!exists("FILE_B")) FILE_B = "results/iam_pcd_ion_neut_iam.dat"
 if (!exists("OUT_PREFIX")) OUT_PREFIX = "iam_pcd_compare"
 
-set terminal epslatex standalone color colortext 10 font "Helvetica,12" \
-    size 4.2in,2.8in \
-    header "\\usepackage{amsmath}"
-set output OUT_PREFIX . ".tex"
+# ~4.2 x 2.8 in at 300 dpi (publication-friendly); adjust size or add -e "DPI=..." if needed
+if (!exists("PNG_W")) PNG_W = 1260
+if (!exists("PNG_H")) PNG_H = 840
 
-# Line styles: distinct colors (color-blind friendly pair); solid lines for wide gnuplot compatibility
+set terminal pngcairo enhanced color font "Helvetica,12" size PNG_W,PNG_H linewidth 2
+set output OUT_PREFIX . ".png"
+set encoding utf8
+
+# Line styles: distinct colors (color-blind friendly pair)
 set style line 1 lw 2.2 lc rgb "#0173B2"
 set style line 2 lw 2.2 lc rgb "#DE8F05"
 
@@ -32,8 +32,9 @@ set tics nomirror
 set mxtics 2
 set mytics 2
 
-set xlabel '$q$ (\AA$^{-1}$)'
-set ylabel 'PCD (\%)'
+# Enhanced text: superscript on inverse Å
+set xlabel 'q (Å^{-1})'
+set ylabel 'PCD (%)'
 
 set key top right samplen 2.5 spacing 1.15 width -4
 
@@ -41,8 +42,8 @@ set key top right samplen 2.5 spacing 1.15 width -4
 set xrange [0.001:4.0]
 
 plot FILE_A using 1:2 with lines ls 1 \
-        title 'PCD + correction; ref.\ CCSD neut.\ +44', \
+        title 'PCD + correction; ref. CCSD neut. +44', \
      FILE_B using 1:2 with lines ls 2 \
-        title 'PCD + ion; ref.\ CCSD neut.\ IAM'
+        title 'PCD + ion; ref. CCSD neut. IAM'
 
 unset output
