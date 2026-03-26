@@ -34,10 +34,8 @@ reference_xyz_file = "chd+_data/CCSD-neut.xyz"
 reference_dat_file = "chd+_data/CCSD_neut_scat_plus44.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
 target_file = "chd+_data/eirik_data_30.dat"
-# Multiplicative correction on predicted IAM (interpolated to q). Do not set both this and ab_initio_scattering_file.
-correction_factor_dat_file = "chd+_data/IAM_corr.dat"
-# Optional: ab initio I(q) at reference_xyz (two columns: q, I). Correction = I / IAM(reference_xyz) on that grid; also writes results/reference_iam_scattering.dat. Mutually exclusive with correction_factor_dat_file.
-# ab_initio_scattering_file = "chd+_data/my_ab_initio.dat"
+# Optional: ab initio I(q) at reference_xyz (two columns: q, I). Correction = I / IAM(reference_xyz) on that grid; writes results/reference_iam_scattering.dat; interpolated to the configured q grid.
+ab_initio_scattering_file = "chd+_data/CCSD_neut_scat_plus44.dat"
 
 # ============================================================================
 # OPTIONS

@@ -58,10 +58,6 @@ class Input_to_params:
             ref_dat = str(data["files"]["reference_dat_file"])
             if ref_dat == "":
                 data["files"]["reference_dat_file"] = None
-        if "files" in data and "correction_factor_dat_file" in data["files"]:
-            cf_dat = str(data["files"]["correction_factor_dat_file"])
-            if cf_dat == "":
-                data["files"]["correction_factor_dat_file"] = None
         if "files" in data and "ab_initio_scattering_file" in data["files"]:
             abi = str(data["files"]["ab_initio_scattering_file"])
             if abi == "":
@@ -167,34 +163,12 @@ class Input_to_params:
                 self.reference_dat_file = None
         else:
             self.reference_dat_file = None
-        if "correction_factor_dat_file" in data["files"]:
-            self.correction_factor_dat_file = str(
-                data["files"]["correction_factor_dat_file"]
-            )
-            if self.correction_factor_dat_file == "":
-                self.correction_factor_dat_file = None
-        else:
-            self.correction_factor_dat_file = None
         if "ab_initio_scattering_file" in data["files"]:
             self.ab_initio_scattering_file = str(data["files"]["ab_initio_scattering_file"])
             if self.ab_initio_scattering_file == "":
                 self.ab_initio_scattering_file = None
         else:
             self.ab_initio_scattering_file = None
-        if (
-            self.correction_factor_dat_file is not None
-            and self.ab_initio_scattering_file is not None
-        ):
-            print(f"\n{'='*60}")
-            print("ERROR: Conflicting file options in [files]")
-            print(f"{'='*60}")
-            print(
-                "  Set only one of: correction_factor_dat_file, ab_initio_scattering_file"
-            )
-            print(f"  correction_factor_dat_file = {self.correction_factor_dat_file!r}")
-            print(f"  ab_initio_scattering_file = {self.ab_initio_scattering_file!r}")
-            print(f"{'='*60}\n")
-            sys.exit(1)
         self.target_file = str(data["files"]["target_file"])
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])

@@ -12,7 +12,6 @@ This script reads an XYZ file (or XYZ trajectory) and calculates the IAM
 Usage:
     python3 calculate_iam.py input.xyz output.dat
     python3 calculate_iam.py input.xyz output.dat --reference reference.xyz --pcd
-    python3 calculate_iam.py input.xyz output.dat --pcd --reference-dat ref.dat --correction-factor IAM_corr.dat
     python3 calculate_iam.py input.xyz output.dat --inelastic --pcd --reference ref.xyz --ab-initio-scattering ab_initio.dat
     python3 calculate_iam.py input.xyz output.dat --ewald
     python3 calculate_iam.py input.xyz output.dat --elastic
@@ -159,12 +158,9 @@ def main():
     parser.add_argument('--reference-dat', type=str, default=None,
                        dest='reference_dat',
                        help='Reference DAT file (q, I_ref) for PCD; use instead of --reference')
-    parser.add_argument('--correction-factor', type=str, default=None,
-                       dest='correction_factor',
-                       help='DAT file with q-dependent factor(s); multiplies total IAM before PCD or raw output')
     parser.add_argument('--ab-initio-scattering', type=str, default=None,
                        dest='ab_initio_scattering',
-                       help='DAT with col1=q, col2=ab initio I(q) at --reference geometry; correction = I/IAM_ref on that grid, interpolated to qvector (mutually exclusive with --correction-factor; requires --reference)')
+                       help='DAT with col1=q, col2=ab initio I(q) at --reference geometry; correction = I/IAM_ref on that grid, interpolated to qvector (requires --reference)')
     parser.add_argument('--pcd', action='store_true',
                        help='Calculate PCD (percentage difference) instead of IAM')
     
@@ -212,13 +208,6 @@ def main():
         if has_xyz == has_dat:
             parser.error("--pcd requires exactly one of --reference or --reference-dat")
     
-    if args.ewald and args.correction_factor:
-        parser.error(
-            "correction factor is only supported for isotropic (non-Ewald) q; "
-            "omit --ewald or omit --correction-factor"
-        )
-    if args.ab_initio_scattering and args.correction_factor:
-        parser.error("use only one of --ab-initio-scattering or --correction-factor")
     if args.ewald and args.ab_initio_scattering:
         parser.error(
             "ab initio scattering correction is only supported for isotropic (non-Ewald) q; "
@@ -338,26 +327,6 @@ def main():
         else:
             correction_factor_q = np.asarray(corr_abi, dtype=np.float64)
             print(f"Ab initio q-grid matches configured qvector ({len(q_abi)} points)")
-    elif args.correction_factor:
-        print(f"Loading q-dependent correction factors from {args.correction_factor}...")
-        if not os.path.exists(args.correction_factor):
-            print(f"Error: Correction factor file not found: {args.correction_factor}")
-            sys.exit(1)
-        cf_q, cf_vals, cf_has_q = _read_scattering_dat(args.correction_factor)
-        if not cf_has_q:
-            if cf_vals.size != qvector.size:
-                print(
-                    f"Error: Single-column correction DAT has {cf_vals.size} points "
-                    f"but qvector has {qvector.size} points. They must match."
-                )
-                sys.exit(1)
-            correction_factor_q = np.asarray(cf_vals, dtype=np.float64)
-        elif cf_q.size != qvector.size or not np.allclose(cf_q, qvector):
-            correction_factor_q = np.interp(
-                qvector, cf_q, cf_vals, left=cf_vals[0], right=cf_vals[-1]
-            )
-        else:
-            correction_factor_q = np.asarray(cf_vals, dtype=np.float64)
     else:
         correction_factor_q = np.ones(qvector.size, dtype=np.float64)
     

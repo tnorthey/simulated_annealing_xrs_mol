@@ -10,7 +10,7 @@
 #
 # Produces: <OUT_PREFIX>.png
 
-if (!exists("FILE_A")) FILE_A = "results/iam_pcd_corr_plus44.dat"
+if (!exists("FILE_A")) FILE_A = "results/iam_pcd_abinitio.dat"
 if (!exists("FILE_B")) FILE_B = "results/iam_pcd_ion_neut_iam.dat"
 if (!exists("OUT_PREFIX")) OUT_PREFIX = "iam_pcd_compare"
 
@@ -42,7 +42,7 @@ set key top right samplen 2.5 spacing 1.15 width -4
 set xrange [0.001:4.0]
 
 plot FILE_A using 1:2 with lines ls 1 \
-        title 'PCD + correction; ref. CCSD neut. +44', \
+        title 'PCD + ab-initio corr.; ref. XYZ IAM', \
      FILE_B using 1:2 with lines ls 2 \
         title 'PCD + ion; ref. CCSD neut. IAM'
 

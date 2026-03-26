@@ -49,12 +49,9 @@ def create_parser():
                             help='Reference XYZ file')
     files_group.add_argument('--reference-dat-file', type=str, dest='files.reference_dat_file',
                             help='Reference DAT file for PCD mode (optional, overrides reference_xyz_file calculation)')
-    files_group.add_argument('--correction-factor-dat-file', type=str,
-                            dest='files.correction_factor_dat_file',
-                            help='Optional DAT: col1=q, col2=multiplicative correction; interpolated to qvector and applied to predicted signal')
     files_group.add_argument('--ab-initio-scattering-file', type=str,
                             dest='files.ab_initio_scattering_file',
-                            help='Optional DAT: col1=q, col2=ab initio I(q) at reference_xyz; correction = I/IAM_ref(q) on that grid, interpolated to qvector (mutually exclusive with --correction-factor-dat-file)')
+                            help='Optional DAT: col1=q, col2=ab initio I(q) at reference_xyz; correction = I/IAM_ref(q) on that grid, interpolated to qvector')
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
     

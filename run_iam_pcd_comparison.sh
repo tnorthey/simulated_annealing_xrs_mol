@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Run two calculate_iam.py PCD cases (correction+DAT ref vs ion+DAT ref) and compare outputs.
+# Run two calculate_iam.py PCD cases:
+#   A: PCD with multiplicative correction from ab initio I(q) / IAM(ref) on the ab-initio q-grid
+#      (--reference must match the geometry of the ab initio curve; no hand-made correction DAT).
+#   B: ion-corrected factors + PCD vs a reference DAT.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -7,7 +10,9 @@ cd "$SCRIPT_DIR"
 
 PYTHON="${PYTHON:-python3}"
 INPUT_XYZ="${INPUT_XYZ:-chd+_data/CCSD-neut.xyz}"
-OUT_A="${OUT_A:-results/iam_pcd_corr_plus44.dat}"
+# Two-column DAT: q, I_ab_initio at the same geometry as reference_xyz (here: INPUT_XYZ)
+AB_INITIO_SCATTERING="${AB_INITIO_SCATTERING:-chd+_data/CCSD_neut_scat_plus44.dat}"
+OUT_A="${OUT_A:-results/iam_pcd_abinitio.dat}"
 OUT_B="${OUT_B:-results/iam_pcd_ion_neut_iam.dat}"
 # Match input.toml [scattering_params.q]
 QFLAGS=(--qmin 0.001 --qmax 4.0 --qlen 100)
@@ -15,10 +20,10 @@ QFLAGS=(--qmin 0.001 --qmax 4.0 --qlen 100)
 mkdir -p "$(dirname "$OUT_A")"
 mkdir -p "$(dirname "$OUT_B")"
 
-echo "=== Run A: PCD + correction factor, reference CCSD_neut_scat_plus44.dat ==="
+echo "=== Run A: PCD + correction from ab initio file: ${AB_INITIO_SCATTERING} ==="
 "$PYTHON" calculate_iam.py "$INPUT_XYZ" "$OUT_A" --inelastic --pcd \
-  --reference-dat chd+_data/CCSD_neut_scat_plus44.dat \
-  --correction-factor chd+_data/IAM_corr.dat \
+  --reference "$INPUT_XYZ" \
+  --ab-initio-scattering "$AB_INITIO_SCATTERING" \
   "${QFLAGS[@]}"
 
 echo "=== Run B: ion + PCD, reference CCSD-neut_iam_scat.dat ==="
