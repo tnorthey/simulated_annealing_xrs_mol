@@ -12,7 +12,7 @@ This script reads an XYZ file (or XYZ trajectory) and calculates the IAM
 Usage:
     python3 calculate_iam.py input.xyz output.dat
     python3 calculate_iam.py input.xyz output.dat --reference reference.xyz --pcd
-    python3 calculate_iam.py input.xyz output.dat --inelastic --pcd --reference ref.xyz --ab-initio-scattering ab_initio.dat
+    python3 calculate_iam.py input.xyz output.dat --elastic --pcd --reference ref.xyz --reference-dat ref_I.dat --ab-initio-scattering ab_initio.dat
     python3 calculate_iam.py input.xyz output.dat --ewald
     python3 calculate_iam.py input.xyz output.dat --elastic
 """
@@ -157,10 +157,10 @@ def main():
                        help='Reference XYZ file for PCD calculation')
     parser.add_argument('--reference-dat', type=str, default=None,
                        dest='reference_dat',
-                       help='Reference DAT file (q, I_ref) for PCD; use instead of --reference')
+                       help='Reference DAT (q, I_ref) for PCD denominator. With --ab-initio-scattering and --pcd, required: PCD = 100*(I_corr/I_ref-1) with I_corr=c×(atomic+molecular).')
     parser.add_argument('--ab-initio-scattering', type=str, default=None,
                        dest='ab_initio_scattering',
-                       help='DAT with col1=q, col2=ab initio total I(q) at --reference; c(q)=I_abi/I_elastic_IAM(ref); output uses c×(atomic+molecular) (requires --reference)')
+                       help='DAT with col1=q, col2=ab initio total I(q) at --reference; c(q)=I_abi/I_elastic_IAM(ref); output uses c×(atomic+molecular) (requires --reference). With --pcd, also pass --reference-dat for the PCD baseline I_ref(q).')
     parser.add_argument('--pcd', action='store_true',
                        help='Calculate PCD (percentage difference) instead of IAM')
     
@@ -203,24 +203,30 @@ def main():
     
     # Validate arguments
     if args.pcd:
-        has_xyz = args.reference is not None
-        has_dat = args.reference_dat is not None
-        if has_xyz == has_dat:
-            parser.error("--pcd requires exactly one of --reference or --reference-dat")
+        if args.ab_initio_scattering:
+            if not args.reference:
+                parser.error(
+                    "--ab-initio-scattering with --pcd requires --reference REF.xyz "
+                    "(for c(q) = I_ab_initio / I_elastic_IAM(ref))"
+                )
+            if not args.reference_dat:
+                parser.error(
+                    "--ab-initio-scattering with --pcd requires --reference-dat REF.dat "
+                    "(PCD compares c(q)×I_elastic to this I_ref(q))"
+                )
+        else:
+            has_xyz = args.reference is not None
+            has_dat = args.reference_dat is not None
+            if has_xyz == has_dat:
+                parser.error("--pcd requires exactly one of --reference or --reference-dat")
     
     if args.ewald and args.ab_initio_scattering:
         parser.error(
             "ab initio scattering correction is only supported for isotropic (non-Ewald) q; "
             "omit --ewald or omit --ab-initio-scattering"
         )
-    if args.ab_initio_scattering:
-        if not args.reference:
-            parser.error("--ab-initio-scattering requires --reference REF.xyz")
-        if args.pcd and args.reference_dat:
-            parser.error(
-                "--ab-initio-scattering with --pcd requires --reference (not --reference-dat) "
-                "so IAM(ref) can be computed on the ab initio q-grid"
-            )
+    if args.ab_initio_scattering and not args.reference:
+        parser.error("--ab-initio-scattering requires --reference REF.xyz")
     
     if args.ewald and (args.tmin >= args.tmax or args.pmin >= args.pmax):
         parser.error("For Ewald mode: tmin < tmax and pmin < pmax required")
@@ -334,17 +340,14 @@ def main():
     # Calculate reference IAM if PCD mode
     reference_iam = None
     if args.pcd:
-        if args.ab_initio_scattering:
-            # Same elastic IAM(ref) on qvector as used in c(q) denominator (wrap.py convention).
-            print("Calculating elastic reference IAM for PCD (ab-initio correction)...")
-            reference_iam, _, _, _ = calculate_iam_for_structure(
-                ref_xyz, ref_atomic_numbers, qvector, x,
-                ion=args.ion,
-                inelastic=False, ewald_mode=args.ewald,
-                th=th, ph=ph, compton_array=compton_array,
-            )
-        elif args.reference_dat:
-            print(f"Loading reference IAM from DAT file: {args.reference_dat}")
+        if args.reference_dat:
+            if args.ab_initio_scattering:
+                print(
+                    f"Loading PCD baseline I_ref(q) from DAT (compared to c(q)×I_elastic): "
+                    f"{args.reference_dat}"
+                )
+            else:
+                print(f"Loading reference IAM from DAT file: {args.reference_dat}")
             if not os.path.exists(args.reference_dat):
                 print(f"Error: Reference DAT file not found: {args.reference_dat}")
                 sys.exit(1)
