@@ -21,6 +21,13 @@ Usage:
     python3 topM_geometry_statistics.py results/ --topM 100 --dihedral 2 3 4 5 --bond 0 1
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --show-individuals
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --dihedral-offset 180
+
+Target vs closest candidate scattering (optional):
+    For each timestep the chosen structure is e.g. 18_000.12482393.xyz; the script overlays
+    the sibling file 18_000.12482393.dat with TARGET_FUNCTION_18.dat (see --plot-target-comparison).
+
+    python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --plot-target-comparison
+    # Optional: --target-results-dir path/to/results
 """
 
 import argparse
@@ -29,7 +36,7 @@ import heapq
 import os
 import re
 import sys
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -264,6 +271,123 @@ def _column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
     return labels
 
 
+def _read_scattering_dat(path: str) -> Tuple[np.ndarray, np.ndarray, bool]:
+    """Return (q, intensity, has_explicit_q). Same semantics as modules.wrap._read_scattering_dat."""
+    data = np.loadtxt(path)
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim == 0:
+        arr = arr.reshape(1)
+    if arr.ndim == 1:
+        q = np.arange(arr.size, dtype=np.float64)
+        intensity = arr.astype(np.float64)
+        has_explicit_q = False
+    else:
+        if arr.shape[1] >= 2:
+            q = arr[:, 0].astype(np.float64)
+            intensity = arr[:, 1].astype(np.float64)
+            has_explicit_q = True
+        else:
+            q = np.arange(arr.shape[0], dtype=np.float64)
+            intensity = arr[:, 0].astype(np.float64)
+            has_explicit_q = False
+    return q, intensity, has_explicit_q
+
+
+def _timestep_to_target_run_id(t: int, *, pad: int) -> str:
+    """Pad timestep id to match run_id (e.g. 1 -> '01')."""
+    return f"{t:0{pad}d}"
+
+
+def _overlay_on_qgrid(
+    q_ref: np.ndarray,
+    q_other: np.ndarray,
+    y_other: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Return (q_ref, y_other interpolated onto q_ref)."""
+    if q_other.size != q_ref.size or not np.allclose(q_other, q_ref, rtol=1e-5, atol=1e-8):
+        y_interp = np.interp(q_ref, q_other, y_other, left=y_other[0], right=y_other[-1])
+    else:
+        y_interp = y_other
+    return q_ref, y_interp
+
+
+def plot_target_vs_closest_dat_files(
+    *,
+    args: argparse.Namespace,
+    n_timesteps: int,
+    closest_dat_paths: list[str],
+    plot_stem: str,
+    font_scale: float,
+) -> None:
+    """Per-timestep plots: TARGET_FUNCTION_<ts>.dat vs sibling .dat of the chosen xyz (same basename)."""
+    if len(closest_dat_paths) != n_timesteps:
+        raise SystemExit(
+            f"closest_dat_paths has {len(closest_dat_paths)} entries but "
+            f"expected {n_timesteps} (one per timestep)."
+        )
+
+    target_dir = args.target_results_dir or args.directory
+    parent = os.path.dirname(plot_stem) or "."
+    out_subdir = os.path.join(parent, os.path.basename(plot_stem) + "_target_comparison")
+    os.makedirs(out_subdir, exist_ok=True)
+
+    pad = max(1, int(args.target_run_id_pad))
+    label_fs = 12.0 * font_scale
+    tick_fs = 10.0 * font_scale
+    legend_fs = 10.0 * font_scale
+    title_fs = 14.0 * font_scale
+
+    for ti in range(n_timesteps):
+        cand_path = closest_dat_paths[ti]
+        parsed = parse_name(cand_path)
+        if parsed is None:
+            parsed = parse_name(os.path.splitext(cand_path)[0] + ".xyz")
+        if parsed is None:
+            raise SystemExit(
+                f"Could not parse timestep from filename: {cand_path!r} "
+                "(expected pattern like 18_000.12345.dat)"
+            )
+        t_id = parsed[0]
+        run_id = _timestep_to_target_run_id(int(t_id), pad=pad) if isinstance(t_id, int) else str(t_id)
+        tf_path = os.path.join(target_dir, f"TARGET_FUNCTION_{run_id}.dat")
+        if not os.path.isfile(tf_path):
+            print(f"Warning: skip timestep {run_id}: missing {tf_path}", file=sys.stderr)
+            continue
+        if not os.path.isfile(cand_path):
+            print(f"Warning: skip timestep {run_id}: missing candidate dat {cand_path}", file=sys.stderr)
+            continue
+
+        q_tgt, y_tgt, _ = _read_scattering_dat(tf_path)
+        q_c, y_c, _ = _read_scattering_dat(cand_path)
+
+        q_plot, y_c_plot = _overlay_on_qgrid(q_tgt, q_c, y_c)
+
+        base = f"frame_{run_id}_target_vs_closest_dat"
+        png_path = os.path.join(out_subdir, base + ".png")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(q_plot, y_tgt, linewidth=2.0, label="TARGET_FUNCTION", color="C0")
+        ax.plot(
+            q_plot,
+            y_c_plot,
+            linewidth=2.0,
+            linestyle="--",
+            label=os.path.basename(cand_path),
+            color="C1",
+        )
+        ax.set_xlabel(r"q (Å$^{-1}$)", fontsize=label_fs)
+        ax.set_ylabel("signal", fontsize=label_fs)
+        ax.set_title(f"Timestep {run_id}: TARGET_FUNCTION vs {os.path.basename(cand_path)}", fontsize=title_fs)
+        ax.tick_params(axis="both", labelsize=tick_fs)
+        ax.legend(fontsize=legend_fs)
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(png_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {png_path}")
+
+    print(f"Target comparison plots directory: {out_subdir}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -387,6 +511,36 @@ def main():
         default=1.0,
         help="Scale factor for plot text sizes (e.g. 2.0 for about double size).",
     )
+    parser.add_argument(
+        "--plot-target-comparison",
+        action="store_true",
+        help=(
+            "After the geometry plot, write one PNG per timestep overlaying "
+            "TARGET_FUNCTION_<run_id>.dat with the sibling .dat of the chosen structure "
+            "(e.g. 18_000.12.xyz -> 18_000.12.dat). Requires "
+            f"a sidecar file <plot_stem>_closest_dat_paths.txt (written when the "
+            "closest-to-mean trajectory is built; use --recompute if missing)."
+        ),
+    )
+    parser.add_argument(
+        "--target-results-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory containing TARGET_FUNCTION_*.dat (default: same as the xyz "
+            "directory positional argument)."
+        ),
+    )
+    parser.add_argument(
+        "--target-run-id-pad",
+        type=int,
+        default=2,
+        metavar="N",
+        help=(
+            "Zero-pad width for mapping timestep index to TARGET_FUNCTION_<id>.dat "
+            "(default 2 → 01, 02, ...)."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -434,6 +588,8 @@ def main():
         else plot_stem + "_closest_to_mean.xyz"
     )
     mean_xyz_path = plot_stem + "_mean.xyz"
+    closest_dat_paths_txt = plot_stem + "_closest_dat_paths.txt"
+    closest_dat_paths: list[str] = []
 
     col_labels = _column_labels(
         bond=args.bond, angle=args.angle, dihedral=args.dihedral
@@ -572,12 +728,20 @@ def main():
         closest_frames = []
         for ti, layer_i in enumerate(layers):
             mi = closest_indices[ti]
-            n, comment, atoms, coords = read_xyz_frame(layer_i[mi]["xyz"])
+            xyz_path = layer_i[mi]["xyz"]
+            closest_dat_paths.append(
+                os.path.abspath(os.path.splitext(xyz_path)[0] + ".dat")
+            )
+            n, comment, atoms, coords = read_xyz_frame(xyz_path)
             sel_tag = "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
             comment = f"{comment} | {sel_tag} | timestep={timesteps[ti]}"
             closest_frames.append((n, comment, atoms, coords))
         write_xyz_trajectory(closest_frames, closest_xyz_path)
         print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
+        with open(closest_dat_paths_txt, "w", encoding="utf-8") as f:
+            for dp in closest_dat_paths:
+                f.write(dp + "\n")
+        print(f"Wrote {closest_dat_paths_txt} (sibling .dat paths for each chosen xyz)")
 
         print("Writing mean trajectory...")
         mean_frames = []
@@ -667,6 +831,26 @@ def main():
     plt.savefig(args.output_plot, dpi=300, bbox_inches="tight")
     plt.close(fig)
     print(f"Plot saved to: {args.output_plot}")
+
+    if args.plot_target_comparison:
+        if not closest_dat_paths:
+            if os.path.isfile(closest_dat_paths_txt):
+                with open(closest_dat_paths_txt, encoding="utf-8") as f:
+                    closest_dat_paths = [line.strip() for line in f if line.strip()]
+        if len(closest_dat_paths) != n_timesteps:
+            raise SystemExit(
+                f"--plot-target-comparison needs {closest_dat_paths_txt} with exactly "
+                f"{n_timesteps} lines (paths to candidate .dat files). "
+                "Re-run without a stale CSV cache or pass --recompute to rebuild the "
+                "closest-to-mean trajectory and sidecar."
+            )
+        plot_target_vs_closest_dat_files(
+            args=args,
+            n_timesteps=n_timesteps,
+            closest_dat_paths=closest_dat_paths,
+            plot_stem=plot_stem,
+            font_scale=float(args.font_scale),
+        )
 
 
 if __name__ == "__main__":
