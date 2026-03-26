@@ -40,6 +40,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 import modules.analysis as analysis
 
@@ -337,6 +338,8 @@ def plot_target_vs_closest_dat_files(
     legend_fs = 10.0 * font_scale
     title_fs = 14.0 * font_scale
 
+    overlay_series: list[dict] = []
+
     for ti in range(n_timesteps):
         cand_path = closest_dat_paths[ti]
         parsed = parse_name(cand_path)
@@ -362,6 +365,15 @@ def plot_target_vs_closest_dat_files(
 
         q_plot, y_c_plot = _overlay_on_qgrid(q_tgt, q_c, y_c)
 
+        overlay_series.append(
+            {
+                "run_id": run_id,
+                "q": q_plot,
+                "y_tgt": y_tgt,
+                "y_c": y_c_plot,
+            }
+        )
+
         base = f"frame_{run_id}_target_vs_closest_dat"
         png_path = os.path.join(out_subdir, base + ".png")
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -384,6 +396,60 @@ def plot_target_vs_closest_dat_files(
         plt.savefig(png_path, dpi=300, bbox_inches="tight")
         plt.close(fig)
         print(f"Wrote {png_path}")
+
+    if overlay_series:
+        run_numeric: list[float] = []
+        for s in overlay_series:
+            try:
+                run_numeric.append(float(s["run_id"]))
+            except ValueError:
+                run_numeric.append(float(len(run_numeric)))
+        mn, mx = min(run_numeric), max(run_numeric)
+        if mx <= mn:
+            mx = mn + 1.0
+        norm = plt.Normalize(vmin=mn, vmax=mx)
+        cmap = plt.cm.viridis
+        fig, ax = plt.subplots(figsize=(12, 7))
+        for s, rn in zip(overlay_series, run_numeric):
+            color = cmap(norm(rn))
+            ax.plot(
+                s["q"],
+                s["y_tgt"],
+                color=color,
+                linewidth=1.5,
+                alpha=0.92,
+                linestyle="-",
+            )
+            ax.plot(
+                s["q"],
+                s["y_c"],
+                color=color,
+                linewidth=1.5,
+                alpha=0.92,
+                linestyle="--",
+            )
+        ax.set_xlabel(r"q (Å$^{-1}$)", fontsize=label_fs)
+        ax.set_ylabel("signal", fontsize=label_fs)
+        ax.set_title(
+            "All timesteps: TARGET_FUNCTION (solid) vs closest candidate .dat (dashed), color = run id",
+            fontsize=title_fs,
+        )
+        ax.tick_params(axis="both", labelsize=tick_fs)
+        ax.grid(True, alpha=0.3)
+        sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("run id (timestep)", fontsize=label_fs)
+        legend_handles = [
+            Line2D([0], [0], color="0.2", lw=2.0, linestyle="-", label="TARGET_FUNCTION"),
+            Line2D([0], [0], color="0.2", lw=2.0, linestyle="--", label="closest candidate .dat"),
+        ]
+        ax.legend(handles=legend_handles, loc="upper right", fontsize=legend_fs)
+        plt.tight_layout()
+        overlay_png = os.path.join(out_subdir, "all_timesteps_target_overlay.png")
+        plt.savefig(overlay_png, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {overlay_png}")
 
     print(f"Target comparison plots directory: {out_subdir}")
 
@@ -517,7 +583,8 @@ def main():
         help=(
             "After the geometry plot, write one PNG per timestep overlaying "
             "TARGET_FUNCTION_<run_id>.dat with the sibling .dat of the chosen structure "
-            "(e.g. 18_000.12.xyz -> 18_000.12.dat). Requires "
+            "(e.g. 18_000.12.xyz -> 18_000.12.dat), plus all_timesteps_target_overlay.png "
+            "(all TARGET solid + all candidates dashed, color by run id). Requires "
             f"a sidecar file <plot_stem>_closest_dat_paths.txt (written when the "
             "closest-to-mean trajectory is built; use --recompute if missing)."
         ),
