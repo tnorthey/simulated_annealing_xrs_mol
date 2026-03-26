@@ -948,6 +948,14 @@ class Wrapper:
             )
 
         if abi_file:
+            ref_dat = getattr(p, "reference_dat_file", None)
+            if p.pcd_mode and not (ref_dat and str(ref_dat).strip()):
+                raise ValueError(
+                    "ab_initio_scattering_file with pcd_mode requires files.reference_dat_file "
+                    "(PCD baseline I_ref(q) must be read from a DAT file; set it in input.toml or "
+                    "use --reference-dat-file on the CLI). IAM(reference_xyz) is not used as the "
+                    "PCD denominator when ab-initio correction is enabled."
+                )
             print(
                 f"Computing correction factor from ab initio scattering: {abi_file}"
             )
@@ -990,16 +998,6 @@ class Wrapper:
                 print(
                     f"Ab initio q-grid matches qvector ({len(q_abi)} points)"
                 )
-            # PCD denominator and SA prediction use elastic IAM at reference on p.qvector.
-            reference_iam, _, _, _, _ = x.iam_calc(
-                atomic_numbers=atomic_numbers,
-                xyz=reference_xyz,
-                qvector=p.qvector,
-                ion=ion_mode,
-                electron_mode=False,
-                inelastic=False,
-                compton_array=None,
-            )
         else:
             correction_factor_q = np.ones(p.qlen, dtype=np.float64)
 

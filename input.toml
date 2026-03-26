@@ -29,12 +29,12 @@ start_xyz_file = "chd+_data/CCSD-neut.xyz"
 start_sdf_file = "sdf/CCSD-neut.sdf"
 # Reference structure for comparison (used for RMSD calculations)
 reference_xyz_file = "chd+_data/CCSD-neut.xyz"
-# Reference DAT file for PCD mode (optional, if provided, uses this instead of calculating from reference_xyz_file)
-# If empty string or not provided, reference IAM is calculated from reference_xyz_file
+# Reference DAT file for PCD mode (optional; if omitted, reference IAM is computed from reference_xyz_file).
+# Required when both pcd_mode and ab_initio_scattering_file are set (PCD denominator I_ref(q) must come from file).
 reference_dat_file = "chd+_data/CCSD_neut_scat_plus44.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
 target_file = "chd+_data/eirik_data_30.dat"
-# Optional: ab initio I(q) at reference_xyz (two columns: q, I). Correction = I / IAM(reference_xyz) on that grid; writes results/reference_iam_scattering.dat; interpolated to the configured q grid.
+# Optional: ab initio total I(q) at reference_xyz (two columns: q, I). c(q)=I_ab_initio/I_elastic_IAM(ref) on that grid; writes results/reference_iam_scattering.dat; interpolated to qvector. With pcd_mode, reference_dat_file is required; PCD uses I_ref from that DAT, not recomputed IAM.
 ab_initio_scattering_file = "chd+_data/CCSD_neut_scat_plus44.dat"
 
 # ============================================================================
