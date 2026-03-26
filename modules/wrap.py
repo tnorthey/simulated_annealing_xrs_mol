@@ -253,14 +253,18 @@ def _read_scattering_dat(path: str):
 
 
 def _safe_ab_initio_correction_ratio(
-    I_abi: np.ndarray, iam_ref: np.ndarray, eps: float = 1e-30
+    I_abi: np.ndarray, iam_ref_elastic: np.ndarray, eps: float = 1e-30
 ) -> np.ndarray:
-    """Element-wise I_abi / iam_ref with ones where iam_ref is tiny."""
+    """Compute c(q) = I_ab_initio_total / I_IAM_elastic_ref (ones where denominator tiny).
+
+    The ab initio column is **total** scattering (includes inelastic). The IAM reference
+    must be **elastic** only (atomic + molecular), matching the elastic part of IAM.
+    """
     I_abi = np.asarray(I_abi, dtype=np.float64).ravel()
-    iam_ref = np.asarray(iam_ref, dtype=np.float64).ravel()
+    iam_ref = np.asarray(iam_ref_elastic, dtype=np.float64).ravel()
     if I_abi.size != iam_ref.size:
         raise ValueError(
-            f"ab initio intensity length {I_abi.size} != IAM_ref length {iam_ref.size}"
+            f"ab initio intensity length {I_abi.size} != elastic IAM_ref length {iam_ref.size}"
         )
     ratio = np.ones_like(I_abi, dtype=np.float64)
     mask = iam_ref > eps
@@ -953,21 +957,26 @@ class Wrapper:
                     "ab_initio_scattering_file must have two columns (q and intensity). "
                     "Single-column files are not supported for this option."
                 )
-            compton_abi = x.compton_spline(atomic_numbers, q_abi)
-            iam_ref_abi, _a, _c, _pm = xyz2iam(
-                reference_xyz,
-                atomic_numbers,
-                compton_abi,
-                p.ewald_mode,
+            ion_mode = getattr(p, "ion_mode", False)
+            iam_ref_elastic_abi, _a, _m, _c, _pm = x.iam_calc(
+                atomic_numbers=atomic_numbers,
+                xyz=reference_xyz,
                 qvector=q_abi,
+                ion=ion_mode,
+                electron_mode=False,
+                inelastic=False,
+                compton_array=None,
             )
             ref_iam_path = os.path.join(p.results_dir, "reference_iam_scattering.dat")
             np.savetxt(
                 ref_iam_path,
-                np.column_stack((q_abi, iam_ref_abi)),
+                np.column_stack((q_abi, iam_ref_elastic_abi)),
             )
-            print(f"Wrote reference IAM at reference_xyz on ab initio q-grid to {ref_iam_path}")
-            corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_abi)
+            print(
+                f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
+            )
+            corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_elastic_abi)
             if q_abi.size != p.qvector.size or not np.allclose(q_abi, p.qvector):
                 correction_factor_q = np.interp(
                     p.qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
@@ -981,6 +990,16 @@ class Wrapper:
                 print(
                     f"Ab initio q-grid matches qvector ({len(q_abi)} points)"
                 )
+            # PCD denominator and SA prediction use elastic IAM at reference on p.qvector.
+            reference_iam, _, _, _, _ = x.iam_calc(
+                atomic_numbers=atomic_numbers,
+                xyz=reference_xyz,
+                qvector=p.qvector,
+                ion=ion_mode,
+                electron_mode=False,
+                inelastic=False,
+                compton_array=None,
+            )
         else:
             correction_factor_q = np.ones(p.qlen, dtype=np.float64)
 
@@ -1132,6 +1151,7 @@ class Wrapper:
                     gpu_chains=getattr(p, "gpu_chains", 1),
                     keep_on_device=use_gpu_persistent,
                     correction_factor_q=correction_factor_q,
+                    elastic_ab_initio_correction=bool(abi_file),
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")

@@ -54,6 +54,7 @@ class Annealing:
         gpu_chains: int = 1,
         keep_on_device: bool = False,
         correction_factor_q: NDArray | None = None,
+        elastic_ab_initio_correction: bool = False,
     ):
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
@@ -146,6 +147,12 @@ class Annealing:
                     f"correction_factor_q length ({_cfq.size}) must match qlen ({qlen})"
                 )
         correction_factor_q = _cfq
+        elastic_abi = bool(elastic_ab_initio_correction)
+        if elastic_abi and ewald_mode:
+            raise RuntimeError(
+                "elastic_ab_initio_correction is only supported for isotropic q "
+                "(disable ewald_mode)"
+            )
         ##=#=#=# END DEFINITIONS #=#=#=#
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
@@ -153,8 +160,16 @@ class Annealing:
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Cache the shifted target_function and abs so the same numpy
         # objects persist across calls → _as_backend_array cache hits.
-        _tf_key = (id(target_function), inelastic, pcd_mode,
-                   id(atomic_total), id(compton), id(reference_iam))
+        _tf_key = (
+            id(target_function),
+            inelastic,
+            pcd_mode,
+            elastic_abi,
+            id(atomic_total),
+            id(compton),
+            id(reference_iam),
+            id(correction_factor_q),
+        )
         _tf_cached = getattr(self, '_tf_cache_key', None) == _tf_key
         if _tf_cached:
             abs_target_function = self._abs_target_function
@@ -171,15 +186,24 @@ class Annealing:
         if _tf_cached:
             target_function = self._target_function_modified
         else:
-            if inelastic:
-                iam_offset = atomic_total + compton
+            if elastic_abi:
+                if pcd_mode:
+                    pcd_offset = 100.0 * (
+                        correction_factor_q * atomic_total / reference_iam - 1.0
+                    )
+                    target_function = target_function - pcd_offset
+                else:
+                    target_function = target_function - correction_factor_q * atomic_total
             else:
-                iam_offset = atomic_total
-            if pcd_mode:
-                pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
-                target_function = target_function - pcd_offset
-            else:
-                target_function = target_function - iam_offset
+                if inelastic:
+                    iam_offset = atomic_total + compton
+                else:
+                    iam_offset = atomic_total
+                if pcd_mode:
+                    pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
+                    target_function = target_function - pcd_offset
+                else:
+                    target_function = target_function - iam_offset
             self._tf_cache_key = _tf_key
             self._abs_target_function = abs_target_function
             self._target_function_modified = target_function
@@ -300,15 +324,23 @@ class Annealing:
                     sse = 0.0
                     for qi in range(qlen):
                         cq = correction_factor_q[qi]
-                        # Correction applies to total IAM, then PCD is derived (not PCD × c).
-                        if inelastic:
-                            offset = atomic_total[qi] + compton[qi]
+                        # Ab-initio path: c = I_abi_total / I_elastic_IAM(ref); predict c × I_elastic.
+                        if elastic_abi:
+                            I_elastic = atomic_total[qi] + iam[qi]
+                            I_corr = cq * I_elastic
+                            PCD_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                            pcd_atom = 100.0 * (
+                                (cq * atomic_total[qi]) / reference_iam[qi] - 1.0
+                            )
                         else:
-                            offset = atomic_total[qi]
-                        I_tot = iam[qi] + offset
-                        I_corr = cq * I_tot
-                        PCD_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
-                        pcd_atom = 100.0 * (offset / reference_iam[qi] - 1.0)
+                            if inelastic:
+                                offset = atomic_total[qi] + compton[qi]
+                            else:
+                                offset = atomic_total[qi]
+                            I_tot = iam[qi] + offset
+                            I_corr = cq * I_tot
+                            PCD_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                            pcd_atom = 100.0 * (offset / reference_iam[qi] - 1.0)
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
                         pred_mol = PCD_full - pcd_atom
@@ -330,19 +362,27 @@ class Annealing:
                         cq = correction_factor_q[qi]
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = iam[qi]
-                        pred_mol_c = pred_mol * cq
-                        diff = pred_mol_c - target_function[qi]
-                        sse += (diff * diff) / abs_target_function[qi]
-                        # For output, store the full IAM curve (incl. constant atomic/compton term)
-                        if inelastic:
-                            predicted_function_[qi] = (
-                                pred_mol + atomic_total[qi] + compton[qi]
-                            ) * cq
+                        if elastic_abi:
+                            pred_mol = iam[qi]
+                            pred_mol_c = cq * pred_mol
+                            diff = pred_mol_c - target_function[qi]
+                            sse += (diff * diff) / abs_target_function[qi]
+                            predicted_function_[qi] = cq * (
+                                atomic_total[qi] + iam[qi]
+                            )
                         else:
-                            predicted_function_[qi] = (
-                                pred_mol + atomic_total[qi]
-                            ) * cq
+                            pred_mol = iam[qi]
+                            pred_mol_c = pred_mol * cq
+                            diff = pred_mol_c - target_function[qi]
+                            sse += (diff * diff) / abs_target_function[qi]
+                            if inelastic:
+                                predicted_function_[qi] = (
+                                    pred_mol + atomic_total[qi] + compton[qi]
+                                ) * cq
+                            else:
+                                predicted_function_[qi] = (
+                                    pred_mol + atomic_total[qi]
+                                ) * cq
                     xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
@@ -592,20 +632,32 @@ class Annealing:
             total_xray_xp = xp.zeros(n_chains, dtype=xp.float64)
 
             if pcd_mode:
-                if inelastic:
-                    _pcd_offset = atomic_total_xp + compton_xp
-                else:
-                    _pcd_offset = atomic_total_xp
-                _pcd_offset_correction = 100.0 * (
-                    _pcd_offset[xp.newaxis, :] / reference_iam_xp[xp.newaxis, :] - 1.0
-                )
-            else:
-                if inelastic:
-                    _iam_offset = (
-                        atomic_total_xp[xp.newaxis, :] + compton_xp[xp.newaxis, :]
+                if elastic_ab_initio_correction:
+                    _cf_grid = correction_factor_xp[xp.newaxis, :]
+                    _pcd_offset_correction = 100.0 * (
+                        _cf_grid * atomic_total_xp[xp.newaxis, :]
+                        / reference_iam_xp[xp.newaxis, :]
+                        - 1.0
                     )
                 else:
-                    _iam_offset = atomic_total_xp[xp.newaxis, :]
+                    if inelastic:
+                        _pcd_offset = atomic_total_xp + compton_xp
+                    else:
+                        _pcd_offset = atomic_total_xp
+                    _pcd_offset_correction = 100.0 * (
+                        _pcd_offset[xp.newaxis, :]
+                        / reference_iam_xp[xp.newaxis, :]
+                        - 1.0
+                    )
+            else:
+                if not elastic_ab_initio_correction:
+                    if inelastic:
+                        _iam_offset = (
+                            atomic_total_xp[xp.newaxis, :]
+                            + compton_xp[xp.newaxis, :]
+                        )
+                    else:
+                        _iam_offset = atomic_total_xp[xp.newaxis, :]
 
             prep_time_s = default_timer() - prep_start
             loop_start = default_timer()
@@ -641,9 +693,12 @@ class Annealing:
 
                 # Objective function (PCD or IAM)
                 if pcd_mode:
-                    # Correction on total IAM, then PCD (same decomposition as CPU path).
-                    I_tot = iam + _pcd_offset[xp.newaxis, :]
-                    I_corr = I_tot * correction_factor_xp[xp.newaxis, :]
+                    if elastic_ab_initio_correction:
+                        I_elastic = iam + atomic_total_xp[xp.newaxis, :]
+                        I_corr = I_elastic * correction_factor_xp[xp.newaxis, :]
+                    else:
+                        I_tot = iam + _pcd_offset[xp.newaxis, :]
+                        I_corr = I_tot * correction_factor_xp[xp.newaxis, :]
                     PCD_full = 100.0 * (
                         I_corr / reference_iam_xp[xp.newaxis, :] - 1.0
                     )
@@ -658,9 +713,14 @@ class Annealing:
                     sse = xp.sum(
                         (diff * diff) / abs_target_function_xp[xp.newaxis, :], axis=1
                     )
-                    predicted_function_ = (
-                        iam + _iam_offset
-                    ) * correction_factor_xp[xp.newaxis, :]
+                    if elastic_ab_initio_correction:
+                        predicted_function_ = (
+                            iam + atomic_total_xp[xp.newaxis, :]
+                        ) * correction_factor_xp[xp.newaxis, :]
+                    else:
+                        predicted_function_ = (
+                            iam + _iam_offset
+                        ) * correction_factor_xp[xp.newaxis, :]
                     xray_contrib = sse * inv_qlen
 
                 bonding_contrib = xp.zeros(n_chains, dtype=xp.float64)
