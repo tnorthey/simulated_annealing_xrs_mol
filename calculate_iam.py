@@ -13,6 +13,7 @@ Usage:
     python3 calculate_iam.py input.xyz output.dat
     python3 calculate_iam.py input.xyz output.dat --reference reference.xyz --pcd
     python3 calculate_iam.py input.xyz output.dat --pcd --reference-dat ref.dat --correction-factor IAM_corr.dat
+    python3 calculate_iam.py input.xyz output.dat --inelastic --pcd --reference ref.xyz --ab-initio-scattering ab_initio.dat
     python3 calculate_iam.py input.xyz output.dat --ewald
     python3 calculate_iam.py input.xyz output.dat --elastic
 """
@@ -25,7 +26,7 @@ import sys
 # Import modules
 import modules.mol as mol
 import modules.x as xray
-from modules.wrap import _read_scattering_dat
+from modules.wrap import _read_scattering_dat, _safe_ab_initio_correction_ratio
 
 
 def read_xyz_trajectory(filename):
@@ -161,6 +162,9 @@ def main():
     parser.add_argument('--correction-factor', type=str, default=None,
                        dest='correction_factor',
                        help='DAT file with q-dependent factor(s); multiplies total IAM before PCD or raw output')
+    parser.add_argument('--ab-initio-scattering', type=str, default=None,
+                       dest='ab_initio_scattering',
+                       help='DAT with col1=q, col2=ab initio I(q) at --reference geometry; correction = I/IAM_ref on that grid, interpolated to qvector (mutually exclusive with --correction-factor; requires --reference)')
     parser.add_argument('--pcd', action='store_true',
                        help='Calculate PCD (percentage difference) instead of IAM')
     
@@ -213,6 +217,21 @@ def main():
             "correction factor is only supported for isotropic (non-Ewald) q; "
             "omit --ewald or omit --correction-factor"
         )
+    if args.ab_initio_scattering and args.correction_factor:
+        parser.error("use only one of --ab-initio-scattering or --correction-factor")
+    if args.ewald and args.ab_initio_scattering:
+        parser.error(
+            "ab initio scattering correction is only supported for isotropic (non-Ewald) q; "
+            "omit --ewald or omit --ab-initio-scattering"
+        )
+    if args.ab_initio_scattering:
+        if not args.reference:
+            parser.error("--ab-initio-scattering requires --reference REF.xyz")
+        if args.pcd and args.reference_dat:
+            parser.error(
+                "--ab-initio-scattering with --pcd requires --reference (not --reference-dat) "
+                "so IAM(ref) can be computed on the ab initio q-grid"
+            )
     
     if args.ewald and (args.tmin >= args.tmax or args.pmin >= args.pmax):
         parser.error("For Ewald mode: tmin < tmax and pmin < pmax required")
@@ -272,7 +291,54 @@ def main():
             args.inelastic = False
     
     # q-dependent correction factors (ones if not requested)
-    if args.correction_factor:
+    if args.ab_initio_scattering:
+        print(f"Computing correction factor from ab initio scattering: {args.ab_initio_scattering}...")
+        if not os.path.exists(args.ab_initio_scattering):
+            print(f"Error: File not found: {args.ab_initio_scattering}")
+            sys.exit(1)
+        q_abi, I_abi, abi_has_q = _read_scattering_dat(args.ab_initio_scattering)
+        if not abi_has_q:
+            print(
+                "Error: ab initio file must have two columns (q and intensity)."
+            )
+            sys.exit(1)
+        if not os.path.exists(args.reference):
+            print(f"Error: Reference file not found: {args.reference}")
+            sys.exit(1)
+        ref_structures = read_xyz_trajectory(args.reference)
+        _, _, ref_atomlist, ref_xyz = ref_structures[0]
+        if not np.array_equal(ref_atomlist, atomlist):
+            print("Error: --reference structure has different atom types than input")
+            sys.exit(1)
+        ref_atomic_numbers = [m.periodic_table(symbol) for symbol in ref_atomlist]
+        compton_abi = None
+        if args.inelastic:
+            compton_abi = x.compton_spline(ref_atomic_numbers, q_abi)
+        iam_ref_abi, _, _, _ = calculate_iam_for_structure(
+            ref_xyz, ref_atomic_numbers, q_abi, x,
+            ion=args.ion,
+            inelastic=args.inelastic, ewald_mode=False,
+            th=None, ph=None, compton_array=compton_abi,
+        )
+        out_dir = os.path.dirname(os.path.abspath(args.output_dat))
+        if not out_dir:
+            out_dir = os.getcwd()
+        ref_iam_path = os.path.join(out_dir, "reference_iam_scattering.dat")
+        np.savetxt(ref_iam_path, np.column_stack((q_abi, iam_ref_abi)))
+        print(f"Wrote reference IAM at --reference geometry on ab initio q-grid to {ref_iam_path}")
+        corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_abi)
+        if q_abi.size != qvector.size or not np.allclose(q_abi, qvector):
+            correction_factor_q = np.interp(
+                qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
+            )
+            print(
+                f"Interpolated ab-initio correction ratio from {len(q_abi)} points "
+                f"to {len(qvector)} q-points"
+            )
+        else:
+            correction_factor_q = np.asarray(corr_abi, dtype=np.float64)
+            print(f"Ab initio q-grid matches configured qvector ({len(q_abi)} points)")
+    elif args.correction_factor:
         print(f"Loading q-dependent correction factors from {args.correction_factor}...")
         if not os.path.exists(args.correction_factor):
             print(f"Error: Correction factor file not found: {args.correction_factor}")

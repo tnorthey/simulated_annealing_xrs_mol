@@ -20,7 +20,8 @@ Optional multi-chain CUDA execution (independent SA chains in parallel):
 - Or use CLI: `python3 run.py --gpu-backend cuda --gpu-chains 8`
 - Outputs include one `.xyz/.dat` per chain (`..._c000`, `..._c001`, etc.) plus the best-chain file for compatibility
 - For timestep workflows, `run_start.sh` runs an initial step from a chosen XYZ; `run_gpu_from_previous_timestep.sh` averages the previous step’s best structures into `results/<N−1>_mean.xyz` (when launching run-id `N`), then runs one GPU job (default 1024 chains).
-- If `correction_factor_dat_file` is set: in **PCD** mode the factor multiplies **total IAM** before forming PCD; in **non-PCD** mode it multiplies the predicted **total intensity** (same as before).
+- If `correction_factor_dat_file` is set: in **PCD** mode the factor multiplies **total IAM** before forming PCD; in **non-PCD** mode it multiplies the predicted **total intensity** (same as before). Do not set `correction_factor_dat_file` together with `ab_initio_scattering_file`.
+- If `ab_initio_scattering_file` is set (instead of a hand-made correction DAT): the file must be two columns `q`, `I` (ab initio scattering at the **reference_xyz** geometry). The code computes IAM for `reference_xyz_file` on **that same q-grid**, writes `results_dir/reference_iam_scattering.dat` for inspection, sets the correction to \(I_{\mathrm{ab\ initio}} / I_{\mathrm{IAM}}\), and interpolates it onto the configured `q` grid. Isotropic q only (not with Ewald mode). Same multiplication rule as `correction_factor_dat_file` once interpolated. The standalone script `calculate_iam.py` supports the same idea via `--ab-initio-scattering` (requires `--reference`).
 
 ## Quick Start
 

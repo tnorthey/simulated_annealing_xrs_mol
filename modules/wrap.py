@@ -252,6 +252,28 @@ def _read_scattering_dat(path: str):
     return q, intensity, has_explicit_q
 
 
+def _safe_ab_initio_correction_ratio(
+    I_abi: np.ndarray, iam_ref: np.ndarray, eps: float = 1e-30
+) -> np.ndarray:
+    """Element-wise I_abi / iam_ref with ones where iam_ref is tiny."""
+    I_abi = np.asarray(I_abi, dtype=np.float64).ravel()
+    iam_ref = np.asarray(iam_ref, dtype=np.float64).ravel()
+    if I_abi.size != iam_ref.size:
+        raise ValueError(
+            f"ab initio intensity length {I_abi.size} != IAM_ref length {iam_ref.size}"
+        )
+    ratio = np.ones_like(I_abi, dtype=np.float64)
+    mask = iam_ref > eps
+    ratio[mask] = I_abi[mask] / iam_ref[mask]
+    n_bad = int(np.sum(~mask))
+    if n_bad > 0:
+        print(
+            f"WARNING: {n_bad} q point(s) had IAM_ref <= {eps:g}; "
+            "correction factor set to 1.0 at those points."
+        )
+    return ratio
+
+
 #############################
 class Wrapper:
     """wrapper functions for simulated annealing strategies"""
@@ -641,9 +663,10 @@ class Wrapper:
         # Create results directory if it doesn't exist
         os.makedirs(p.results_dir, exist_ok=True)
 
-        def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode):
-            """convert xyz file to IAM signal"""
+        def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode, qvector=None):
+            """Convert xyz to IAM signal. If qvector is None, use p.qvector (compton_array must match)."""
             ion_mode = getattr(p, "ion_mode", False)
+            qv = p.qvector if qvector is None else np.asarray(qvector, dtype=np.float64)
             if ewald_mode:
                 (
                     iam,
@@ -658,7 +681,7 @@ class Wrapper:
                 ) = x.iam_calc_ewald(
                     atomic_numbers=atomic_numbers,
                     xyz=xyz,
-                    qvector=p.qvector,
+                    qvector=qv,
                     th=p.th,
                     ph=p.ph,
                     ion=ion_mode,
@@ -669,7 +692,7 @@ class Wrapper:
                 iam, atomic, molecular, compton, pre_molecular = x.iam_calc(
                     atomic_numbers=atomic_numbers,
                     xyz=xyz,
-                    qvector=p.qvector,
+                    qvector=qv,
                     ion=ion_mode,
                     electron_mode=electron_mode,
                     inelastic=p.inelastic,
@@ -913,12 +936,61 @@ class Wrapper:
         else:
             target_for_sa = target_function_
 
+        abi_file = getattr(p, "ab_initio_scattering_file", None)
         if p.ewald_mode and p.correction_factor_dat_file:
             raise ValueError(
                 "correction_factor_dat_file is only supported for isotropic (non-Ewald) q; "
                 "disable ewald_mode or omit the correction factor file."
             )
-        if p.correction_factor_dat_file:
+        if p.ewald_mode and abi_file:
+            raise ValueError(
+                "ab_initio_scattering_file is only supported for isotropic (non-Ewald) q; "
+                "disable ewald_mode or omit the ab initio scattering file."
+            )
+        if abi_file and p.correction_factor_dat_file:
+            raise ValueError(
+                "Set only one of correction_factor_dat_file or ab_initio_scattering_file."
+            )
+
+        if abi_file:
+            print(
+                f"Computing correction factor from ab initio scattering: {abi_file}"
+            )
+            q_abi, I_abi, abi_has_q = _read_scattering_dat(abi_file)
+            if not abi_has_q:
+                raise ValueError(
+                    "ab_initio_scattering_file must have two columns (q and intensity). "
+                    "Single-column files are not supported for this option."
+                )
+            compton_abi = x.compton_spline(atomic_numbers, q_abi)
+            iam_ref_abi, _a, _c, _pm = xyz2iam(
+                reference_xyz,
+                atomic_numbers,
+                compton_abi,
+                p.ewald_mode,
+                qvector=q_abi,
+            )
+            ref_iam_path = os.path.join(p.results_dir, "reference_iam_scattering.dat")
+            np.savetxt(
+                ref_iam_path,
+                np.column_stack((q_abi, iam_ref_abi)),
+            )
+            print(f"Wrote reference IAM at reference_xyz on ab initio q-grid to {ref_iam_path}")
+            corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_abi)
+            if q_abi.size != p.qvector.size or not np.allclose(q_abi, p.qvector):
+                correction_factor_q = np.interp(
+                    p.qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
+                )
+                print(
+                    f"Interpolated ab-initio correction ratio from {len(q_abi)} points "
+                    f"to {len(p.qvector)} q-points"
+                )
+            else:
+                correction_factor_q = np.asarray(corr_abi, dtype=np.float64)
+                print(
+                    f"Ab initio q-grid matches qvector ({len(q_abi)} points)"
+                )
+        elif p.correction_factor_dat_file:
             print(
                 f"Loading q-dependent correction factors from "
                 f"{p.correction_factor_dat_file}"
@@ -966,6 +1038,7 @@ class Wrapper:
                 "mean": float(np.nanmean(_cf)),
                 "median": float(np.median(_cf)),
                 "has_file": bool(p.correction_factor_dat_file),
+                "has_ab_initio_file": bool(abi_file),
             },
         )
         if p.pcd_mode and _cmax > 1.01:

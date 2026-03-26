@@ -52,6 +52,9 @@ def create_parser():
     files_group.add_argument('--correction-factor-dat-file', type=str,
                             dest='files.correction_factor_dat_file',
                             help='Optional DAT: col1=q, col2=multiplicative correction; interpolated to qvector and applied to predicted signal')
+    files_group.add_argument('--ab-initio-scattering-file', type=str,
+                            dest='files.ab_initio_scattering_file',
+                            help='Optional DAT: col1=q, col2=ab initio I(q) at reference_xyz; correction = I/IAM_ref(q) on that grid, interpolated to qvector (mutually exclusive with --correction-factor-dat-file)')
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
     

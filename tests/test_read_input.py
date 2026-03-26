@@ -29,6 +29,102 @@ class TestInputToParams:
         assert p.qlen == 50
         assert p.sa_starting_temp == 1.0
         assert p.sa_nsteps == 1000
+        assert p.ab_initio_scattering_file is None
+    
+    def test_ab_initio_and_correction_both_set_exits(self):
+        """Setting both correction_factor_dat_file and ab_initio_scattering_file must fail."""
+        toml_content = '''mode = "test"
+[run_params]
+run_id = "test"
+results_dir = "test"
+
+[files]
+forcefield_file = "test.offxml"
+start_xyz_file = "test.xyz"
+start_sdf_file = "test.sdf"
+reference_xyz_file = "test_ref.xyz"
+target_file = "test_target.xyz"
+correction_factor_dat_file = "cf.dat"
+ab_initio_scattering_file = "abi.dat"
+
+[options]
+run_pyscf_modes_bool = false
+pyscf_basis = "6-31g"
+verbose_bool = false
+write_dat_file_bool = false
+
+[sampling]
+sampling_bool = false
+boltzmann_temperature = 300.0
+
+[scattering_params]
+inelastic_bool = true
+pcd_mode_bool = false
+excitation_factor = 1.0
+
+[scattering_params.q]
+qmin = 0.1
+qmax = 10.0
+qlen = 50
+
+[scattering_params.ewald]
+ewald_mode_bool = false
+
+[scattering_params.ewald.th]
+tmin = 0.0
+tmax = 1.0
+tlen = 21
+
+[scattering_params.ewald.ph]
+pmin = 0.0
+pmax = 2.0
+plen = 21
+
+[scattering_params.noise]
+noise_value = 0.0
+noise_data_file = "noise.dat"
+
+[simulated_annealing_params]
+sa_starting_temp = 1.0
+sa_nsteps = 1000
+greedy_algorithm_bool = false
+ga_nsteps = 5000
+sa_step_size = 0.01
+ga_step_size = 0.01
+nrestarts = 1
+ntotalruns = 1
+bonds_bool = true
+angles_bool = true
+torsions_bool = true
+tuning_ratio_target = 1.0
+c_tuning_initial = 1.0
+non_h_modes_only_bool = false
+hydrogen_mode_damping_factor = 0.2
+hf_energy_bool = false
+
+[molecule_params]
+natoms = 2
+nmodes = 6
+hydrogen_mode_range = [4, 6]
+sa_mode_range = [0, 6]
+ga_mode_range = [0, 6]
+bond_ignore_array = []
+angle_ignore_array = []
+torsion_ignore_array = []
+rmsd_indices = [0, 1]
+bond_indices = [0, 1]
+angle_indices = []
+dihedral_indices = []
+'''
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.toml', delete=False) as f:
+            f.write(toml_content)
+            temp_file = f.name
+        try:
+            with pytest.raises(SystemExit):
+                Input_to_params(temp_file)
+        finally:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
     
     def test_read_with_overrides(self, sample_toml_file):
         """Test reading with parameter overrides"""
