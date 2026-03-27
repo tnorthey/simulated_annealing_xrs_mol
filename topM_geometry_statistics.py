@@ -15,7 +15,8 @@ the raw candidates at each timestep.
 
 Dihedral convention: raw angles from arctan2 ([-180, 180]°) are mapped to
 [0, 360) when negative; an optional --dihedral-offset is then added (no wrap),
-so e.g. offset -360 yields values in [-360, 0).
+so e.g. offset -360 yields values in [-360, 0). Optional --dihedral-negate multiplies
+the dihedral column by -1 last (e.g. trend -30…0 becomes 30…0).
 
 Usage:
     python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5
@@ -508,6 +509,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--dihedral-negate",
+        action="store_true",
+        help=(
+            "After wrap and offset, multiply the dihedral column by -1 (last step). "
+            "Only valid with --dihedral."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default=None,
@@ -616,6 +625,8 @@ def main():
         parser.error("At least one of --bond, --angle, or --dihedral must be specified")
     if args.dihedral is None and args.dihedral_offset != 0.0:
         parser.error("--dihedral-offset requires --dihedral")
+    if args.dihedral is None and args.dihedral_negate:
+        parser.error("--dihedral-negate requires --dihedral")
 
     rmsd_indices: list[int] | None = None
     if args.rmsd_indices is not None:
@@ -745,12 +756,20 @@ def main():
                     geom[:, dihedral_col] = (
                         geom[:, dihedral_col] + args.dihedral_offset
                     )
+                if args.dihedral_negate:
+                    geom[:, dihedral_col] *= -1.0
             all_geom.append(geom)
 
             for ci in range(n_cols):
                 if ci == dihedral_col:
-                    wrapped = geom[:, ci] - args.dihedral_offset
-                    means[ti, ci] = circular_mean_deg(wrapped) + args.dihedral_offset
+                    if args.dihedral_negate:
+                        wrapped = -geom[:, ci] - args.dihedral_offset
+                    else:
+                        wrapped = geom[:, ci] - args.dihedral_offset
+                    mean_d = circular_mean_deg(wrapped) + args.dihedral_offset
+                    if args.dihedral_negate:
+                        mean_d = -mean_d
+                    means[ti, ci] = mean_d
                     stds[ti, ci] = circular_std_deg(wrapped)
                 else:
                     means[ti, ci] = np.mean(geom[:, ci])
