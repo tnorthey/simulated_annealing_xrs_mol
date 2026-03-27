@@ -169,6 +169,20 @@ class Input_to_params:
                 self.ab_initio_scattering_file = None
         else:
             self.ab_initio_scattering_file = None
+        self.ab_initio_correction_mode = str(
+            data.get("files", {}).get("ab_initio_correction_mode", "elastic")
+        ).lower()
+        if self.ab_initio_correction_mode not in ("elastic", "total"):
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid ab_initio_correction_mode value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.ab_initio_correction_mode!r}")
+            print(f"  Allowed values: 'elastic' or 'total'")
+            print(
+                f"  Suggestion: Set ab_initio_correction_mode = 'elastic' or 'total' in [files]"
+            )
+            print(f"{'='*60}\n")
+            sys.exit(1)
         self.target_file = str(data["files"]["target_file"])
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])

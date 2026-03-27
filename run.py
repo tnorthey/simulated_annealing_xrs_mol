@@ -52,6 +52,13 @@ def create_parser():
     files_group.add_argument('--ab-initio-scattering-file', type=str,
                             dest='files.ab_initio_scattering_file',
                             help='Optional DAT: col1=q, col2=ab initio I(q) at reference_xyz; correction = I/IAM_ref(q) on that grid, interpolated to qvector')
+    files_group.add_argument(
+        '--ab-initio-correction-mode',
+        type=str,
+        dest='files.ab_initio_correction_mode',
+        choices=['elastic', 'total'],
+        help='With ab-initio file: elastic = c×I_elastic IAM; total = c×full IAM (see input.toml)',
+    )
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
     

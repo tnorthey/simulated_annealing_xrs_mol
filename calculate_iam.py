@@ -12,7 +12,7 @@ This script reads an XYZ file (or XYZ trajectory) and calculates the IAM
 Usage:
     python3 calculate_iam.py input.xyz output.dat
     python3 calculate_iam.py input.xyz output.dat --reference reference.xyz --pcd
-    python3 calculate_iam.py input.xyz output.dat --elastic --pcd --reference ref.xyz --reference-dat ref_I.dat --ab-initio-scattering ab_initio.dat
+    python3 calculate_iam.py input.xyz output.dat --elastic --pcd --reference ref.xyz --reference-dat ref_I.dat --ab-initio-scattering ab_initio.dat [--ab-initio-correction-mode elastic|total]
     python3 calculate_iam.py input.xyz output.dat --ewald
     python3 calculate_iam.py input.xyz output.dat --elastic
 """
@@ -160,7 +160,16 @@ def main():
                        help='Reference DAT (q, I_ref) for PCD denominator. With --ab-initio-scattering and --pcd, required: PCD = 100*(I_corr/I_ref-1) with I_corr=c×(atomic+molecular).')
     parser.add_argument('--ab-initio-scattering', type=str, default=None,
                        dest='ab_initio_scattering',
-                       help='DAT with col1=q, col2=ab initio total I(q) at --reference; c(q)=I_abi/I_elastic_IAM(ref); output uses c×(atomic+molecular) (requires --reference). With --pcd, also pass --reference-dat for the PCD baseline I_ref(q).')
+                       help='DAT with col1=q, col2=ab initio total I(q) at --reference (requires --reference). With --pcd, also pass --reference-dat for the PCD baseline I_ref(q).')
+    parser.add_argument(
+        '--ab-initio-correction-mode',
+        type=str,
+        choices=['elastic', 'total'],
+        default='elastic',
+        dest='ab_initio_correction_mode',
+        help='With --ab-initio-scattering: elastic => c=I_abi/I_elastic_IAM(ref), output c×(atomic+molecular); '
+             'total => c=I_abi/I_total_IAM(ref), output c×full IAM',
+    )
     parser.add_argument('--pcd', action='store_true',
                        help='Calculate PCD (percentage difference) instead of IAM')
     
@@ -306,22 +315,38 @@ def main():
             print("Error: --reference structure has different atom types than input")
             sys.exit(1)
         ref_atomic_numbers = [m.periodic_table(symbol) for symbol in ref_atomlist]
-        # Denominator for c(q) is elastic IAM at reference; numerator is ab-initio total I(q).
-        iam_ref_abi, _, _, _ = calculate_iam_for_structure(
-            ref_xyz, ref_atomic_numbers, q_abi, x,
-            ion=args.ion,
-            inelastic=False, ewald_mode=False,
-            th=None, ph=None, compton_array=None,
-        )
         out_dir = os.path.dirname(os.path.abspath(args.output_dat))
         if not out_dir:
             out_dir = os.getcwd()
-        ref_iam_path = os.path.join(out_dir, "reference_iam_scattering.dat")
-        np.savetxt(ref_iam_path, np.column_stack((q_abi, iam_ref_abi)))
-        print(
-            f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
-            "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
-        )
+        if args.ab_initio_correction_mode == "elastic":
+            iam_ref_abi, _, _, _ = calculate_iam_for_structure(
+                ref_xyz, ref_atomic_numbers, q_abi, x,
+                ion=args.ion,
+                inelastic=False, ewald_mode=False,
+                th=None, ph=None, compton_array=None,
+            )
+            ref_iam_path = os.path.join(out_dir, "reference_iam_scattering.dat")
+            np.savetxt(ref_iam_path, np.column_stack((q_abi, iam_ref_abi)))
+            print(
+                f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
+            )
+        else:
+            compton_abi = None
+            if args.inelastic:
+                compton_abi = x.compton_spline(atomic_numbers, q_abi)
+            iam_ref_abi, _, _, _ = calculate_iam_for_structure(
+                ref_xyz, ref_atomic_numbers, q_abi, x,
+                ion=args.ion,
+                inelastic=args.inelastic, ewald_mode=False,
+                th=None, ph=None, compton_array=compton_abi,
+            )
+            ref_iam_path = os.path.join(out_dir, "reference_iam_total_scattering.dat")
+            np.savetxt(ref_iam_path, np.column_stack((q_abi, iam_ref_abi)))
+            print(
+                f"Wrote total IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                "(denominator for c = I_ab_initio_total / I_total_IAM)"
+            )
         corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_abi)
         if q_abi.size != qvector.size or not np.allclose(q_abi, qvector):
             correction_factor_q = np.interp(
@@ -342,8 +367,13 @@ def main():
     if args.pcd:
         if args.reference_dat:
             if args.ab_initio_scattering:
+                _cmp = (
+                    "c(q)×I_elastic"
+                    if args.ab_initio_correction_mode == "elastic"
+                    else "c(q)×I_total"
+                )
                 print(
-                    f"Loading PCD baseline I_ref(q) from DAT (compared to c(q)×I_elastic): "
+                    f"Loading PCD baseline I_ref(q) from DAT (compared to {_cmp}): "
                     f"{args.reference_dat}"
                 )
             else:
@@ -411,8 +441,10 @@ def main():
         )
         
         if args.ab_initio_scattering:
-            # Predicted intensity = c(q) × I_elastic only (inelastic enters via c).
-            iam = correction_factor_q * (atomic + molecular)
+            if args.ab_initio_correction_mode == "elastic":
+                iam = correction_factor_q * (atomic + molecular)
+            else:
+                iam = correction_factor_q * iam
         else:
             iam = iam * correction_factor_q
         

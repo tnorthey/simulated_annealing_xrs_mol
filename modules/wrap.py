@@ -956,8 +956,17 @@ class Wrapper:
                     "use --reference-dat-file on the CLI). IAM(reference_xyz) is not used as the "
                     "PCD denominator when ab-initio correction is enabled."
                 )
+            abi_corr_mode = str(
+                getattr(p, "ab_initio_correction_mode", "elastic")
+            ).lower()
+            if abi_corr_mode not in ("elastic", "total"):
+                raise ValueError(
+                    'ab_initio_correction_mode must be "elastic" or "total", '
+                    f"got {abi_corr_mode!r}"
+                )
             print(
-                f"Computing correction factor from ab initio scattering: {abi_file}"
+                f"Computing correction factor from ab initio scattering: {abi_file} "
+                f"(mode={abi_corr_mode})"
             )
             q_abi, I_abi, abi_has_q = _read_scattering_dat(abi_file)
             if not abi_has_q:
@@ -966,25 +975,53 @@ class Wrapper:
                     "Single-column files are not supported for this option."
                 )
             ion_mode = getattr(p, "ion_mode", False)
-            iam_ref_elastic_abi, _a, _m, _c, _pm = x.iam_calc(
-                atomic_numbers=atomic_numbers,
-                xyz=reference_xyz,
-                qvector=q_abi,
-                ion=ion_mode,
-                electron_mode=False,
-                inelastic=False,
-                compton_array=None,
-            )
-            ref_iam_path = os.path.join(p.results_dir, "reference_iam_scattering.dat")
-            np.savetxt(
-                ref_iam_path,
-                np.column_stack((q_abi, iam_ref_elastic_abi)),
-            )
-            print(
-                f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
-                "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
-            )
-            corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_elastic_abi)
+            if abi_corr_mode == "elastic":
+                iam_ref_denom_abi, _a, _m, _c, _pm = x.iam_calc(
+                    atomic_numbers=atomic_numbers,
+                    xyz=reference_xyz,
+                    qvector=q_abi,
+                    ion=ion_mode,
+                    electron_mode=False,
+                    inelastic=False,
+                    compton_array=None,
+                )
+                ref_iam_path = os.path.join(
+                    p.results_dir, "reference_iam_scattering.dat"
+                )
+                np.savetxt(
+                    ref_iam_path,
+                    np.column_stack((q_abi, iam_ref_denom_abi)),
+                )
+                print(
+                    f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                    "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
+                )
+                corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_denom_abi)
+            else:
+                compton_abi = None
+                if p.inelastic:
+                    compton_abi = x.compton_spline(atomic_numbers, q_abi)
+                iam_ref_denom_abi, _a, _m, _c, _pm = x.iam_calc(
+                    atomic_numbers=atomic_numbers,
+                    xyz=reference_xyz,
+                    qvector=q_abi,
+                    ion=ion_mode,
+                    electron_mode=False,
+                    inelastic=p.inelastic,
+                    compton_array=compton_abi,
+                )
+                ref_iam_path = os.path.join(
+                    p.results_dir, "reference_iam_total_scattering.dat"
+                )
+                np.savetxt(
+                    ref_iam_path,
+                    np.column_stack((q_abi, iam_ref_denom_abi)),
+                )
+                print(
+                    f"Wrote total IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                    "(denominator for c = I_ab_initio_total / I_total_IAM)"
+                )
+                corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_denom_abi)
             if q_abi.size != p.qvector.size or not np.allclose(q_abi, p.qvector):
                 correction_factor_q = np.interp(
                     p.qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
@@ -1000,6 +1037,7 @@ class Wrapper:
                 )
         else:
             correction_factor_q = np.ones(p.qlen, dtype=np.float64)
+            abi_corr_mode = "elastic"
 
         # #region agent log
         _cf = np.asarray(correction_factor_q, dtype=np.float64).ravel()
@@ -1149,7 +1187,9 @@ class Wrapper:
                     gpu_chains=getattr(p, "gpu_chains", 1),
                     keep_on_device=use_gpu_persistent,
                     correction_factor_q=correction_factor_q,
-                    elastic_ab_initio_correction=bool(abi_file),
+                    elastic_ab_initio_correction=(
+                        bool(abi_file) and abi_corr_mode == "elastic"
+                    ),
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")

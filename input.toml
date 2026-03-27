@@ -34,8 +34,10 @@ reference_xyz_file = "chd+_data/CCSD-neut.xyz"
 reference_dat_file = "chd+_data/CCSD_neut_scat_plus44.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
 target_file = "chd+_data/eirik_data_30.dat"
-# Optional: ab initio total I(q) at reference_xyz (two columns: q, I). c(q)=I_ab_initio/I_elastic_IAM(ref) on that grid; writes results/reference_iam_scattering.dat; interpolated to qvector. With pcd_mode, reference_dat_file is required; PCD uses I_ref from that DAT, not recomputed IAM.
+# Optional: ab initio total I(q) at reference_xyz (two columns: q, I). Interpolated to qvector. With pcd_mode, reference_dat_file is required; PCD uses I_ref from that DAT, not recomputed IAM.
 ab_initio_scattering_file = "chd+_data/CCSD_neut_scat_plus44.dat"
+# When ab_initio_scattering_file is set: "elastic" => c = I_ab_initio / I_elastic_IAM(ref), SA uses c×I_elastic; "total" => c = I_ab_initio / I_total_IAM(ref), SA uses c×I_total (includes Compton if inelastic).
+ab_initio_correction_mode = "elastic"
 
 # ============================================================================
 # OPTIONS

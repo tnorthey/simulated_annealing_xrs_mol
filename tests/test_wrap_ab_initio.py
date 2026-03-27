@@ -39,3 +39,14 @@ def test_interp_matches_direct_when_q_grids_align():
         qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
     )
     np.testing.assert_allclose(correction_factor_q, 1.25)
+
+
+def test_total_denominator_ratio_differs_from_elastic():
+    """Total IAM ref in denominator gives different c than elastic when Compton nonzero."""
+    I_abi = np.array([3.0, 6.0])
+    iam_elastic = np.array([1.0, 2.0])
+    iam_total = np.array([1.5, 3.0])
+    r_el = _safe_ab_initio_correction_ratio(I_abi, iam_elastic)
+    r_tot = _safe_ab_initio_correction_ratio(I_abi, iam_total)
+    np.testing.assert_allclose(r_el, [3.0, 3.0])
+    np.testing.assert_allclose(r_tot, [2.0, 2.0])
