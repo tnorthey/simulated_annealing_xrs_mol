@@ -14,7 +14,8 @@ No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
 
 Dihedral convention: raw angles from arctan2 ([-180, 180]°) are mapped to
-[0, 360) when negative; an optional --dihedral-offset is then applied (mod 360).
+[0, 360) when negative; an optional --dihedral-offset is then added (no wrap),
+so e.g. offset -360 yields values in [-360, 0).
 
 Usage:
     python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5
@@ -501,7 +502,7 @@ def main():
         default=0.0,
         metavar="DEG",
         help=(
-            "Degrees added to the dihedral column after [0, 360) wrap; result is taken mod 360. "
+            "Degrees added to the dihedral column after [0, 360) wrap; not folded modulo 360. "
             "Only valid with --dihedral. Changing this uses the same default output names as offset 0; "
             "pass --recompute to refresh a cached CSV."
         ),
@@ -743,13 +744,14 @@ def main():
                 if args.dihedral_offset != 0.0:
                     geom[:, dihedral_col] = (
                         geom[:, dihedral_col] + args.dihedral_offset
-                    ) % 360.0
+                    )
             all_geom.append(geom)
 
             for ci in range(n_cols):
                 if ci == dihedral_col:
-                    means[ti, ci] = circular_mean_deg(geom[:, ci])
-                    stds[ti, ci] = circular_std_deg(geom[:, ci])
+                    wrapped = geom[:, ci] - args.dihedral_offset
+                    means[ti, ci] = circular_mean_deg(wrapped) + args.dihedral_offset
+                    stds[ti, ci] = circular_std_deg(wrapped)
                 else:
                     means[ti, ci] = np.mean(geom[:, ci])
                     stds[ti, ci] = np.std(geom[:, ci], ddof=0)
