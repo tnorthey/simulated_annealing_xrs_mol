@@ -11,26 +11,26 @@ if [[ $# -ne 1 ]] || [[ ! -d "$1" ]]; then
   exit 1
 fi
 
-dir=$(cd "$1" && pwd)
+dir=$1
 # ??_???.????????.xyz — chi^2 is the part after the first '_', before '.xyz'
-glob='[0-9][0-9]_[0-9][0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].xyz'
+name_pat='[0-9][0-9]_[0-9][0-9][0-9].[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].xyz'
 
-shopt -s nullglob
-files=("$dir"/$glob)
-shopt -u nullglob
-
-if ((${#files[@]} == 0)); then
-  echo "No files matching DD_DDD.DDDDDDDD.xyz in $dir" >&2
-  exit 1
-fi
-
-for f in "${files[@]}"; do
-  base=$(basename "$f" .xyz)
-  echo "${base#*_}"
-done | awk '
-  { sum += $1; n++ }
+# Stream basenames only: avoids storing ~50k paths in a bash array and ~50k basename(1) calls.
+# Requires GNU find (-printf).
+find -P "$dir" -maxdepth 1 -type f -name "$name_pat" -printf '%f\n' \
+| LC_ALL=C awk -v dir="$dir" '
+  {
+    line = $0
+    sub(/\.xyz$/, "", line)
+    sub(/^[0-9][0-9]_/, "", line)
+    sum += line + 0
+    n++
+  }
   END {
-    if (n == 0) exit 1
+    if (n == 0) {
+      printf "No files matching DD_DDD.DDDDDDDD.xyz in %s\n", dir > "/dev/stderr"
+      exit 1
+    }
     printf "%.8f\n", sum / n
   }
 '
