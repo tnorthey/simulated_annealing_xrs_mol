@@ -1,5 +1,7 @@
 import os
 import sys
+import json
+import time
 import pprint
 import numpy as np
 from numpy import linalg as LA
@@ -11,6 +13,30 @@ try:
     HAVE_PYSCF = True
 except ImportError:
     HAVE_PYSCF = False
+
+# #region agent log
+def _agent_debug_log(hypothesis_id, location, message, data):
+    _p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug-11f1de.log")
+    try:
+        with open(_p, "a", encoding="utf-8") as _f:
+            _f.write(
+                json.dumps(
+                    {
+                        "sessionId": "11f1de",
+                        "hypothesisId": hypothesis_id,
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+
+
+# #endregion
 
 # my modules
 import modules.mol as mol
@@ -195,6 +221,61 @@ def _extract_params_from_geometry_light(atomlist, xyz: np.ndarray):
     torsion_param_array = np.asarray(torsion_params, dtype=np.float64).reshape((-1, 6))
 
     return bond_param_array, angle_param_array, torsion_param_array
+
+
+def _read_scattering_dat(path: str):
+    """
+    Read scattering data as either:
+    - 1 column: I(q) only (q is index-based)
+    - >=2 columns: first column q, second column I(q)
+
+    Returns (q, intensity, has_explicit_q) where has_explicit_q is False
+    when the file had only one column (q was synthesised from indices).
+    """
+    data = np.loadtxt(path)
+    arr = np.asarray(data, dtype=np.float64)
+    if arr.ndim == 0:
+        arr = arr.reshape(1)
+    if arr.ndim == 1:
+        q = np.arange(arr.size, dtype=np.float64)
+        intensity = arr.astype(np.float64)
+        has_explicit_q = False
+    else:
+        if arr.shape[1] >= 2:
+            q = arr[:, 0].astype(np.float64)
+            intensity = arr[:, 1].astype(np.float64)
+            has_explicit_q = True
+        else:
+            q = np.arange(arr.shape[0], dtype=np.float64)
+            intensity = arr[:, 0].astype(np.float64)
+            has_explicit_q = False
+    return q, intensity, has_explicit_q
+
+
+def _safe_ab_initio_correction_ratio(
+    I_abi: np.ndarray, iam_ref_elastic: np.ndarray, eps: float = 1e-30
+) -> np.ndarray:
+    """Compute c(q) = I_ab_initio_total / I_IAM_elastic_ref (ones where denominator tiny).
+
+    The ab initio column is **total** scattering (includes inelastic). The IAM reference
+    must be **elastic** only (atomic + molecular), matching the elastic part of IAM.
+    """
+    I_abi = np.asarray(I_abi, dtype=np.float64).ravel()
+    iam_ref = np.asarray(iam_ref_elastic, dtype=np.float64).ravel()
+    if I_abi.size != iam_ref.size:
+        raise ValueError(
+            f"ab initio intensity length {I_abi.size} != elastic IAM_ref length {iam_ref.size}"
+        )
+    ratio = np.ones_like(I_abi, dtype=np.float64)
+    mask = iam_ref > eps
+    ratio[mask] = I_abi[mask] / iam_ref[mask]
+    n_bad = int(np.sum(~mask))
+    if n_bad > 0:
+        print(
+            f"WARNING: {n_bad} q point(s) had IAM_ref <= {eps:g}; "
+            "correction factor set to 1.0 at those points."
+        )
+    return ratio
 
 
 #############################
@@ -586,9 +667,10 @@ class Wrapper:
         # Create results directory if it doesn't exist
         os.makedirs(p.results_dir, exist_ok=True)
 
-        def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode):
-            """convert xyz file to IAM signal"""
+        def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode, qvector=None):
+            """Convert xyz to IAM signal. If qvector is None, use p.qvector (compton_array must match)."""
             ion_mode = getattr(p, "ion_mode", False)
+            qv = p.qvector if qvector is None else np.asarray(qvector, dtype=np.float64)
             if ewald_mode:
                 (
                     iam,
@@ -603,7 +685,7 @@ class Wrapper:
                 ) = x.iam_calc_ewald(
                     atomic_numbers=atomic_numbers,
                     xyz=xyz,
-                    qvector=p.qvector,
+                    qvector=qv,
                     th=p.th,
                     ph=p.ph,
                     ion=ion_mode,
@@ -614,7 +696,7 @@ class Wrapper:
                 iam, atomic, molecular, compton, pre_molecular = x.iam_calc(
                     atomic_numbers=atomic_numbers,
                     xyz=xyz,
-                    qvector=p.qvector,
+                    qvector=qv,
                     ion=ion_mode,
                     electron_mode=electron_mode,
                     inelastic=p.inelastic,
@@ -637,23 +719,30 @@ class Wrapper:
         if p.pcd_mode and p.reference_dat_file is not None and p.reference_dat_file != "":
             # Load reference IAM from DAT file
             print(f"Loading reference IAM from DAT file: {p.reference_dat_file}")
-            ref_data = np.loadtxt(p.reference_dat_file)
-            if ref_data.ndim == 1:
-                # Single column: assume it's I(q) and q is index-based
-                ref_q = np.arange(ref_data.size, dtype=np.float64)
-                ref_iam = ref_data.astype(np.float64)
+            ref_q, ref_iam, ref_has_explicit_q = _read_scattering_dat(p.reference_dat_file)
+
+            if not ref_has_explicit_q:
+                if ref_iam.size != p.qvector.size:
+                    raise ValueError(
+                        f"Single-column reference DAT has {ref_iam.size} points "
+                        f"but qvector has {p.qvector.size} points. They must match."
+                    )
+                reference_iam = ref_iam
+                print(
+                    f"Using single-column reference DAT directly "
+                    f"({ref_iam.size} points, no interpolation)"
+                )
+            elif ref_q.size != p.qvector.size or not np.allclose(ref_q, p.qvector):
+                reference_iam = np.interp(
+                    p.qvector, ref_q, ref_iam, left=ref_iam[0], right=ref_iam[-1]
+                )
+                print(
+                    f"Interpolated reference IAM from {len(ref_q)} points "
+                    f"to {len(p.qvector)} points"
+                )
             else:
-                # Two or more columns: first is q, second is I
-                if ref_data.shape[1] >= 2:
-                    ref_q = ref_data[:, 0].astype(np.float64)
-                    ref_iam = ref_data[:, 1].astype(np.float64)
-                else:
-                    ref_q = np.arange(ref_data.shape[0], dtype=np.float64)
-                    ref_iam = ref_data[:, 0].astype(np.float64)
-            
-            # Interpolate to match current q-vector
-            reference_iam = np.interp(p.qvector, ref_q, ref_iam, left=ref_iam[0], right=ref_iam[-1])
-            print(f"Interpolated reference IAM from {len(ref_q)} points to {len(p.qvector)} points")
+                reference_iam = ref_iam
+                print(f"Reference DAT q-grid matches qvector ({len(ref_q)} points)")
         else:
             # Calculate reference IAM from XYZ file (default behavior)
             reference_iam, atomic, compton, pre_molecular = xyz2iam(
@@ -664,6 +753,22 @@ class Wrapper:
         if save_starting_reference_iams:
             np.savetxt("starting_iam.dat", np.column_stack((p.qvector, starting_iam)))
             np.savetxt("reference_iam.dat", np.column_stack((p.qvector, reference_iam)))
+
+        # #region agent log
+        if p.pcd_mode:
+            _ri = np.asarray(reference_iam, dtype=np.float64).ravel()
+            _agent_debug_log(
+                "H2",
+                "wrap.py:after_reference_iam",
+                "reference_iam stats",
+                {
+                    "min": float(np.nanmin(_ri)),
+                    "max": float(np.nanmax(_ri)),
+                    "mean": float(np.nanmean(_ri)),
+                    "qlen": int(_ri.size),
+                },
+            )
+        # #endregion
 
         natoms = xyz_start.shape[0]
         ###### mode displacements ######
@@ -766,12 +871,45 @@ class Wrapper:
                 target_function_ = target_function
 
         elif p.mode == "normal":
-            # if target file is a data file, read as target_function
-            target_function_ = np.loadtxt(target_file)
-            excitation_factor = p.excitation_factor
-            print(f"EXCITATION FACTOR = {excitation_factor}")
-            target_function_ /= excitation_factor  # scale target function up to 100% to fit the calculations
-            target_xyz = xyz_start  # added simply to run the rmsd analysis later compared to this
+            # Scattering DAT (q, I) or single-column I; alternatively .xyz → IAM/PCD on q-grid
+            if str(target_file).lower().endswith(".xyz"):
+                print(
+                    f"normal mode: target {target_file} is XYZ — computing "
+                    "target IAM/PCD on the configured q grid (use a .dat file for raw data)."
+                )
+                _, _, _tl, target_xyz = m.read_xyz(target_file)
+                target_iam, _ta, _tc, _tpm = xyz2iam(
+                    target_xyz, atomic_numbers, compton_array, p.ewald_mode
+                )
+                if p.pcd_mode:
+                    target_function_ = 100 * (target_iam / reference_iam - 1)
+                else:
+                    target_function_ = target_iam
+                print(f"EXCITATION FACTOR = {p.excitation_factor}")
+            else:
+                target_q, target_iq, has_explicit_q = _read_scattering_dat(target_file)
+                if p.pcd_mode and not has_explicit_q:
+                    if target_iq.size != p.qvector.size:
+                        raise ValueError(
+                            f"Single-column PCD target has {target_iq.size} points "
+                            f"but qvector has {p.qvector.size} points. They must match."
+                        )
+                    print(
+                        f"PCD mode: using single-column target data directly "
+                        f"({target_iq.size} points, no interpolation)"
+                    )
+                    target_function_ = target_iq
+                elif target_q.size != p.qvector.size or not np.allclose(target_q, p.qvector):
+                    print(
+                        f"Interpolating target data from {target_q.size} points to {p.qvector.size} q-points"
+                    )
+                    target_function_ = np.interp(
+                        p.qvector, target_q, target_iq, left=target_iq[0], right=target_iq[-1]
+                    )
+                else:
+                    target_function_ = target_iq
+                print(f"EXCITATION FACTOR = {p.excitation_factor}")
+                target_xyz = xyz_start  # RMSD reference when target is data, not a geometry
         else:
             print('Error: mode value must be "test" or "normal"!')
         ###########################################################
@@ -796,7 +934,137 @@ class Wrapper:
             np.savetxt(
                 target_function_file, np.column_stack((p.qvector, target_function_))
             )
-        # print(target_function)
+        # Scale target for SA internally (keeps saved target_function_ unchanged)
+        if p.mode == "normal":
+            target_for_sa = target_function_ / p.excitation_factor
+        else:
+            target_for_sa = target_function_
+
+        abi_file = getattr(p, "ab_initio_scattering_file", None)
+        if p.ewald_mode and abi_file:
+            raise ValueError(
+                "ab_initio_scattering_file is only supported for isotropic (non-Ewald) q; "
+                "disable ewald_mode or omit the ab initio scattering file."
+            )
+
+        if abi_file:
+            ref_dat = getattr(p, "reference_dat_file", None)
+            if p.pcd_mode and not (ref_dat and str(ref_dat).strip()):
+                raise ValueError(
+                    "ab_initio_scattering_file with pcd_mode requires files.reference_dat_file "
+                    "(PCD baseline I_ref(q) must be read from a DAT file; set it in input.toml or "
+                    "use --reference-dat-file on the CLI). IAM(reference_xyz) is not used as the "
+                    "PCD denominator when ab-initio correction is enabled."
+                )
+            abi_corr_mode = str(
+                getattr(p, "ab_initio_correction_mode", "elastic")
+            ).lower()
+            if abi_corr_mode not in ("elastic", "total"):
+                raise ValueError(
+                    'ab_initio_correction_mode must be "elastic" or "total", '
+                    f"got {abi_corr_mode!r}"
+                )
+            print(
+                f"Computing correction factor from ab initio scattering: {abi_file} "
+                f"(mode={abi_corr_mode})"
+            )
+            q_abi, I_abi, abi_has_q = _read_scattering_dat(abi_file)
+            if not abi_has_q:
+                raise ValueError(
+                    "ab_initio_scattering_file must have two columns (q and intensity). "
+                    "Single-column files are not supported for this option."
+                )
+            ion_mode = getattr(p, "ion_mode", False)
+            if abi_corr_mode == "elastic":
+                iam_ref_denom_abi, _a, _m, _c, _pm = x.iam_calc(
+                    atomic_numbers=atomic_numbers,
+                    xyz=reference_xyz,
+                    qvector=q_abi,
+                    ion=ion_mode,
+                    electron_mode=False,
+                    inelastic=False,
+                    compton_array=None,
+                )
+                ref_iam_path = os.path.join(
+                    p.results_dir, "reference_iam_scattering.dat"
+                )
+                np.savetxt(
+                    ref_iam_path,
+                    np.column_stack((q_abi, iam_ref_denom_abi)),
+                )
+                print(
+                    f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                    "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
+                )
+                corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_denom_abi)
+            else:
+                compton_abi = None
+                if p.inelastic:
+                    compton_abi = x.compton_spline(atomic_numbers, q_abi)
+                iam_ref_denom_abi, _a, _m, _c, _pm = x.iam_calc(
+                    atomic_numbers=atomic_numbers,
+                    xyz=reference_xyz,
+                    qvector=q_abi,
+                    ion=ion_mode,
+                    electron_mode=False,
+                    inelastic=p.inelastic,
+                    compton_array=compton_abi,
+                )
+                ref_iam_path = os.path.join(
+                    p.results_dir, "reference_iam_total_scattering.dat"
+                )
+                np.savetxt(
+                    ref_iam_path,
+                    np.column_stack((q_abi, iam_ref_denom_abi)),
+                )
+                print(
+                    f"Wrote total IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                    "(denominator for c = I_ab_initio_total / I_total_IAM)"
+                )
+                corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_denom_abi)
+            if q_abi.size != p.qvector.size or not np.allclose(q_abi, p.qvector):
+                correction_factor_q = np.interp(
+                    p.qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
+                )
+                print(
+                    f"Interpolated ab-initio correction ratio from {len(q_abi)} points "
+                    f"to {len(p.qvector)} q-points"
+                )
+            else:
+                correction_factor_q = np.asarray(corr_abi, dtype=np.float64)
+                print(
+                    f"Ab initio q-grid matches qvector ({len(q_abi)} points)"
+                )
+        else:
+            correction_factor_q = np.ones(p.qlen, dtype=np.float64)
+            abi_corr_mode = "elastic"
+
+        # #region agent log
+        _cf = np.asarray(correction_factor_q, dtype=np.float64).ravel()
+        _cmin, _cmax = float(np.nanmin(_cf)), float(np.nanmax(_cf))
+        _agent_debug_log(
+            "H1",
+            "wrap.py:after_correction_factor_q",
+            "correction_factor_q stats",
+            {
+                "min": _cmin,
+                "max": _cmax,
+                "mean": float(np.nanmean(_cf)),
+                "median": float(np.median(_cf)),
+                "has_ab_initio_file": bool(abi_file),
+            },
+        )
+        if p.pcd_mode and _cmax > 1.01:
+            _agent_debug_log(
+                "H4",
+                "wrap.py:pcd_formula_sanity",
+                "if I_tot equals ref, new PCD_full is 100*(c-1) per q",
+                {
+                    "example_new_pcd_if_I_equals_ref": 100.0 * (_cmax - 1.0),
+                    "example_old_scaled_pcd_if_uncorr_0p04": 0.04 * _cmax,
+                },
+            )
+        # #endregion
 
         # load target function from file
         # if os.path.exists(target_function_file):
@@ -811,6 +1079,12 @@ class Wrapper:
         xyz_start_ = xyz_start  # save original xyz_start as xyz_start_
         # Tuning parameter
         c_tuning = p.c_tuning_initial  # initialise C_tuning
+        use_gpu_persistent = (
+            getattr(p, "gpu_backend", "cpu") == "cuda"
+            and not getattr(p, "gpu_emulation_bool", False)
+        )
+        if use_gpu_persistent:
+            print("GPU persistent mode enabled: keeping SA/GA state on device across restarts.")
         print("tuning_ratio_target = %3.2f" % p.tuning_ratio_target)
         for k in range(p.ntotalruns):
             #################################
@@ -883,7 +1157,7 @@ class Wrapper:
                     xyz_start,
                     displacements,
                     mode_indices,
-                    target_function_,
+                    target_for_sa,
                     reference_iam,
                     p.qvector,
                     p.th,
@@ -910,12 +1184,72 @@ class Wrapper:
                     p.c_tuning_initial,
                     backend=getattr(p, "gpu_backend", "cpu"),
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
+                    gpu_chains=getattr(p, "gpu_chains", 1),
+                    keep_on_device=use_gpu_persistent,
+                    correction_factor_q=correction_factor_q,
+                    elastic_ab_initio_correction=(
+                        bool(abi_file) and abi_corr_mode == "elastic"
+                    ),
                 )
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")
                 print("c_tuning: %9.8f" % c_tuning)
                 c_tuning = c_tuning_adjusted
                 print("c_tuning_adjusted: %9.8f" % c_tuning_adjusted)
+
+            if use_gpu_persistent:
+                if hasattr(xyz_best, "get"):
+                    xyz_best = xyz_best.get()
+                if hasattr(predicted_best, "get"):
+                    predicted_best = predicted_best.get()
+
+            # Scale predicted output from 100% excitation level back to
+            # the experimental excitation level so it matches the raw target.
+            # #region agent log
+            if p.pcd_mode:
+                _pb = np.asarray(predicted_best, dtype=np.float64).ravel()
+                _agent_debug_log(
+                    "H5",
+                    "wrap.py:predicted_before_excitation",
+                    "predicted_best before excitation_factor",
+                    {
+                        "min": float(np.nanmin(_pb)),
+                        "max": float(np.nanmax(_pb)),
+                        "mean": float(np.nanmean(_pb)),
+                    },
+                )
+            # #endregion
+            if p.mode == "normal":
+                predicted_best = predicted_best * p.excitation_factor
+                chain_results = getattr(sa, "last_chain_results", None)
+                if (
+                    chain_results is not None
+                    and "predicted_best_all" in chain_results
+                ):
+                    chain_results["predicted_best_all"] = (
+                        chain_results["predicted_best_all"] * p.excitation_factor
+                    )
+
+            # #region agent log
+            if p.pcd_mode:
+                _pb2 = np.asarray(predicted_best, dtype=np.float64).ravel()
+                _tgt = np.asarray(target_function_, dtype=np.float64).ravel()
+                _tfs = np.asarray(target_for_sa, dtype=np.float64).ravel()
+                _agent_debug_log(
+                    "H3",
+                    "wrap.py:predicted_vs_target_after_excitation",
+                    "compare scales",
+                    {
+                        "predicted_min": float(np.nanmin(_pb2)),
+                        "predicted_max": float(np.nanmax(_pb2)),
+                        "target_raw_min": float(np.nanmin(_tgt)),
+                        "target_raw_max": float(np.nanmax(_tgt)),
+                        "target_for_sa_min": float(np.nanmin(_tfs)),
+                        "target_for_sa_max": float(np.nanmax(_tfs)),
+                        "excitation_factor": float(p.excitation_factor),
+                    },
+                )
+            # #endregion
 
             ### analysis on xyz_best
             # bond-length of interest
@@ -973,15 +1307,115 @@ class Wrapper:
                 e_mol,
                 mapd,
             )
-            ### write best structure to xyz file
-            print("writing to xyz... (f: %10.8f)" % f_xray_best)
-            f_best_str = ("%10.8f" % f_xray_best).zfill(12)
-            m.write_xyz(
-                "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
-                header_str,
-                atomlist,
-                xyz_best,
+            chain_results = getattr(sa, "last_chain_results", None)
+            multi_chain_mode = (
+                chain_results is not None
+                and "xyz_best_all" in chain_results
+                and np.ndim(chain_results["xyz_best_all"]) == 3
+                and chain_results["xyz_best_all"].shape[0] > 1
             )
+
+            # In multi-chain mode, write all chains and do not emit a special
+            # best-chain file; otherwise keep legacy single-output behavior.
+            if multi_chain_mode:
+                xyz_best_all = chain_results["xyz_best_all"]
+                predicted_best_all = chain_results["predicted_best_all"]
+                f_xray_best_all = chain_results["f_xray_best_all"]
+                if hasattr(xyz_best_all, "get"):
+                    xyz_best_all = xyz_best_all.get()
+                else:
+                    xyz_best_all = np.asarray(xyz_best_all)
+                if hasattr(predicted_best_all, "get"):
+                    predicted_best_all = predicted_best_all.get()
+                else:
+                    predicted_best_all = np.asarray(predicted_best_all)
+                if hasattr(f_xray_best_all, "get"):
+                    f_xray_best_all = f_xray_best_all.get()
+                else:
+                    f_xray_best_all = np.asarray(f_xray_best_all)
+                print(
+                    f"Writing outputs for {xyz_best_all.shape[0]} GPU chains "
+                    "(no chain IDs in filenames)"
+                )
+                filename_counts = {}
+                for chain_idx in range(xyz_best_all.shape[0]):
+                    xyz_chain = xyz_best_all[chain_idx]
+                    f_xray_chain = float(f_xray_best_all[chain_idx])
+
+                    # bond-length of interest
+                    bond_distance_chain = np.linalg.norm(
+                        xyz_chain[p.bond_indices[0], :] - xyz_chain[p.bond_indices[1], :]
+                    )
+                    # angle of interest
+                    p0c = np.array(xyz_chain[p.angle_indices[0], :])
+                    p1c = np.array(xyz_chain[p.angle_indices[1], :])  # central point
+                    p2c = np.array(xyz_chain[p.angle_indices[2], :])
+                    angle_degrees_chain = analysis.directional_angle_3d(
+                        p0c, p1c, p2c, [0, 1, 0]
+                    )
+                    # dihedral of interest
+                    p0c = np.array(xyz_chain[p.dihedral_indices[0], :])
+                    p1c = np.array(xyz_chain[p.dihedral_indices[1], :])
+                    p2c = np.array(xyz_chain[p.dihedral_indices[2], :])
+                    p3c = np.array(xyz_chain[p.dihedral_indices[3], :])
+                    dihedral_chain = analysis.new_dihedral((p0c, p1c, p2c, p3c))
+                    if rmsd_target_bool:
+                        rmsd_chain, _ = m.rmsd_kabsch(
+                            xyz_chain, target_xyz, p.rmsd_indices
+                        )
+                        mapd_chain = m.mapd_function(
+                            xyz_chain, target_xyz, p.rmsd_indices
+                        )
+                    else:
+                        rmsd_chain, mapd_chain = 0.0, 0.0
+                    e_mol_chain = 0.0  # per-chain HF not computed here
+
+                    header_str_chain = (
+                        "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f"
+                        % (
+                            f_xray_chain,
+                            rmsd_chain,
+                            bond_distance_chain,
+                            angle_degrees_chain,
+                            dihedral_chain,
+                            e_mol_chain,
+                            mapd_chain,
+                        )
+                    )
+                    f_chain_str = ("%10.8f" % f_xray_chain).zfill(12)
+                    base_stub = "%s_%s" % (run_id, f_chain_str)
+                    count = filename_counts.get(base_stub, 0)
+                    filename_counts[base_stub] = count + 1
+                    if count == 0:
+                        file_stub = base_stub
+                    else:
+                        file_stub = "%s_dup%d" % (base_stub, count)
+                    m.write_xyz(
+                        "%s/%s.xyz" % (p.results_dir, file_stub),
+                        header_str_chain,
+                        atomlist,
+                        xyz_chain,
+                    )
+                    if p.write_dat_file_bool:
+                        predicted_chain = predicted_best_all[chain_idx]
+                        if p.ewald_mode:
+                            predicted_chain = x.spherical_rotavg(
+                                predicted_chain, p.th, p.ph
+                            )
+                        np.savetxt(
+                            "%s/%s.dat" % (p.results_dir, file_stub),
+                            np.column_stack((p.qvector, predicted_chain)),
+                        )
+            else:
+                ### write best structure to xyz file (single-chain/CPU behavior)
+                print("writing to xyz... (f: %10.8f)" % f_xray_best)
+                f_best_str = ("%10.8f" % f_xray_best).zfill(12)
+                m.write_xyz(
+                    "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
+                    header_str,
+                    atomlist,
+                    xyz_best,
+                )
             ### analysis values dictionary for final print out
             A = {
                 "f_xray_best": "%10.8f" % f_xray_best,
@@ -1007,7 +1441,7 @@ class Wrapper:
                 predicted_best_r = x.spherical_rotavg(predicted_best, p.th, p.ph)
                 predicted_best = predicted_best_r
             ### write predicted data to file
-            if p.write_dat_file_bool:
+            if p.write_dat_file_bool and not multi_chain_mode:
                 np.savetxt(
                     "%s/%s_%s.dat" % (p.results_dir, run_id, f_best_str),
                     np.column_stack((p.qvector, predicted_best)),

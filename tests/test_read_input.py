@@ -23,25 +23,36 @@ class TestInputToParams:
         assert p.inelastic is True
         assert hasattr(p, "ion_mode")
         assert p.ion_mode is False
+        assert p.gpu_chains == 1
         assert p.qmin == 0.1
         assert p.qmax == 10.0
         assert p.qlen == 50
         assert p.sa_starting_temp == 1.0
         assert p.sa_nsteps == 1000
+        assert p.ab_initio_scattering_file is None
+        assert p.ab_initio_correction_mode == "elastic"
     
     def test_read_with_overrides(self, sample_toml_file):
         """Test reading with parameter overrides"""
         overrides = {
             "run_params.run_id": "override_run",
-            "simulated_annealing_params.sa_nsteps": 5000
+            "simulated_annealing_params.sa_nsteps": 5000,
+            "options.gpu_chains": 4,
         }
         
         p = Input_to_params(sample_toml_file, overrides=overrides)
         
         assert p.run_id == "override_run"
         assert p.sa_nsteps == 5000
+        assert p.gpu_chains == 4
         # Other parameters should remain unchanged
         assert p.mode == "test"
+
+    def test_gpu_chains_validation(self, sample_toml_file):
+        """Test gpu_chains must be >= 1."""
+        overrides = {"options.gpu_chains": 0}
+        with pytest.raises(SystemExit):
+            Input_to_params(sample_toml_file, overrides=overrides)
     
     def test_mode_validation(self):
         """Test mode validation"""

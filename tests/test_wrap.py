@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 # Skip tests if wrap module dependencies are not available
 try:
-    from modules.wrap import Wrapper
+    from modules.wrap import Wrapper, _read_scattering_dat
     WRAP_AVAILABLE = True
 except ImportError:
     WRAP_AVAILABLE = False
@@ -45,3 +45,28 @@ class TestWrapper:
         w = Wrapper()
         assert hasattr(w, 'run')
         assert callable(w.run)
+
+    def test_read_scattering_dat_two_columns(self, tmp_path):
+        """Two-column dat files should be parsed as q and I(q)."""
+        dat_path = tmp_path / "two_col.dat"
+        q = np.array([0.1, 0.2, 0.3], dtype=np.float64)
+        iq = np.array([10.0, 20.0, 30.0], dtype=np.float64)
+        np.savetxt(dat_path, np.column_stack((q, iq)))
+
+        q_read, iq_read, has_q = _read_scattering_dat(str(dat_path))
+
+        assert has_q is True
+        assert np.allclose(q_read, q)
+        assert np.allclose(iq_read, iq)
+
+    def test_read_scattering_dat_single_column(self, tmp_path):
+        """Single-column dat files should be treated as I(q)-only."""
+        dat_path = tmp_path / "one_col.dat"
+        iq = np.array([5.0, 6.0, 7.0], dtype=np.float64)
+        np.savetxt(dat_path, iq)
+
+        q_read, iq_read, has_q = _read_scattering_dat(str(dat_path))
+
+        assert has_q is False
+        assert np.allclose(q_read, np.arange(iq.size, dtype=np.float64))
+        assert np.allclose(iq_read, iq)

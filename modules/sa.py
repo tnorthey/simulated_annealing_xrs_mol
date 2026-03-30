@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from numba import njit
 import numpy as np
 from numpy.typing import NDArray
@@ -11,7 +13,10 @@ class Annealing:
     """Simulated annealing functions"""
 
     def __init__(self):
-        pass
+        # Populated by GPU batched runs (gpu_chains > 1).
+        self.last_chain_results = None
+        # Cache for static host->device array conversions.
+        self._gpu_array_cache = {}
 
     def simulated_annealing_modes_ho(
         self,
@@ -46,33 +51,84 @@ class Annealing:
         verbose: bool = False,
         backend: str = "cpu",
         gpu_emulation: bool = False,
+        gpu_chains: int = 1,
+        keep_on_device: bool = False,
+        correction_factor_q: NDArray | None = None,
+        elastic_ab_initio_correction: bool = False,
     ):
         """simulated annealing minimisation to target_function"""
+        # Clear stale results from prior invocations.
+        self.last_chain_results = None
         ######## READ BOND/ANGLE PARAMS #######
-        # Bonds
-        bond_atom1_idx_arr = bond_param_array[:, 0].astype(int)
-        bond_atom2_idx_arr = bond_param_array[:, 1].astype(int)
-        r0_arr = bond_param_array[:, 2]
-        k_arr = bond_param_array[:, 3]
-        nbonds = len(r0_arr)
-        # Angles
-        angle_atom1_idx_arr = angle_param_array[:, 0].astype(int)
-        angle_atom2_idx_arr = angle_param_array[:, 1].astype(int)
-        angle_atom3_idx_arr = angle_param_array[:, 2].astype(int)
-        theta0_arr = angle_param_array[:, 3]
-        k_theta_arr = angle_param_array[:, 4]
-        nangles = len(theta0_arr)
-        # Torsions
-        torsion_atom1_idx_arr = torsion_param_array[:, 0].astype(int)
-        torsion_atom2_idx_arr = torsion_param_array[:, 1].astype(int)
-        torsion_atom3_idx_arr = torsion_param_array[:, 2].astype(int)
-        torsion_atom4_idx_arr = torsion_param_array[:, 3].astype(int)
-        delta0_arr = torsion_param_array[:, 4]
-        k_delta_arr = torsion_param_array[:, 5]
-        ntorsions = len(delta0_arr)
+        # Cache derived arrays on self so their id()s stay stable across
+        # calls, allowing _as_backend_array to reuse GPU copies.
+        _param_key = (
+            id(bond_param_array), bond_param_array.shape,
+            id(angle_param_array), angle_param_array.shape,
+            id(torsion_param_array), torsion_param_array.shape,
+        )
+        if getattr(self, '_param_cache_key', None) == _param_key:
+            (
+                bond_atom1_idx_arr, bond_atom2_idx_arr, r0_arr, k_arr,
+                angle_atom1_idx_arr, angle_atom2_idx_arr, angle_atom3_idx_arr,
+                theta0_arr, k_theta_arr,
+                torsion_atom1_idx_arr, torsion_atom2_idx_arr,
+                torsion_atom3_idx_arr, torsion_atom4_idx_arr,
+                delta0_arr, k_delta_arr,
+            ) = self._param_arrays
+            nbonds, nangles, ntorsions = (
+                len(r0_arr), len(theta0_arr), len(delta0_arr),
+            )
+        else:
+            # Bonds
+            bond_atom1_idx_arr = bond_param_array[:, 0].astype(int)
+            bond_atom2_idx_arr = bond_param_array[:, 1].astype(int)
+            r0_arr = bond_param_array[:, 2]
+            k_arr = bond_param_array[:, 3]
+            nbonds = len(r0_arr)
+            # Angles
+            angle_atom1_idx_arr = angle_param_array[:, 0].astype(int)
+            angle_atom2_idx_arr = angle_param_array[:, 1].astype(int)
+            angle_atom3_idx_arr = angle_param_array[:, 2].astype(int)
+            theta0_arr = angle_param_array[:, 3]
+            k_theta_arr = angle_param_array[:, 4]
+            nangles = len(theta0_arr)
+            # Torsions
+            torsion_atom1_idx_arr = torsion_param_array[:, 0].astype(int)
+            torsion_atom2_idx_arr = torsion_param_array[:, 1].astype(int)
+            torsion_atom3_idx_arr = torsion_param_array[:, 2].astype(int)
+            torsion_atom4_idx_arr = torsion_param_array[:, 3].astype(int)
+            delta0_arr = torsion_param_array[:, 4]
+            k_delta_arr = torsion_param_array[:, 5]
+            ntorsions = len(delta0_arr)
+            self._param_cache_key = _param_key
+            self._param_arrays = (
+                bond_atom1_idx_arr, bond_atom2_idx_arr, r0_arr, k_arr,
+                angle_atom1_idx_arr, angle_atom2_idx_arr, angle_atom3_idx_arr,
+                theta0_arr, k_theta_arr,
+                torsion_atom1_idx_arr, torsion_atom2_idx_arr,
+                torsion_atom3_idx_arr, torsion_atom4_idx_arr,
+                delta0_arr, k_delta_arr,
+            )
         ##=#=#=# DEFINITIONS #=#=#=##
         natoms = starting_xyz.shape[0]  # number of atoms
         c_tuning = c_tuning_initial  # initialise C_tuning
+        gpu_chains = max(1, int(gpu_chains))
+
+        def _as_backend_array(xp, arr, dtype=None):
+            """Convert to backend array, reusing cached static transfers when possible."""
+            xp_ndarray = getattr(xp, "ndarray", None)
+            if xp_ndarray is not None and isinstance(arr, xp_ndarray):
+                if dtype is None:
+                    return arr
+                return arr.astype(dtype, copy=False)
+            key = (id(xp), id(arr), str(dtype), getattr(arr, "shape", None))
+            cached = self._gpu_array_cache.get(key)
+            if cached is not None and cached.shape == getattr(arr, "shape", None):
+                return cached
+            out = xp.asarray(arr, dtype=dtype)
+            self._gpu_array_cache[key] = out
+            return out
         # nmodes = displacements.shape[0]  # number of displacement vectors
         # nmode_indices = len(mode_indices)
         # print((nmodes, nmode_indices))
@@ -82,13 +138,43 @@ class Annealing:
         qmin, qmax, qlen = qvector[0], qvector[-1], len(qvector)
         tmin, tmax, tlen = th[0], th[-1], len(th)
         pmin, pmax, plen = ph[0], ph[-1], len(ph)
+        if correction_factor_q is None:
+            _cfq = np.ones(qlen, dtype=np.float64)
+        else:
+            _cfq = np.asarray(correction_factor_q, dtype=np.float64).reshape(-1)
+            if _cfq.size != qlen:
+                raise ValueError(
+                    f"correction_factor_q length ({_cfq.size}) must match qlen ({qlen})"
+                )
+        correction_factor_q = _cfq
+        elastic_abi = bool(elastic_ab_initio_correction)
+        if elastic_abi and ewald_mode:
+            raise RuntimeError(
+                "elastic_ab_initio_correction is only supported for isotropic q "
+                "(disable ewald_mode)"
+            )
         ##=#=#=# END DEFINITIONS #=#=#=#
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
 
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
-        # Pre-compute abs(target_function) to avoid repeated abs() calls in loop
-        abs_target_function = np.abs(target_function)
+        # Cache the shifted target_function and abs so the same numpy
+        # objects persist across calls → _as_backend_array cache hits.
+        _tf_key = (
+            id(target_function),
+            inelastic,
+            pcd_mode,
+            elastic_abi,
+            id(atomic_total),
+            id(compton),
+            id(reference_iam),
+            id(correction_factor_q),
+        )
+        _tf_cached = getattr(self, '_tf_cache_key', None) == _tf_key
+        if _tf_cached:
+            abs_target_function = self._abs_target_function
+        else:
+            abs_target_function = np.abs(target_function)
         ### define qx, qy, qz for Ewald mode (CPU path)
         if ewald_mode:
             r_grid, th_grid, ph_grid = np.meshgrid(qvector, th, ph, indexing="ij")
@@ -97,15 +183,30 @@ class Annealing:
             qy = r_grid * np.sin(th_grid) * np.sin(ph_grid)
             qz = r_grid * np.cos(th_grid)
         # Shift target function to remove constant IAM terms outside the SA loop
-        if inelastic:
-            iam_offset = atomic_total + compton
+        if _tf_cached:
+            target_function = self._target_function_modified
         else:
-            iam_offset = atomic_total
-        if pcd_mode:
-            pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
-            target_function = target_function - pcd_offset
-        else:
-            target_function = target_function - iam_offset
+            if elastic_abi:
+                if pcd_mode:
+                    pcd_offset = 100.0 * (
+                        correction_factor_q * atomic_total / reference_iam - 1.0
+                    )
+                    target_function = target_function - pcd_offset
+                else:
+                    target_function = target_function - correction_factor_q * atomic_total
+            else:
+                if inelastic:
+                    iam_offset = atomic_total + compton
+                else:
+                    iam_offset = atomic_total
+                if pcd_mode:
+                    pcd_offset = 100.0 * (iam_offset / reference_iam - 1.0)
+                    target_function = target_function - pcd_offset
+                else:
+                    target_function = target_function - iam_offset
+            self._tf_cache_key = _tf_key
+            self._abs_target_function = abs_target_function
+            self._target_function_modified = target_function
         ##=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=#=##
         # Ensure predicted_start has the right shape/type (avoid int sentinel inside njit)
         if isinstance(predicted_start, (int, float)) and predicted_start == 0:
@@ -222,19 +323,30 @@ class Annealing:
                     inv_qlen = 1.0 / qlen
                     sse = 0.0
                     for qi in range(qlen):
+                        cq = correction_factor_q[qi]
+                        # Ab-initio path: c = I_abi_total / I_elastic_IAM(ref); predict c × I_elastic.
+                        if elastic_abi:
+                            I_elastic = atomic_total[qi] + iam[qi]
+                            I_corr = cq * I_elastic
+                            PCD_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                            pcd_atom = 100.0 * (
+                                (cq * atomic_total[qi]) / reference_iam[qi] - 1.0
+                            )
+                        else:
+                            if inelastic:
+                                offset = atomic_total[qi] + compton[qi]
+                            else:
+                                offset = atomic_total[qi]
+                            I_tot = iam[qi] + offset
+                            I_corr = cq * I_tot
+                            PCD_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                            pcd_atom = 100.0 * (offset / reference_iam[qi] - 1.0)
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = 100.0 * (iam[qi] / reference_iam[qi])
+                        pred_mol = PCD_full - pcd_atom
                         diff = pred_mol - target_function[qi]
                         sse += diff * diff
-                        # For output, store the full PCD curve (incl. constant atomic/compton term)
-                        if inelastic:
-                            offset = atomic_total[qi] + compton[qi]
-                        else:
-                            offset = atomic_total[qi]
-                        predicted_function_[qi] = pred_mol + 100.0 * (
-                            offset / reference_iam[qi] - 1.0
-                        )
+                        predicted_function_[qi] = PCD_full
                     xray_contrib = sse * inv_qlen
                 else:
                     ### x-ray part of objective function
@@ -247,16 +359,30 @@ class Annealing:
                     inv_n = 1.0 / n
                     sse = 0.0
                     for qi in range(qlen):
+                        cq = correction_factor_q[qi]
                         # Objective compares *molecular-only* contribution because
                         # `target_function` was pre-shifted outside the SA loop.
-                        pred_mol = iam[qi]
-                        diff = pred_mol - target_function[qi]
-                        sse += (diff * diff) / abs_target_function[qi]
-                        # For output, store the full IAM curve (incl. constant atomic/compton term)
-                        if inelastic:
-                            predicted_function_[qi] = pred_mol + atomic_total[qi] + compton[qi]
+                        if elastic_abi:
+                            pred_mol = iam[qi]
+                            pred_mol_c = cq * pred_mol
+                            diff = pred_mol_c - target_function[qi]
+                            sse += (diff * diff) / abs_target_function[qi]
+                            predicted_function_[qi] = cq * (
+                                atomic_total[qi] + iam[qi]
+                            )
                         else:
-                            predicted_function_[qi] = pred_mol + atomic_total[qi]
+                            pred_mol = iam[qi]
+                            pred_mol_c = pred_mol * cq
+                            diff = pred_mol_c - target_function[qi]
+                            sse += (diff * diff) / abs_target_function[qi]
+                            if inelastic:
+                                predicted_function_[qi] = (
+                                    pred_mol + atomic_total[qi] + compton[qi]
+                                ) * cq
+                            else:
+                                predicted_function_[qi] = (
+                                    pred_mol + atomic_total[qi]
+                                ) * cq
                     xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
@@ -406,205 +532,288 @@ class Annealing:
 
         ### END run_annealing() function ###
 
-        def run_annealing_gpu(nsteps, xp):
-            def _to_scalar(value):
-                return float(to_numpy(value, xp))
-
-            # Backend arrays
-            xyz = xp.asarray(starting_xyz, dtype=xp.float64).copy()
+        def run_annealing_gpu_batched(nsteps, xp, n_chains):
+            """
+            Run multiple independent SA chains in parallel on GPU and
+            return the best chain outcome.
+            """
+            prep_start = default_timer()
+            # Backend arrays with chain dimension
+            xyz = xp.repeat(
+                xp.asarray(starting_xyz, dtype=xp.float64)[xp.newaxis, :, :],
+                n_chains,
+                axis=0,
+            )
             xyz_trial = xp.empty_like(xyz)
             xyz_best = xyz.copy()
-            predicted_best = xp.asarray(predicted_start, dtype=xp.float64).copy()
-            f_best, f_xray_best = f_start, f_xray_start
-            f = 1e9  # high initial value so 1st step will be accepted
-            c = 0
-            n_mode_indices = len(mode_indices)
-            mdisp = xp.asarray(displacements, dtype=xp.float64)
-            step_size_xp = xp.asarray(step_size_array, dtype=xp.float64)
-            qvector_xp = xp.asarray(qvector, dtype=xp.float64)
-            target_function_xp = xp.asarray(target_function, dtype=xp.float64)
-            reference_iam_xp = xp.asarray(reference_iam, dtype=xp.float64)
-            abs_target_function_xp = xp.asarray(abs_target_function, dtype=xp.float64)
-            atomic_total_xp = xp.asarray(atomic_total, dtype=xp.float64)
-            compton_xp = xp.asarray(compton, dtype=xp.float64)
-            pre_molecular_xp = xp.asarray(pre_molecular, dtype=xp.float64)
 
-            # Constraints arrays
-            bond_atom1_idx = bond_atom1_idx_arr
-            bond_atom2_idx = bond_atom2_idx_arr
-            angle_atom1_idx = angle_atom1_idx_arr
-            angle_atom2_idx = angle_atom2_idx_arr
-            angle_atom3_idx = angle_atom3_idx_arr
+            predicted_start_xp = xp.asarray(predicted_start, dtype=xp.float64)
+            if predicted_start_xp.ndim == 1:
+                predicted_best = xp.repeat(
+                    predicted_start_xp[xp.newaxis, :], n_chains, axis=0
+                )
+            elif predicted_start_xp.ndim == 2 and predicted_start_xp.shape[0] == n_chains:
+                predicted_best = predicted_start_xp.copy()
+            else:
+                predicted_best = xp.repeat(
+                    predicted_start_xp.reshape(1, -1), n_chains, axis=0
+                )
+
+            f_best = xp.full(n_chains, float(f_start), dtype=xp.float64)
+            f_xray_best = xp.full(n_chains, float(f_xray_start), dtype=xp.float64)
+            f = xp.full(n_chains, 1e9, dtype=xp.float64)
+            c = 0
+
+            n_mode_indices = len(mode_indices)
+            mdisp = _as_backend_array(xp, displacements, xp.float64)
+            step_size_xp = _as_backend_array(xp, step_size_array, xp.float64)
+            qvector_xp = _as_backend_array(xp, qvector, xp.float64)
+            correction_factor_xp = _as_backend_array(
+                xp, correction_factor_q, xp.float64
+            )
+            target_function_xp = _as_backend_array(xp, target_function, xp.float64)
+            reference_iam_xp = _as_backend_array(xp, reference_iam, xp.float64)
+            abs_target_function_xp = _as_backend_array(xp, abs_target_function, xp.float64)
+            atomic_total_xp = _as_backend_array(xp, atomic_total, xp.float64)
+            compton_xp = _as_backend_array(xp, compton, xp.float64)
+            pre_molecular_xp = _as_backend_array(xp, pre_molecular, xp.float64)
+
+            # Constraints arrays – keep on GPU for fancy indexing;
+            # torsion indices stay numpy for scalar loop access.
+            bond_atom1_idx = _as_backend_array(xp, bond_atom1_idx_arr, xp.int64)
+            bond_atom2_idx = _as_backend_array(xp, bond_atom2_idx_arr, xp.int64)
+            angle_atom1_idx = _as_backend_array(xp, angle_atom1_idx_arr, xp.int64)
+            angle_atom2_idx = _as_backend_array(xp, angle_atom2_idx_arr, xp.int64)
+            angle_atom3_idx = _as_backend_array(xp, angle_atom3_idx_arr, xp.int64)
             torsion_atom1_idx = torsion_atom1_idx_arr
             torsion_atom2_idx = torsion_atom2_idx_arr
             torsion_atom3_idx = torsion_atom3_idx_arr
             torsion_atom4_idx = torsion_atom4_idx_arr
-            r0_xp = xp.asarray(r0_arr, dtype=xp.float64)
-            k_xp = xp.asarray(k_arr, dtype=xp.float64)
-            theta0_xp = xp.asarray(theta0_arr, dtype=xp.float64)
-            k_theta_xp = xp.asarray(k_theta_arr, dtype=xp.float64)
-            delta0_xp = xp.asarray(delta0_arr, dtype=xp.float64)
-            k_delta_xp = xp.asarray(k_delta_arr, dtype=xp.float64)
-
-            total_bonding_contrib = 0.0
-            total_angular_contrib = 0.0
-            total_torsional_contrib = 0.0
-            total_xray_contrib = 0.0
+            r0_xp = _as_backend_array(xp, r0_arr, xp.float64)
+            k_xp = _as_backend_array(xp, k_arr, xp.float64)
+            theta0_xp = _as_backend_array(xp, theta0_arr, xp.float64)
+            k_theta_xp = _as_backend_array(xp, k_theta_arr, xp.float64)
+            delta0_xp = _as_backend_array(xp, delta0_arr, xp.float64)
+            k_delta_xp = _as_backend_array(xp, k_delta_arr, xp.float64)
 
             inv_nsteps = 1.0 / nsteps
             inv_qlen = 1.0 / qlen
             HALF = 0.5
 
+            # Batched path currently supports isotropic mode only.
             if ewald_mode:
-                r_grid, th_grid, ph_grid = xp.meshgrid(
-                    qvector_xp, xp.asarray(th), xp.asarray(ph), indexing="ij"
+                raise NotImplementedError(
+                    "gpu_chains > 1 is not implemented for ewald_mode yet."
                 )
-                qx = r_grid * xp.sin(th_grid) * xp.cos(ph_grid)
-                qy = r_grid * xp.sin(th_grid) * xp.sin(ph_grid)
-                qz = r_grid * xp.cos(th_grid)
 
+            # Pre-compute pair indices for vectorized IAM
+            pair_i_np, pair_j_np = np.triu_indices(natoms, k=1)
+            pair_i_xp = xp.asarray(pair_i_np)
+            pair_j_xp = xp.asarray(pair_j_np)
+
+            # Pre-extract mode data for vectorized displacement (single matmul)
+            mode_indices_xp = xp.asarray(np.asarray(mode_indices))
+            mode_disps_xp = mdisp[mode_indices_xp]
+            mode_disps_flat = mode_disps_xp.reshape(n_mode_indices, -1)
+            mode_steps_xp = step_size_xp[mode_indices_xp]
+
+            # Torsion indices on GPU for vectorized dihedral calc
+            if torsions_bool and ntorsions > 0:
+                torsion_a1_xp = _as_backend_array(xp, torsion_atom1_idx_arr, xp.int64)
+                torsion_a2_xp = _as_backend_array(xp, torsion_atom2_idx_arr, xp.int64)
+                torsion_a3_xp = _as_backend_array(xp, torsion_atom3_idx_arr, xp.int64)
+                torsion_a4_xp = _as_backend_array(xp, torsion_atom4_idx_arr, xp.int64)
+
+            # GPU accumulators – no per-step GPU→CPU sync
+            c_xp = xp.zeros(n_chains, dtype=xp.int64)
+            total_bonding_xp = xp.zeros(n_chains, dtype=xp.float64)
+            total_angular_xp = xp.zeros(n_chains, dtype=xp.float64)
+            total_torsional_xp = xp.zeros(n_chains, dtype=xp.float64)
+            total_xray_xp = xp.zeros(n_chains, dtype=xp.float64)
+
+            if pcd_mode:
+                if elastic_ab_initio_correction:
+                    _cf_grid = correction_factor_xp[xp.newaxis, :]
+                    _pcd_offset_correction = 100.0 * (
+                        _cf_grid * atomic_total_xp[xp.newaxis, :]
+                        / reference_iam_xp[xp.newaxis, :]
+                        - 1.0
+                    )
+                else:
+                    if inelastic:
+                        _pcd_offset = atomic_total_xp + compton_xp
+                    else:
+                        _pcd_offset = atomic_total_xp
+                    _pcd_offset_correction = 100.0 * (
+                        _pcd_offset[xp.newaxis, :]
+                        / reference_iam_xp[xp.newaxis, :]
+                        - 1.0
+                    )
+            else:
+                if not elastic_ab_initio_correction:
+                    if inelastic:
+                        _iam_offset = (
+                            atomic_total_xp[xp.newaxis, :]
+                            + compton_xp[xp.newaxis, :]
+                        )
+                    else:
+                        _iam_offset = atomic_total_xp[xp.newaxis, :]
+
+            prep_time_s = default_timer() - prep_start
+            loop_start = default_timer()
             for i in range(nsteps):
                 tmp = 1.0 - i * inv_nsteps
                 temp = starting_temp * tmp
 
-                # Displace xyz along displacement vectors
-                summed_displacement = xp.zeros_like(xyz)
-                for mi in range(n_mode_indices):
-                    n = mode_indices[mi]
-                    scale = step_size_xp[n] * tmp * (2.0 * xp.random.random() - 1.0)
-                    summed_displacement += mdisp[n] * scale
+                # Vectorised displacement (one matmul replaces mode loop)
+                rand = 2.0 * xp.random.random((n_chains, n_mode_indices)) - 1.0
+                scales = mode_steps_xp[xp.newaxis, :] * tmp * rand
+                summed_displacement = (scales @ mode_disps_flat).reshape(
+                    n_chains, natoms, 3
+                )
                 xyz_trial = xyz + summed_displacement
 
-                if temp > _to_scalar(xp.random.random()):
-                    c += 1
-                    xyz, xyz_trial = xyz_trial, xyz
-                    continue
+                # Temperature acceptance – no GPU→CPU sync
+                temp_accept = temp > xp.random.random(n_chains)
+                xyz = xp.where(
+                    temp_accept[:, xp.newaxis, xp.newaxis], xyz_trial, xyz
+                )
+                c_xp += temp_accept.astype(xp.int64)
 
-                # IAM calculation
-                if ewald_mode:
-                    molecular = xp.zeros((qlen, tlen, plen), dtype=xp.float64)
-                    k = 0
-                    for n in range(natoms - 1):
-                        for m in range(n + 1, natoms):
-                            fnm = pre_molecular_xp[k]
-                            k += 1
-                            xnm = xyz[n, 0] - xyz[m, 0]
-                            ynm = xyz[n, 1] - xyz[m, 1]
-                            znm = xyz[n, 2] - xyz[m, 2]
-                            molecular += 2 * fnm * xp.cos(
-                                (qx * xnm + qy * ynm + qz * znm)
-                            )
-                    iam = molecular
-                else:
-                    molecular = xp.zeros(qlen, dtype=xp.float64)
-                    k = 0
-                    for ii in range(natoms):
-                        for jj in range(ii + 1, natoms):
-                            dx = xyz_trial[ii, 0] - xyz_trial[jj, 0]
-                            dy = xyz_trial[ii, 1] - xyz_trial[jj, 1]
-                            dz = xyz_trial[ii, 2] - xyz_trial[jj, 2]
-                            r = xp.sqrt(dx * dx + dy * dy + dz * dz)
-                            qd = qvector_xp * r
-                            molecular += 2.0 * pre_molecular_xp[k] * xp.sin(qd) / qd
-                            k += 1
-                    iam = molecular
+                # Vectorised IAM (all atom pairs in one batch)
+                dx = xyz_trial[:, pair_i_xp, 0] - xyz_trial[:, pair_j_xp, 0]
+                dy = xyz_trial[:, pair_i_xp, 1] - xyz_trial[:, pair_j_xp, 1]
+                dz = xyz_trial[:, pair_i_xp, 2] - xyz_trial[:, pair_j_xp, 2]
+                r_pairs = xp.sqrt(dx * dx + dy * dy + dz * dz)
+                qd = r_pairs[:, :, xp.newaxis] * qvector_xp[xp.newaxis, xp.newaxis, :]
+                iam = xp.sum(
+                    2.0 * pre_molecular_xp[xp.newaxis, :, :] * xp.sin(qd) / qd,
+                    axis=1,
+                )
 
                 # Objective function (PCD or IAM)
                 if pcd_mode:
-                    pred_mol = 100.0 * (iam / reference_iam_xp)
-                    diff = pred_mol - target_function_xp
-                    sse = xp.sum(diff * diff)
-                    if inelastic:
-                        offset = atomic_total_xp + compton_xp
+                    if elastic_ab_initio_correction:
+                        I_elastic = iam + atomic_total_xp[xp.newaxis, :]
+                        I_corr = I_elastic * correction_factor_xp[xp.newaxis, :]
                     else:
-                        offset = atomic_total_xp
-                    predicted_function_ = pred_mol + 100.0 * (
-                        offset / reference_iam_xp - 1.0
+                        I_tot = iam + _pcd_offset[xp.newaxis, :]
+                        I_corr = I_tot * correction_factor_xp[xp.newaxis, :]
+                    PCD_full = 100.0 * (
+                        I_corr / reference_iam_xp[xp.newaxis, :] - 1.0
                     )
-                    xray_contrib = _to_scalar(sse) * inv_qlen
+                    pred_mol = PCD_full - _pcd_offset_correction
+                    diff = pred_mol - target_function_xp[xp.newaxis, :]
+                    sse = xp.sum(diff * diff, axis=1)
+                    predicted_function_ = PCD_full
+                    xray_contrib = sse * inv_qlen
                 else:
-                    if ewald_mode:
-                        n = qlen * tlen * plen
+                    pred_mol_c = iam * correction_factor_xp[xp.newaxis, :]
+                    diff = pred_mol_c - target_function_xp[xp.newaxis, :]
+                    sse = xp.sum(
+                        (diff * diff) / abs_target_function_xp[xp.newaxis, :], axis=1
+                    )
+                    if elastic_ab_initio_correction:
+                        predicted_function_ = (
+                            iam + atomic_total_xp[xp.newaxis, :]
+                        ) * correction_factor_xp[xp.newaxis, :]
                     else:
-                        n = qlen
-                    inv_n = 1.0 / n
-                    diff = iam - target_function_xp
-                    sse = xp.sum((diff * diff) / abs_target_function_xp)
-                    if inelastic:
-                        predicted_function_ = iam + atomic_total_xp + compton_xp
-                    else:
-                        predicted_function_ = iam + atomic_total_xp
-                    xray_contrib = _to_scalar(sse) * inv_n
+                        predicted_function_ = (
+                            iam + _iam_offset
+                        ) * correction_factor_xp[xp.newaxis, :]
+                    xray_contrib = sse * inv_qlen
 
-                bonding_contrib = 0.0
+                bonding_contrib = xp.zeros(n_chains, dtype=xp.float64)
                 if bonds_bool and nbonds > 0:
-                    vec = xyz_trial[bond_atom1_idx] - xyz_trial[bond_atom2_idx]
-                    r = xp.sqrt(xp.sum(vec * vec, axis=1))
-                    bonding_contrib = _to_scalar(
-                        xp.sum(k_xp * HALF * (r - r0_xp) ** 2)
+                    vec = (
+                        xyz_trial[:, bond_atom1_idx, :]
+                        - xyz_trial[:, bond_atom2_idx, :]
+                    )
+                    r_b = xp.sqrt(xp.sum(vec * vec, axis=2))
+                    bonding_contrib = xp.sum(
+                        k_xp[xp.newaxis, :] * HALF * (r_b - r0_xp[xp.newaxis, :]) ** 2,
+                        axis=1,
                     )
 
-                angular_contrib = 0.0
+                angular_contrib = xp.zeros(n_chains, dtype=xp.float64)
                 if angles_bool and nangles > 0:
-                    ba = xyz_trial[angle_atom1_idx] - xyz_trial[angle_atom2_idx]
-                    bc = xyz_trial[angle_atom3_idx] - xyz_trial[angle_atom2_idx]
-                    norm_ba = xp.sqrt(xp.sum(ba * ba, axis=1))
-                    norm_bc = xp.sqrt(xp.sum(bc * bc, axis=1))
-                    cos_theta = xp.sum(ba * bc, axis=1) / (norm_ba * norm_bc)
+                    ba = (
+                        xyz_trial[:, angle_atom1_idx, :]
+                        - xyz_trial[:, angle_atom2_idx, :]
+                    )
+                    bc = (
+                        xyz_trial[:, angle_atom3_idx, :]
+                        - xyz_trial[:, angle_atom2_idx, :]
+                    )
+                    norm_ba = xp.sqrt(xp.sum(ba * ba, axis=2))
+                    norm_bc = xp.sqrt(xp.sum(bc * bc, axis=2))
+                    cos_theta = xp.sum(ba * bc, axis=2) / (norm_ba * norm_bc)
                     cos_theta = xp.clip(cos_theta, -1.0, 1.0)
                     theta = xp.arccos(cos_theta)
-                    angular_contrib = _to_scalar(
-                        xp.sum(k_theta_xp * HALF * (theta - theta0_xp) ** 2)
+                    angular_contrib = xp.sum(
+                        k_theta_xp[xp.newaxis, :]
+                        * HALF
+                        * (theta - theta0_xp[xp.newaxis, :]) ** 2,
+                        axis=1,
                     )
 
-                torsion_contrib = 0.0
+                # Vectorised torsion (all dihedrals in one batch)
+                torsion_contrib = xp.zeros(n_chains, dtype=xp.float64)
                 if torsions_bool and ntorsions > 0:
-                    for i_tors in range(ntorsions):
-                        idx1 = torsion_atom1_idx[i_tors]
-                        idx2 = torsion_atom2_idx[i_tors]
-                        idx3 = torsion_atom3_idx[i_tors]
-                        idx4 = torsion_atom4_idx[i_tors]
-                        p0 = xyz_trial[idx1, :]
-                        p1 = xyz_trial[idx2, :]
-                        p2 = xyz_trial[idx3, :]
-                        p3 = xyz_trial[idx4, :]
-
-                        b0 = -1.0 * (p1 - p0)
-                        b1 = p2 - p1
-                        b2 = p3 - p2
-
-                        b1_norm = xp.sqrt(xp.sum(b1 * b1))
-                        b1 = b1 / b1_norm
-
-                        v = b0 - xp.dot(b0, b1) * b1
-                        w = b2 - xp.dot(b2, b1) * b1
-
-                        x = xp.dot(v, w)
-                        y = xp.dot(xp.cross(b1, v), w)
-                        torsion = xp.arctan2(y, x)
-
-                        torsion_contrib += _to_scalar(
-                            k_delta_xp[i_tors]
-                            * (1 + xp.cos(torsion - delta0_xp[i_tors]))
-                        )
+                    t_p0 = xyz_trial[:, torsion_a1_xp, :]
+                    t_p1 = xyz_trial[:, torsion_a2_xp, :]
+                    t_p2 = xyz_trial[:, torsion_a3_xp, :]
+                    t_p3 = xyz_trial[:, torsion_a4_xp, :]
+                    b0 = t_p0 - t_p1
+                    b1 = t_p2 - t_p1
+                    b2 = t_p3 - t_p2
+                    b1_norm = xp.sqrt(xp.sum(b1 * b1, axis=2, keepdims=True))
+                    b1 = b1 / b1_norm
+                    v = b0 - xp.sum(b0 * b1, axis=2, keepdims=True) * b1
+                    w = b2 - xp.sum(b2 * b1, axis=2, keepdims=True) * b1
+                    x_t = xp.sum(v * w, axis=2)
+                    y_t = xp.sum(xp.cross(b1, v) * w, axis=2)
+                    torsion_angles = xp.arctan2(y_t, x_t)
+                    torsion_contrib = xp.sum(
+                        k_delta_xp[xp.newaxis, :]
+                        * (1 + xp.cos(torsion_angles - delta0_xp[xp.newaxis, :])),
+                        axis=1,
+                    )
 
                 f_ = xray_contrib + c_tuning * (
                     bonding_contrib + angular_contrib + torsion_contrib
                 )
+                improve = xp.logical_and(~temp_accept, f_ < f * 0.999)
+                improve_f = improve.astype(xp.float64)
+                c_xp += improve.astype(xp.int64)
+                f = xp.where(improve, f_, f)
+                xyz = xp.where(
+                    improve[:, xp.newaxis, xp.newaxis], xyz_trial, xyz
+                )
 
-                if f_ < f * 0.999:
-                    c += 1
-                    f = f_
-                    xyz, xyz_trial = xyz_trial, xyz
-                    if f < f_best:
-                        f_best = f
-                        xyz_best[:, :] = xyz[:, :]
-                        predicted_best = predicted_function_.copy()
-                        f_xray_best = xray_contrib
-                    total_bonding_contrib += c_tuning * bonding_contrib
-                    total_angular_contrib += c_tuning * angular_contrib
-                    total_torsional_contrib += c_tuning * torsion_contrib
-                    total_xray_contrib += xray_contrib
+                is_new_best = xp.logical_and(improve, f < f_best)
+                f_best = xp.where(is_new_best, f, f_best)
+                f_xray_best = xp.where(is_new_best, xray_contrib, f_xray_best)
+                xyz_best = xp.where(
+                    is_new_best[:, xp.newaxis, xp.newaxis], xyz, xyz_best
+                )
+                predicted_best = xp.where(
+                    is_new_best[:, xp.newaxis],
+                    predicted_function_,
+                    predicted_best,
+                )
+
+                total_bonding_xp += c_tuning * bonding_contrib * improve_f
+                total_angular_xp += c_tuning * angular_contrib * improve_f
+                total_torsional_xp += c_tuning * torsion_contrib * improve_f
+                total_xray_xp += xray_contrib * improve_f
+
+            # Reduce GPU accumulators to host scalars (single sync)
+            c = int(to_numpy(xp.sum(c_xp), xp))
+            total_bonding_contrib = float(to_numpy(xp.sum(total_bonding_xp), xp))
+            total_angular_contrib = float(to_numpy(xp.sum(total_angular_xp), xp))
+            total_torsional_contrib = float(to_numpy(xp.sum(total_torsional_xp), xp))
+            total_xray_contrib = float(to_numpy(xp.sum(total_xray_xp), xp))
 
             priors_contrib = (
                 total_bonding_contrib + total_angular_contrib + total_torsional_contrib
@@ -629,17 +838,31 @@ class Annealing:
                     c_tuning_adjusted,
                 ) = (0, 0, 0, 0, 0)
 
+            best_chain_idx = int(to_numpy(xp.argmin(f_best), xp))
+            f_best_scalar = float(to_numpy(f_best[best_chain_idx], xp))
+            f_xray_best_scalar = float(to_numpy(f_xray_best[best_chain_idx], xp))
+            predicted_best_chain = predicted_best[best_chain_idx]
+            xyz_best_chain = xyz_best[best_chain_idx]
+            loop_time_s = default_timer() - loop_start
+
             return (
-                f_best,
-                f_xray_best,
-                predicted_best,
-                xyz_best,
+                f_best_scalar,
+                f_xray_best_scalar,
+                predicted_best_chain,
+                xyz_best_chain,
                 xray_ratio,
                 bonding_ratio,
                 angular_ratio,
                 torsional_ratio,
                 c,
                 c_tuning_adjusted,
+                f_best,
+                f_xray_best,
+                predicted_best,
+                xyz_best,
+                best_chain_idx,
+                prep_time_s,
+                loop_time_s,
             )
 
         ### Call the run_annealing() function...
@@ -660,6 +883,13 @@ class Annealing:
             ) = run_annealing(nsteps)
         else:
             backend_info = get_backend(backend_name, emulate=gpu_emulation)
+            gpu_d2h_time_s = 0.0
+            if gpu_chains > 1:
+                print(
+                    f"[GPU] Multi-chain mode enabled: launching {gpu_chains} chains "
+                    f"(nsteps={nsteps}, backend={backend_name})"
+                )
+                
             (
                 f_best,
                 f_xray_best,
@@ -671,9 +901,49 @@ class Annealing:
                 torsional_ratio,
                 c,
                 c_tuning_adjusted,
-            ) = run_annealing_gpu(nsteps, backend_info.xp)
-            predicted_best = to_numpy(predicted_best, backend_info.xp)
-            xyz_best = to_numpy(xyz_best, backend_info.xp)
+                f_best_all,
+                f_xray_best_all,
+                predicted_best_all,
+                xyz_best_all,
+                best_chain_idx,
+                prep_time_s,
+                loop_time_s,
+            ) = run_annealing_gpu_batched(nsteps, backend_info.xp, gpu_chains)
+            if gpu_chains > 1:
+                if keep_on_device:
+                    self.last_chain_results = {
+                        "f_best_all": f_best_all,
+                        "f_xray_best_all": f_xray_best_all,
+                        "predicted_best_all": predicted_best_all,
+                        "xyz_best_all": xyz_best_all,
+                        "best_chain_idx": int(best_chain_idx),
+                    }
+                else:
+                    self.last_chain_results = {
+                        "f_best_all": to_numpy(f_best_all, backend_info.xp),
+                        "f_xray_best_all": to_numpy(f_xray_best_all, backend_info.xp),
+                        "predicted_best_all": to_numpy(
+                            predicted_best_all, backend_info.xp
+                        ),
+                        "xyz_best_all": to_numpy(xyz_best_all, backend_info.xp),
+                        "best_chain_idx": int(best_chain_idx),
+                    }
+                print(f"[GPU] All {gpu_chains} chains finished.")
+            if not keep_on_device:
+                d2h_start = default_timer()
+                predicted_best = to_numpy(predicted_best, backend_info.xp)
+                xyz_best = to_numpy(xyz_best, backend_info.xp)
+                gpu_d2h_time_s = default_timer() - d2h_start
+            gpu_total_time_s = float(default_timer() - start)
+            print(
+                "[GPU-TIMING] prep(H2D+init): "
+                f"{prep_time_s:6.3f}s | compute(loop): {loop_time_s:6.3f}s | "
+                f"copy-back(D2H): {gpu_d2h_time_s:6.3f}s | total: {gpu_total_time_s:6.3f}s"
+            )
+            if keep_on_device:
+                print(
+                    "[GPU-TIMING] D2H copy deferred (persistent GPU mode keeps arrays on device)."
+                )
         if verbose:
             print("run_annealing() time: %3.2f s" % float(default_timer() - start))
             print("xray contrib ratio: %f" % xray_ratio)

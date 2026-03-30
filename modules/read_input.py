@@ -58,6 +58,10 @@ class Input_to_params:
             ref_dat = str(data["files"]["reference_dat_file"])
             if ref_dat == "":
                 data["files"]["reference_dat_file"] = None
+        if "files" in data and "ab_initio_scattering_file" in data["files"]:
+            abi = str(data["files"]["ab_initio_scattering_file"])
+            if abi == "":
+                data["files"]["ab_initio_scattering_file"] = None
         
         ### Parameters
         # mode
@@ -111,6 +115,9 @@ class Input_to_params:
         self.gpu_emulation_bool = bool(
             data.get("options", {}).get("gpu_emulation_bool", False)
         )
+        self.gpu_chains = int(
+            data.get("options", {}).get("gpu_chains", 1)
+        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")
@@ -131,6 +138,15 @@ class Input_to_params:
             print(f"  Suggestion: Set gpu_backend = 'cpu' or 'cuda' in [options]")
             print(f"{'='*60}\n")
             sys.exit(1)
+        if self.gpu_chains < 1:
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid gpu_chains value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.gpu_chains}")
+            print(f"  Allowed values: integer >= 1")
+            print(f"  Suggestion: Set gpu_chains = 1 (or larger) in [options]")
+            print(f"{'='*60}\n")
+            sys.exit(1)
         # sampling options
         self.sampling_bool = bool(data["sampling"]["sampling_bool"])
         self.boltzmann_temperature = float(data["sampling"]["boltzmann_temperature"])
@@ -147,6 +163,26 @@ class Input_to_params:
                 self.reference_dat_file = None
         else:
             self.reference_dat_file = None
+        if "ab_initio_scattering_file" in data["files"]:
+            self.ab_initio_scattering_file = str(data["files"]["ab_initio_scattering_file"])
+            if self.ab_initio_scattering_file == "":
+                self.ab_initio_scattering_file = None
+        else:
+            self.ab_initio_scattering_file = None
+        self.ab_initio_correction_mode = str(
+            data.get("files", {}).get("ab_initio_correction_mode", "elastic")
+        ).lower()
+        if self.ab_initio_correction_mode not in ("elastic", "total"):
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid ab_initio_correction_mode value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.ab_initio_correction_mode!r}")
+            print(f"  Allowed values: 'elastic' or 'total'")
+            print(
+                f"  Suggestion: Set ab_initio_correction_mode = 'elastic' or 'total' in [files]"
+            )
+            print(f"{'='*60}\n")
+            sys.exit(1)
         self.target_file = str(data["files"]["target_file"])
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])

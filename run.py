@@ -49,6 +49,16 @@ def create_parser():
                             help='Reference XYZ file')
     files_group.add_argument('--reference-dat-file', type=str, dest='files.reference_dat_file',
                             help='Reference DAT file for PCD mode (optional, overrides reference_xyz_file calculation)')
+    files_group.add_argument('--ab-initio-scattering-file', type=str,
+                            dest='files.ab_initio_scattering_file',
+                            help='Optional DAT: col1=q, col2=ab initio I(q) at reference_xyz; correction = I/IAM_ref(q) on that grid, interpolated to qvector')
+    files_group.add_argument(
+        '--ab-initio-correction-mode',
+        type=str,
+        dest='files.ab_initio_correction_mode',
+        choices=['elastic', 'total'],
+        help='With ab-initio file: elastic = c×I_elastic IAM; total = c×full IAM (see input.toml)',
+    )
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
     
@@ -70,6 +80,9 @@ def create_parser():
     options_group.add_argument('--gpu-emulation', action='store_true',
                               dest='options.gpu_emulation_bool',
                               help='Run CUDA backend using CPU emulation')
+    options_group.add_argument('--gpu-chains', type=int,
+                              dest='options.gpu_chains',
+                              help='Number of independent GPU chains to run in parallel')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')

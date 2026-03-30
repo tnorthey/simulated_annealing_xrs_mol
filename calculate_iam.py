@@ -5,13 +5,14 @@ Standalone script to calculate IAM scattering signal from XYZ file(s).
 This script reads an XYZ file (or XYZ trajectory) and calculates the IAM
 (Independent Atom Model) scattering signal. It supports:
 - Single XYZ files or XYZ trajectories
-- PCD mode (percentage difference from reference structure)
+- PCD mode (percentage difference from reference XYZ or reference DAT intensity)
 - Inelastic scattering (Compton scattering)
 - Ewald sphere mode (3D scattering)
 
 Usage:
     python3 calculate_iam.py input.xyz output.dat
     python3 calculate_iam.py input.xyz output.dat --reference reference.xyz --pcd
+    python3 calculate_iam.py input.xyz output.dat --elastic --pcd --reference ref.xyz --reference-dat ref_I.dat --ab-initio-scattering ab_initio.dat [--ab-initio-correction-mode elastic|total]
     python3 calculate_iam.py input.xyz output.dat --ewald
     python3 calculate_iam.py input.xyz output.dat --elastic
 """
@@ -24,6 +25,7 @@ import sys
 # Import modules
 import modules.mol as mol
 import modules.x as xray
+from modules.wrap import _read_scattering_dat, _safe_ab_initio_correction_ratio
 
 
 def read_xyz_trajectory(filename):
@@ -153,6 +155,21 @@ def main():
     # PCD mode
     parser.add_argument('--reference', type=str, default=None,
                        help='Reference XYZ file for PCD calculation')
+    parser.add_argument('--reference-dat', type=str, default=None,
+                       dest='reference_dat',
+                       help='Reference DAT (q, I_ref) for PCD denominator. With --ab-initio-scattering and --pcd, required: PCD = 100*(I_corr/I_ref-1) with I_corr=c×(atomic+molecular).')
+    parser.add_argument('--ab-initio-scattering', type=str, default=None,
+                       dest='ab_initio_scattering',
+                       help='DAT with col1=q, col2=ab initio total I(q) at --reference (requires --reference). With --pcd, also pass --reference-dat for the PCD baseline I_ref(q).')
+    parser.add_argument(
+        '--ab-initio-correction-mode',
+        type=str,
+        choices=['elastic', 'total'],
+        default='elastic',
+        dest='ab_initio_correction_mode',
+        help='With --ab-initio-scattering: elastic => c=I_abi/I_elastic_IAM(ref), output c×(atomic+molecular); '
+             'total => c=I_abi/I_total_IAM(ref), output c×full IAM',
+    )
     parser.add_argument('--pcd', action='store_true',
                        help='Calculate PCD (percentage difference) instead of IAM')
     
@@ -194,8 +211,31 @@ def main():
     args = parser.parse_args()
     
     # Validate arguments
-    if args.pcd and args.reference is None:
-        parser.error("--pcd requires --reference to be specified")
+    if args.pcd:
+        if args.ab_initio_scattering:
+            if not args.reference:
+                parser.error(
+                    "--ab-initio-scattering with --pcd requires --reference REF.xyz "
+                    "(for c(q) = I_ab_initio / I_elastic_IAM(ref))"
+                )
+            if not args.reference_dat:
+                parser.error(
+                    "--ab-initio-scattering with --pcd requires --reference-dat REF.dat "
+                    "(PCD compares c(q)×I_elastic to this I_ref(q))"
+                )
+        else:
+            has_xyz = args.reference is not None
+            has_dat = args.reference_dat is not None
+            if has_xyz == has_dat:
+                parser.error("--pcd requires exactly one of --reference or --reference-dat")
+    
+    if args.ewald and args.ab_initio_scattering:
+        parser.error(
+            "ab initio scattering correction is only supported for isotropic (non-Ewald) q; "
+            "omit --ewald or omit --ab-initio-scattering"
+        )
+    if args.ab_initio_scattering and not args.reference:
+        parser.error("--ab-initio-scattering requires --reference REF.xyz")
     
     if args.ewald and (args.tmin >= args.tmax or args.pmin >= args.pmax):
         parser.error("For Ewald mode: tmin < tmax and pmin < pmax required")
@@ -254,32 +294,136 @@ def main():
             print("Warning: Compton data file not found, continuing without inelastic scattering")
             args.inelastic = False
     
-    # Calculate reference IAM if PCD mode
-    reference_iam = None
-    if args.pcd:
-        print(f"Reading reference structure from {args.reference}...")
+    # q-dependent correction factors (ones if not requested)
+    if args.ab_initio_scattering:
+        print(f"Computing correction factor from ab initio scattering: {args.ab_initio_scattering}...")
+        if not os.path.exists(args.ab_initio_scattering):
+            print(f"Error: File not found: {args.ab_initio_scattering}")
+            sys.exit(1)
+        q_abi, I_abi, abi_has_q = _read_scattering_dat(args.ab_initio_scattering)
+        if not abi_has_q:
+            print(
+                "Error: ab initio file must have two columns (q and intensity)."
+            )
+            sys.exit(1)
         if not os.path.exists(args.reference):
             print(f"Error: Reference file not found: {args.reference}")
             sys.exit(1)
-        
         ref_structures = read_xyz_trajectory(args.reference)
-        if len(ref_structures) > 1:
-            print("Warning: Reference file contains multiple structures, using first one")
         _, _, ref_atomlist, ref_xyz = ref_structures[0]
-        
-        # Check atom types match
         if not np.array_equal(ref_atomlist, atomlist):
-            print("Error: Reference structure has different atom types")
+            print("Error: --reference structure has different atom types than input")
             sys.exit(1)
-        
         ref_atomic_numbers = [m.periodic_table(symbol) for symbol in ref_atomlist]
-        print("Calculating reference IAM signal...")
-        reference_iam, _, _, _ = calculate_iam_for_structure(
-            ref_xyz, ref_atomic_numbers, qvector, x,
-            ion=args.ion,
-            inelastic=args.inelastic, ewald_mode=args.ewald,
-            th=th, ph=ph, compton_array=compton_array
-        )
+        out_dir = os.path.dirname(os.path.abspath(args.output_dat))
+        if not out_dir:
+            out_dir = os.getcwd()
+        if args.ab_initio_correction_mode == "elastic":
+            iam_ref_abi, _, _, _ = calculate_iam_for_structure(
+                ref_xyz, ref_atomic_numbers, q_abi, x,
+                ion=args.ion,
+                inelastic=False, ewald_mode=False,
+                th=None, ph=None, compton_array=None,
+            )
+            ref_iam_path = os.path.join(out_dir, "reference_iam_scattering.dat")
+            np.savetxt(ref_iam_path, np.column_stack((q_abi, iam_ref_abi)))
+            print(
+                f"Wrote elastic IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                "(denominator for c = I_ab_initio_total / I_elastic_IAM)"
+            )
+        else:
+            compton_abi = None
+            if args.inelastic:
+                compton_abi = x.compton_spline(atomic_numbers, q_abi)
+            iam_ref_abi, _, _, _ = calculate_iam_for_structure(
+                ref_xyz, ref_atomic_numbers, q_abi, x,
+                ion=args.ion,
+                inelastic=args.inelastic, ewald_mode=False,
+                th=None, ph=None, compton_array=compton_abi,
+            )
+            ref_iam_path = os.path.join(out_dir, "reference_iam_total_scattering.dat")
+            np.savetxt(ref_iam_path, np.column_stack((q_abi, iam_ref_abi)))
+            print(
+                f"Wrote total IAM(ref) on ab initio q-grid to {ref_iam_path} "
+                "(denominator for c = I_ab_initio_total / I_total_IAM)"
+            )
+        corr_abi = _safe_ab_initio_correction_ratio(I_abi, iam_ref_abi)
+        if q_abi.size != qvector.size or not np.allclose(q_abi, qvector):
+            correction_factor_q = np.interp(
+                qvector, q_abi, corr_abi, left=corr_abi[0], right=corr_abi[-1]
+            )
+            print(
+                f"Interpolated ab-initio correction ratio from {len(q_abi)} points "
+                f"to {len(qvector)} q-points"
+            )
+        else:
+            correction_factor_q = np.asarray(corr_abi, dtype=np.float64)
+            print(f"Ab initio q-grid matches configured qvector ({len(q_abi)} points)")
+    else:
+        correction_factor_q = np.ones(qvector.size, dtype=np.float64)
+    
+    # Calculate reference IAM if PCD mode
+    reference_iam = None
+    if args.pcd:
+        if args.reference_dat:
+            if args.ab_initio_scattering:
+                _cmp = (
+                    "c(q)×I_elastic"
+                    if args.ab_initio_correction_mode == "elastic"
+                    else "c(q)×I_total"
+                )
+                print(
+                    f"Loading PCD baseline I_ref(q) from DAT (compared to {_cmp}): "
+                    f"{args.reference_dat}"
+                )
+            else:
+                print(f"Loading reference IAM from DAT file: {args.reference_dat}")
+            if not os.path.exists(args.reference_dat):
+                print(f"Error: Reference DAT file not found: {args.reference_dat}")
+                sys.exit(1)
+            ref_q, ref_iam, ref_has_explicit_q = _read_scattering_dat(args.reference_dat)
+            if not ref_has_explicit_q:
+                if ref_iam.size != qvector.size:
+                    print(
+                        f"Error: Single-column reference DAT has {ref_iam.size} points "
+                        f"but qvector has {qvector.size} points. They must match."
+                    )
+                    sys.exit(1)
+                reference_iam = ref_iam
+            elif ref_q.size != qvector.size or not np.allclose(ref_q, qvector):
+                reference_iam = np.interp(
+                    qvector, ref_q, ref_iam, left=ref_iam[0], right=ref_iam[-1]
+                )
+                print(
+                    f"Interpolated reference IAM from {len(ref_q)} points "
+                    f"to {len(qvector)} points"
+                )
+            else:
+                reference_iam = ref_iam
+                print(f"Reference DAT q-grid matches qvector ({len(ref_q)} points)")
+        else:
+            print(f"Reading reference structure from {args.reference}...")
+            if not os.path.exists(args.reference):
+                print(f"Error: Reference file not found: {args.reference}")
+                sys.exit(1)
+            
+            ref_structures = read_xyz_trajectory(args.reference)
+            if len(ref_structures) > 1:
+                print("Warning: Reference file contains multiple structures, using first one")
+            _, _, ref_atomlist, ref_xyz = ref_structures[0]
+            
+            if not np.array_equal(ref_atomlist, atomlist):
+                print("Error: Reference structure has different atom types")
+                sys.exit(1)
+            
+            ref_atomic_numbers = [m.periodic_table(symbol) for symbol in ref_atomlist]
+            print("Calculating reference IAM signal...")
+            reference_iam, _, _, _ = calculate_iam_for_structure(
+                ref_xyz, ref_atomic_numbers, qvector, x,
+                ion=args.ion,
+                inelastic=args.inelastic, ewald_mode=args.ewald,
+                th=th, ph=ph, compton_array=compton_array
+            )
     
     # Calculate IAM for all structures
     print("Calculating IAM signals...")
@@ -296,7 +440,14 @@ def main():
             th=th, ph=ph, compton_array=compton_array
         )
         
-        # Apply PCD if requested
+        if args.ab_initio_scattering:
+            if args.ab_initio_correction_mode == "elastic":
+                iam = correction_factor_q * (atomic + molecular)
+            else:
+                iam = correction_factor_q * iam
+        else:
+            iam = iam * correction_factor_q
+        
         if args.pcd:
             iam = calculate_pcd(iam, reference_iam)
         
@@ -306,10 +457,11 @@ def main():
     print(f"Writing output to {args.output_dat}...")
     
     if len(all_iam_signals) == 1:
-        # Single structure: write q, IAM columns
+        # Single structure: write q, IAM/PCD columns
         output_data = np.column_stack((qvector, all_iam_signals[0]))
+        ylabel = 'PCD (%)' if args.pcd else 'IAM signal'
         np.savetxt(args.output_dat, output_data,
-                  fmt='%.6e', header='q (A^-1)    IAM signal')
+                  fmt='%.6e', header=f'q (A^-1)    {ylabel}')
     else:
         # Trajectory: write q, IAM_1, IAM_2, ... columns
         output_data = np.column_stack([qvector] + all_iam_signals)

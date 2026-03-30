@@ -11,9 +11,11 @@ mode = "normal"
 # ============================================================================
 [run_params]
 # Unique identifier for this run (used in output filenames)
-run_id = "39"
+run_id = "test"
+# Molecule name (must match a section in [molecule_params])
+molecule = "chd"
 # Directory where results will be saved
-results_dir = "results"
+results_dir = "results_frames44_99_b"
 
 # ============================================================================
 # FILE PATHS
@@ -22,16 +24,16 @@ results_dir = "results"
 # Force field file for molecular mechanics calculations (OpenFF format)
 forcefield_file = "forcefields/openff_unconstrained-2.0.0.offxml"
 # Starting structure in XYZ format
-start_xyz_file = "xyz/nmm_opt.xyz"
+start_xyz_file = "xyz/start.xyz"
 # Starting structure in SDF format (alternative to XYZ)
-start_sdf_file = "sdf/nmm_opt.sdf"
+start_sdf_file = "sdf/chd_start.sdf"
 # Reference structure for comparison (used for RMSD calculations)
-reference_xyz_file = "xyz/nmm_opt.xyz"
+reference_xyz_file = "xyz/chd_reference.xyz"
 # Reference DAT file for PCD mode (optional, if provided, uses this instead of calculating from reference_xyz_file)
 # If empty string or not provided, reference IAM is calculated from reference_xyz_file
-#reference_dat_file = "data/chd_reference.dat"
+reference_dat_file = "data/chd_reference.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
-target_file = "nmm_data/target_39.dat"
+target_file = "xyz/target.xyz"
 
 # ============================================================================
 # OPTIONS
@@ -40,7 +42,7 @@ target_file = "nmm_data/target_39.dat"
 # Run normal modes calculation with PySCF (if false, reads from data/modes.npy)
 run_pyscf_modes_bool = false
 # Basis set for PySCF calculations (e.g., "6-31g*", "sto-3g", "def2-SVP")
-pyscf_basis = "6-31g**"
+pyscf_basis = "6-31g*"
 # Enable verbose output (prints all parameters during initialization)
 verbose_bool = false
 # Write DAT file output with scattering data
@@ -48,11 +50,9 @@ write_dat_file_bool = true
 # MM parameter retrieval method: "sdf" (try SDF method first, fallback to basic) or "basic" (use basic method directly)
 mm_param_method = "basic"
 # GPU backend for simulated annealing: "cpu" or "cuda"
-gpu_backend = "cuda"
+gpu_backend = "cpu"
 # Emulate CUDA backend on CPU (useful for laptop testing)
 gpu_emulation_bool = false
-# Number of independent chains to run in parallel on GPU backend
-gpu_chains = 1024
 
 # ============================================================================
 # SAMPLING PARAMETERS
@@ -72,20 +72,20 @@ inelastic_bool = true
 # Use ion-corrected atomic scattering factors (see `modules/x.py`)
 # - false: neutral atom factors (default)
 # - true: apply per-element ion correction term (currently defined for a subset, e.g. C+)
-ion_mode_bool = false
+ion_mode_bool = true
 # Use PCD (Percent Change Difference) mode for target function
 pcd_mode_bool = true
 # Excitation factor for scaling target function (used in "normal" mode)
-excitation_factor = 0.057
+excitation_factor = 1.0
 
 # Q-vector parameters (scattering vector magnitude)
 [scattering_params.q]
 # Minimum q value (Å⁻¹)
-qmin = 0.3323
+qmin = 0.4
 # Maximum q value (Å⁻¹)
-qmax = 4.3727
+qmax = 4.0
 # Number of q points
-qlen = 39
+qlen = 100
 
 # Ewald sphere parameters (3D scattering mode)
 [scattering_params.ewald]
@@ -128,15 +128,15 @@ sa_nsteps = 4000
 # Enable greedy algorithm phase after simulated annealing
 greedy_algorithm_bool = true
 # Number of steps in greedy algorithm phase
-ga_nsteps = 20000
+ga_nsteps = 4000
 # Step size for simulated annealing (controls displacement magnitude)
-sa_step_size = 0.024
+sa_step_size = 0.012
 # Step size for greedy algorithm
-ga_step_size = 0.024
+ga_step_size = 0.012
 # Number of restarts (each restart uses best structure from previous restart)
-nrestarts = 5
+nrestarts = 1
 # Total number of runs (repeats entire process ntotalruns times)
-ntotalruns = 1
+ntotalruns = 100
 # Enable bond length constraints (harmonic oscillator potential)
 bonds_bool = true
 # Enable bond angle constraints (harmonic oscillator potential)
@@ -146,18 +146,47 @@ torsions_bool = true
 # Target ratio of X-ray contribution to total objective function
 tuning_ratio_target = 0.5
 # Initial tuning constant (C_tuning) for balancing X-ray vs. geometric constraints
-c_tuning_initial = 0.1
+c_tuning_initial = 0.01
 # Only use non-hydrogen normal modes in optimization
-non_h_modes_only_bool = false
+non_h_modes_only_bool = true
 # Damping factor for hydrogen modes (multiplies step size for hydrogen modes, typically < 1.0)
 hydrogen_mode_damping_factor = 0.2
 # Run PySCF Hartree-Fock energy calculation
 hf_energy_bool = false
 
 # ============================================================================
-# MOLECULE PARAMETERS
+# MOLECULE-SPECIFIC PARAMETERS: CHD (1,3-Cyclohexadiene)
 # ============================================================================
-[molecule_params]
+[molecule_params.chd]
+# Number of atoms in the molecule
+natoms = 14
+# Total number of normal modes (3N-6 for non-linear molecules)
+nmodes = 36
+# Range of hydrogen modes [start, end) - modes to exclude or handle specially
+hydrogen_mode_range = [28, 36]
+# Range of modes to use in simulated annealing phase [start, end)
+sa_mode_range = [0, 36]
+# Range of modes to use in greedy algorithm phase [start, end)
+ga_mode_range = [0, 36]
+# Bonds to ignore in constraint calculations (atom indices: [atom1, atom2])
+bond_ignore_array = []
+# Angles to ignore in constraint calculations (atom indices: [atom1, atom2, atom3])
+angle_ignore_array = []
+# Torsions to ignore in constraint calculations (atom indices: [atom1, atom2, atom3, atom4])
+torsion_ignore_array = []
+# Atom indices to use for RMSD calculation (compared to reference structure)
+rmsd_indices = [0, 1, 2, 3, 4, 5]
+# Atom indices defining bonds to monitor/constrain (atom indices: [atom1, atom2])
+bond_indices = [0, 5]
+# Atom indices defining angles to monitor/constrain (atom indices: [atom1, atom2, atom3])
+angle_indices = [0, 3, 5]
+# Atom indices defining dihedrals to monitor/constrain (atom indices: [atom1, atom2, atom3, atom4])
+dihedral_indices = [0, 1, 4, 5]
+
+# ============================================================================
+# MOLECULE-SPECIFIC PARAMETERS: NMM (N-methylmorpholine)
+# ============================================================================
+[molecule_params.nmm]
 # Number of atoms in the molecule
 natoms = 18
 # Total number of normal modes (3N-6 for non-linear molecules)
@@ -180,7 +209,7 @@ torsion_ignore_array = [
     [1, 3, 6, 9],
     [5, 3, 6, 7],
     [5, 3, 6, 8],
-    [5, 3, 6, 9], 
+    [5, 3, 6, 9],
     [2, 1, 3, 6],
     [4, 1, 3, 6],
     [6, 3, 5, 10],
