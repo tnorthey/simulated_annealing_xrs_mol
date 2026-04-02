@@ -1182,6 +1182,7 @@ class Wrapper:
                     predicted_start,
                     p.tuning_ratio_target,
                     p.c_tuning_initial,
+                    n_tuning_update_freq=getattr(p, "n_tuning_update_freq", 0),
                     backend=getattr(p, "gpu_backend", "cpu"),
                     gpu_emulation=getattr(p, "gpu_emulation_bool", False),
                     gpu_chains=getattr(p, "gpu_chains", 1),

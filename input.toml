@@ -153,6 +153,8 @@ torsions_bool = true
 tuning_ratio_target = 0.5
 # Initial tuning constant (C_tuning) for balancing X-ray vs. geometric constraints
 c_tuning_initial = 0.1
+# Optional: update c_tuning inside SA every N steps (0 disables; legacy behavior updates only between restarts)
+n_tuning_update_freq = 0
 # Only use non-hydrogen normal modes in optimization
 non_h_modes_only_bool = false
 # Damping factor for hydrogen modes (multiplies step size for hydrogen modes, typically < 1.0)

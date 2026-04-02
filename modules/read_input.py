@@ -235,6 +235,10 @@ class Input_to_params:
         self.c_tuning_initial = float(
             data["simulated_annealing_params"]["c_tuning_initial"]
         )
+        # Optional: update c_tuning inside SA every N steps (0 disables; legacy behavior).
+        self.n_tuning_update_freq = int(
+            data.get("simulated_annealing_params", {}).get("n_tuning_update_freq", 0)
+        )
         self.non_h_modes_only = bool(
             data["simulated_annealing_params"]["non_h_modes_only_bool"]
         )  # only include "non-hydrogen" modes
@@ -436,6 +440,11 @@ class Input_to_params:
             errors.append(
                 f'Error: c_tuning_initial ({self.c_tuning_initial}) must be positive\n'
                 f'  Suggestion: Set c_tuning_initial > 0 (typically 0.001-0.1)'
+            )
+        if self.n_tuning_update_freq < 0:
+            errors.append(
+                f"Error: n_tuning_update_freq ({self.n_tuning_update_freq}) must be >= 0\n"
+                f"  Suggestion: Set n_tuning_update_freq = 0 to disable, or e.g. 100/200/500"
             )
         if self.hydrogen_mode_damping_factor < 0:
             errors.append(

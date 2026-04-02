@@ -48,6 +48,7 @@ class Annealing:
         predicted_start=0,
         tuning_ratio_target=1,
         c_tuning_initial=1,
+        n_tuning_update_freq: int = 0,
         verbose: bool = False,
         backend: str = "cpu",
         gpu_emulation: bool = False,
@@ -114,6 +115,9 @@ class Annealing:
         natoms = starting_xyz.shape[0]  # number of atoms
         c_tuning = c_tuning_initial  # initialise C_tuning
         gpu_chains = max(1, int(gpu_chains))
+        n_tuning_update_freq = int(n_tuning_update_freq) if n_tuning_update_freq is not None else 0
+        if n_tuning_update_freq < 0:
+            raise ValueError("n_tuning_update_freq must be >= 0")
 
         def _as_backend_array(xp, arr, dtype=None):
             """Convert to backend array, reusing cached static transfers when possible."""
@@ -226,6 +230,7 @@ class Annealing:
             predicted_best = predicted_start.copy()  # initialise on restart
             f = 1e9  # high initial value so 1st step will be accepted
             c = 0  # count accepted steps
+            c_tuning_local = c_tuning_initial
             mdisp = displacements
             n_mode_indices = len(mode_indices)
             (
@@ -234,6 +239,8 @@ class Annealing:
                 total_torsional_contrib,
                 total_xray_contrib,
             ) = (0, 0, 0, 0)
+            # Windowed accumulators used to periodically retune c_tuning.
+            win_bonding, win_angular, win_torsional, win_xray = (0.0, 0.0, 0.0, 0.0)
             ##=#=#=# END INITIATE LOOP VARIABLES #=#=#
             # Pre-compute inverse nsteps and constants to avoid division in loop
             inv_nsteps = 1.0 / nsteps
@@ -471,7 +478,7 @@ class Annealing:
                         )
 
                 ### combine x-ray and bonding, angular contributions
-                f_ = xray_contrib + c_tuning * (
+                f_ = xray_contrib + c_tuning_local * (
                     bonding_contrib + angular_contrib + torsion_contrib
                 )
                 ##=#=#=# END PCD & DSIGNAL CALCULATIONS #=#=#=##
@@ -488,11 +495,26 @@ class Annealing:
                         xyz_best[:, :] = xyz[:, :]
                         predicted_best = predicted_function_.copy()
                         f_xray_best = xray_contrib
-                    total_bonding_contrib += c_tuning * bonding_contrib
-                    total_angular_contrib += c_tuning * angular_contrib
-                    total_torsional_contrib += c_tuning * torsion_contrib
+                    total_bonding_contrib += c_tuning_local * bonding_contrib
+                    total_angular_contrib += c_tuning_local * angular_contrib
+                    total_torsional_contrib += c_tuning_local * torsion_contrib
                     total_xray_contrib += xray_contrib
+                    # Windowed sums for periodic retuning.
+                    win_bonding += c_tuning_local * bonding_contrib
+                    win_angular += c_tuning_local * angular_contrib
+                    win_torsional += c_tuning_local * torsion_contrib
+                    win_xray += xray_contrib
                 ##=#=#=# END ACCEPTANCE CRITERIA #=#=#=##
+
+                # Periodically retune c_tuning using accepted-step contribution ratios.
+                if n_tuning_update_freq > 0 and ((i + 1) % n_tuning_update_freq == 0):
+                    priors_w = win_bonding + win_angular + win_torsional
+                    total_w = win_xray + priors_w
+                    if total_w > 0.0 and priors_w > 0.0:
+                        denom = 1.0 - (win_xray / total_w)
+                        if denom != 0.0:
+                            c_tuning_local = (1.0 - tuning_ratio_target) * c_tuning_local / denom
+                    win_bonding, win_angular, win_torsional, win_xray = (0.0, 0.0, 0.0, 0.0)
             # print ratio of contributions to f
             priors_contrib = (
                 total_bonding_contrib + total_angular_contrib + total_torsional_contrib
@@ -503,12 +525,16 @@ class Annealing:
                 bonding_ratio = total_bonding_contrib / total_contrib
                 angular_ratio = total_angular_contrib / total_contrib
                 torsional_ratio = total_torsional_contrib / total_contrib
-                # readjust c_tuning
-                c_tuning_adjusted = (
-                    (1 - tuning_ratio_target)
-                    * c_tuning
-                    / (1 - total_xray_contrib / total_contrib)
-                )
+                # For backward compatibility: if we are not doing in-loop retuning,
+                # compute the end-of-run adjustment; otherwise return the current c_tuning.
+                if n_tuning_update_freq > 0:
+                    c_tuning_adjusted = c_tuning_local
+                else:
+                    c_tuning_adjusted = (
+                        (1 - tuning_ratio_target)
+                        * c_tuning_local
+                        / (1 - total_xray_contrib / total_contrib)
+                    )
             else:
                 (
                     xray_ratio,
@@ -538,6 +564,7 @@ class Annealing:
             return the best chain outcome.
             """
             prep_start = default_timer()
+            c_tuning_local = c_tuning_initial
             # Backend arrays with chain dimension
             xyz = xp.repeat(
                 xp.asarray(starting_xyz, dtype=xp.float64)[xp.newaxis, :, :],
@@ -630,6 +657,11 @@ class Annealing:
             total_angular_xp = xp.zeros(n_chains, dtype=xp.float64)
             total_torsional_xp = xp.zeros(n_chains, dtype=xp.float64)
             total_xray_xp = xp.zeros(n_chains, dtype=xp.float64)
+            # Windowed accumulators for periodic retuning (scalar c_tuning shared across chains).
+            win_bonding_xp = xp.zeros(n_chains, dtype=xp.float64)
+            win_angular_xp = xp.zeros(n_chains, dtype=xp.float64)
+            win_torsional_xp = xp.zeros(n_chains, dtype=xp.float64)
+            win_xray_xp = xp.zeros(n_chains, dtype=xp.float64)
 
             if pcd_mode:
                 if elastic_ab_initio_correction:
@@ -780,7 +812,7 @@ class Annealing:
                         axis=1,
                     )
 
-                f_ = xray_contrib + c_tuning * (
+                f_ = xray_contrib + c_tuning_local * (
                     bonding_contrib + angular_contrib + torsion_contrib
                 )
                 improve = xp.logical_and(~temp_accept, f_ < f * 0.999)
@@ -803,10 +835,32 @@ class Annealing:
                     predicted_best,
                 )
 
-                total_bonding_xp += c_tuning * bonding_contrib * improve_f
-                total_angular_xp += c_tuning * angular_contrib * improve_f
-                total_torsional_xp += c_tuning * torsion_contrib * improve_f
+                total_bonding_xp += c_tuning_local * bonding_contrib * improve_f
+                total_angular_xp += c_tuning_local * angular_contrib * improve_f
+                total_torsional_xp += c_tuning_local * torsion_contrib * improve_f
                 total_xray_xp += xray_contrib * improve_f
+
+                win_bonding_xp += c_tuning_local * bonding_contrib * improve_f
+                win_angular_xp += c_tuning_local * angular_contrib * improve_f
+                win_torsional_xp += c_tuning_local * torsion_contrib * improve_f
+                win_xray_xp += xray_contrib * improve_f
+
+                # Periodic retuning (infrequent host sync when enabled).
+                if n_tuning_update_freq > 0 and ((i + 1) % n_tuning_update_freq == 0):
+                    win_b = float(to_numpy(xp.sum(win_bonding_xp), xp))
+                    win_a = float(to_numpy(xp.sum(win_angular_xp), xp))
+                    win_t = float(to_numpy(xp.sum(win_torsional_xp), xp))
+                    win_x = float(to_numpy(xp.sum(win_xray_xp), xp))
+                    priors_w = win_b + win_a + win_t
+                    total_w = win_x + priors_w
+                    if total_w > 0.0 and priors_w > 0.0:
+                        denom = 1.0 - (win_x / total_w)
+                        if denom != 0.0:
+                            c_tuning_local = (1.0 - tuning_ratio_target) * c_tuning_local / denom
+                    win_bonding_xp *= 0.0
+                    win_angular_xp *= 0.0
+                    win_torsional_xp *= 0.0
+                    win_xray_xp *= 0.0
 
             # Reduce GPU accumulators to host scalars (single sync)
             c = int(to_numpy(xp.sum(c_xp), xp))
@@ -824,11 +878,14 @@ class Annealing:
                 bonding_ratio = total_bonding_contrib / total_contrib
                 angular_ratio = total_angular_contrib / total_contrib
                 torsional_ratio = total_torsional_contrib / total_contrib
-                c_tuning_adjusted = (
-                    (1 - tuning_ratio_target)
-                    * c_tuning
-                    / (1 - total_xray_contrib / total_contrib)
-                )
+                if n_tuning_update_freq > 0:
+                    c_tuning_adjusted = c_tuning_local
+                else:
+                    c_tuning_adjusted = (
+                        (1 - tuning_ratio_target)
+                        * c_tuning_local
+                        / (1 - total_xray_contrib / total_contrib)
+                    )
             else:
                 (
                     xray_ratio,

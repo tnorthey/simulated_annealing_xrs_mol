@@ -180,6 +180,12 @@ def create_parser():
     sa_group.add_argument('--c-tuning-initial', type=float,
                          dest='simulated_annealing_params.c_tuning_initial',
                          help='Initial C tuning')
+    sa_group.add_argument(
+        '--n-tuning-update-freq',
+        type=int,
+        dest='simulated_annealing_params.n_tuning_update_freq',
+        help='Update c_tuning inside SA every N steps (0 disables; e.g. 100/200/500)',
+    )
     sa_group.add_argument('--non-h-modes-only', action='store_true',
                          dest='simulated_annealing_params.non_h_modes_only_bool',
                          help='Only include non-hydrogen modes')
