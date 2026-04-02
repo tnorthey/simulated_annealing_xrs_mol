@@ -49,6 +49,7 @@ class Annealing:
         tuning_ratio_target=1,
         c_tuning_initial=1,
         n_tuning_update_freq: int = 0,
+        print_c_tuning_updates: bool = False,
         verbose: bool = False,
         backend: str = "cpu",
         gpu_emulation: bool = False,
@@ -118,6 +119,7 @@ class Annealing:
         n_tuning_update_freq = int(n_tuning_update_freq) if n_tuning_update_freq is not None else 0
         if n_tuning_update_freq < 0:
             raise ValueError("n_tuning_update_freq must be >= 0")
+        print_c_tuning_updates = bool(print_c_tuning_updates)
 
         def _as_backend_array(xp, arr, dtype=None):
             """Convert to backend array, reusing cached static transfers when possible."""
@@ -514,6 +516,8 @@ class Annealing:
                         denom = 1.0 - (win_xray / total_w)
                         if denom != 0.0:
                             c_tuning_local = (1.0 - tuning_ratio_target) * c_tuning_local / denom
+                            if print_c_tuning_updates:
+                                print("c_tuning_update step", i + 1, "c_tuning", c_tuning_local)
                     win_bonding, win_angular, win_torsional, win_xray = (0.0, 0.0, 0.0, 0.0)
             # print ratio of contributions to f
             priors_contrib = (
