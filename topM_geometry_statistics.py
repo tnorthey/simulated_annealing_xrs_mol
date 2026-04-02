@@ -13,10 +13,10 @@ The closest-to-mean frame can be selected either by:
 No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
 
-Dihedral convention: raw angles from arctan2 ([-180, 180]°) are mapped to
-[0, 360) when negative; an optional --dihedral-offset is then added (no wrap),
-so e.g. offset -360 yields values in [-360, 0). Optional --dihedral-negate multiplies
-the dihedral column by -1 last (e.g. trend -30…0 becomes 30…0).
+Dihedral convention: angles are kept as returned by arctan2 ([-180, 180]°), so
+crossing through 0 appears as a smooth change into negative values (no +360 jump).
+An optional --dihedral-offset is added (no modulo). Optional --dihedral-negate
+multiplies the dihedral column by -1 last.
 
 Usage:
     python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5
@@ -222,19 +222,10 @@ def compute_geometry_for_layer(
     return np.array(results, dtype=np.float64)
 
 
-def wrap_dihedral_column(data: np.ndarray, col_idx: int) -> np.ndarray:
-    """Shift dihedrals: negative values +360 to put into [0, 360)."""
-    vals = data[:, col_idx].copy()
-    vals = np.where(vals < 0, vals + 360.0, vals)
-    data[:, col_idx] = vals
-    return data
-
-
 def circular_mean_deg(angles_deg: np.ndarray) -> float:
-    """Circular (directional) mean of angles in degrees, returned in [0, 360)."""
+    """Circular (directional) mean of angles in degrees, principal value in [-180, 180]."""
     rad = np.deg2rad(angles_deg)
-    mean_deg = float(np.rad2deg(np.arctan2(np.mean(np.sin(rad)), np.mean(np.cos(rad)))))
-    return mean_deg % 360.0
+    return float(np.rad2deg(np.arctan2(np.mean(np.sin(rad)), np.mean(np.cos(rad)))))
 
 
 def circular_std_deg(angles_deg: np.ndarray) -> float:
@@ -503,7 +494,7 @@ def main():
         default=0.0,
         metavar="DEG",
         help=(
-            "Degrees added to the dihedral column after [0, 360) wrap; not folded modulo 360. "
+            "Degrees added to the dihedral column after computation; not folded modulo 360. "
             "Only valid with --dihedral. Changing this uses the same default output names as offset 0; "
             "pass --recompute to refresh a cached CSV."
         ),
@@ -512,7 +503,7 @@ def main():
         "--dihedral-negate",
         action="store_true",
         help=(
-            "After wrap and offset, multiply the dihedral column by -1 (last step). "
+            "After offset, multiply the dihedral column by -1 (last step). "
             "Only valid with --dihedral."
         ),
     )
@@ -751,7 +742,6 @@ def main():
                 layer, bond=args.bond, angle=args.angle, dihedral=args.dihedral
             )
             if dihedral_col is not None:
-                geom = wrap_dihedral_column(geom, dihedral_col)
                 if args.dihedral_offset != 0.0:
                     geom[:, dihedral_col] = (
                         geom[:, dihedral_col] + args.dihedral_offset
