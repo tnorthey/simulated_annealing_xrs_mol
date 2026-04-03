@@ -19,6 +19,8 @@ START_FROM_PREV_MEAN="${START_FROM_PREV_MEAN:-}"
 PREV_STEP="${PREV_STEP:-}"
 ALIGN_INDICES="${ALIGN_INDICES:-}"
 PYTHON="${PYTHON:-python3}"
+EXCITATION_FACTOR="${EXCITATION_FACTOR:-1.0}"
+TUNING_RATIO="${TUNING_RATIO:-0.5}"
 TARGET_FILE="${TARGET_FILE:-}"
 TARGET_FILE_TEMPLATE="${TARGET_FILE_TEMPLATE:-nmm_data/target_{time_step}.dat}"
 EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
@@ -37,12 +39,14 @@ Starting geometry is chosen by one of three modes (first match wins):
 
 Positional arguments:
   time_step           Time-step identifier (passed as --run-id)
-  excitation_factor   (default: 1.0)
-  tuning_ratio_target (default: 0.5)
+  excitation_factor   (default: \$EXCITATION_FACTOR=$EXCITATION_FACTOR)
+  tuning_ratio_target (default: \$TUNING_RATIO=$TUNING_RATIO)
 
 Environment variables (defaults shown):
   N_WORKERS            $N_WORKERS
-  RESULTS_DIR          $RESULTS_DIR
+  RESULTS_DIR          $RESULTS_DIR   (also passed as --results-dir to run.py)
+  EXCITATION_FACTOR    $EXCITATION_FACTOR  (used when positional arg is omitted)
+  TUNING_RATIO         $TUNING_RATIO  (used when positional arg is omitted)
   STARTING_XYZ         (unset)  fixed starting xyz for all workers
   START_FROM_PREV_MEAN (unset)  if 1, build mean from previous step
   PREV_STEP            (unset)  override previous step (default: time_step - 1)
@@ -65,8 +69,8 @@ if [[ $# -lt 1 ]]; then
 fi
 
 time_step="$1"
-excitation_factor="${2:-1.0}"
-tuning_ratio_target="${3:-0.5}"
+excitation_factor="${2:-$EXCITATION_FACTOR}"
+tuning_ratio_target="${3:-$TUNING_RATIO}"
 
 # ── Mode 1: fixed STARTING_XYZ ──────────────────────────────────────────────
 if [[ -n "$STARTING_XYZ" ]]; then
@@ -193,6 +197,7 @@ for (( worker=0; worker<N_WORKERS; worker++ )); do
     fi
     "$PYTHON" run.py \
         --run-id "$time_step" \
+        --results-dir "$RESULTS_DIR" \
         --start-xyz-file "$starting_xyz" \
         --target-file "$target_file" \
         --excitation-factor "$excitation_factor" \
