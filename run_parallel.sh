@@ -6,6 +6,12 @@ RESULTS_DIR="${RESULTS_DIR:-results}"
 XYZ_SOURCE_STEP="${XYZ_SOURCE_STEP:-01}"
 TOP_N="${TOP_N:-20}"
 STARTING_XYZ="${STARTING_XYZ:-}"
+PYTHON="${PYTHON:-python3}"
+# Override the --target-file path passed to run.py for every worker.
+# If unset, the default uses TARGET_FILE_TEMPLATE.
+TARGET_FILE="${TARGET_FILE:-}"
+TARGET_FILE_TEMPLATE="${TARGET_FILE_TEMPLATE:-nmm_data/target_{time_step}.dat}"
+EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 
 usage() {
     cat <<EOF
@@ -27,6 +33,9 @@ Environment variables (defaults shown):
   TOP_N              $TOP_N    (consider first N files by ls order)
   STARTING_XYZ       (unset)  (if set, use this xyz file for all workers
                                instead of picking randomly from the pool)
+  TARGET_FILE       (unset)  (if set, passed as --target-file for all workers)
+  TARGET_FILE_TEMPLATE $TARGET_FILE_TEMPLATE (used when TARGET_FILE is unset)
+  EXTRA_RUN_PY_ARGS  (unset)  extra args appended to run.py (e.g. --gpu-backend cpu)
 EOF
     exit 0
 }
@@ -73,12 +82,18 @@ for (( worker=0; worker<N_WORKERS; worker++ )); do
         starting_xyz="${candidates[$idx]}"
     fi
     echo "  worker $worker: xyz=$starting_xyz"
-    python run.py \
+    if [[ -n "$TARGET_FILE" ]]; then
+        target_file="$TARGET_FILE"
+    else
+        target_file="${TARGET_FILE_TEMPLATE//{time_step}/$time_step}"
+    fi
+    "$PYTHON" run.py \
         --run-id "$time_step" \
         --start-xyz-file "$starting_xyz" \
-        --target-file "nmm_data/target_${time_step}.dat" \
+        --target-file "$target_file" \
         --excitation-factor "$excitation_factor" \
-        --tuning-ratio-target "$tuning_ratio_target" &
+        --tuning-ratio-target "$tuning_ratio_target" \
+        ${EXTRA_RUN_PY_ARGS} &
 done
 
 wait
