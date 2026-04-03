@@ -46,7 +46,7 @@ Each script supports `--help` to display all available options.
 | `plot_fit_histograms.py` | Histogram of fit values per timestep |
 | `average_xyz.py` | Frame-wise averaging of XYZ trajectories |
 | `run_gpu_from_previous_timestep.sh` | Kabsch mean of best `TOP_N` structures from timestep *N−1*, save as `results/<N−1>_mean.xyz`, then one CUDA `run.py` with `GPU_CHAINS` (default 1024). See `--help`. Env: `RESULTS_DIR`, `TOP_N`, `PREV_STEP`, `STARTING_XYZ`, `TARGET_FILE`, `ALIGN_INDICES`. |
-| `run_cpu_from_previous_timestep.sh` | Same as `run_gpu_from_previous_timestep.sh`, but runs `run.py` with `--gpu-backend cpu`. If `N_WORKERS>1`, delegates to `run_parallel.sh` (launches N workers starting from the computed mean). See `--help`. Env: `RESULTS_DIR`, `TOP_N`, `PREV_STEP`, `STARTING_XYZ`, `TARGET_FILE`, `ALIGN_INDICES`, `N_WORKERS`, `CPU_CHAINS`. |
+| `run_parallel.sh` | Launch `N_WORKERS` parallel `run.py` processes. Three modes: (1) `STARTING_XYZ` set — fixed file for every worker; (2) `START_FROM_PREV_MEAN=1` — Kabsch mean of `TOP_N` best from previous step; (3) default — random pick from `XYZ_SOURCE_STEP` pool. See `--help`. |
 | `run_start.sh` | First (or any) timestep from a **fixed** starting XYZ: copies it to `results/NN_mean.xyz`, then same CUDA `run.py` as above. Pass `starting_xyz` as the second argument, or set `STARTING_XYZ`. See `--help`. |
 
 ## Testing
