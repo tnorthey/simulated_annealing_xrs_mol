@@ -16,8 +16,11 @@
 # Environment overrides (defaults shown):
 #   N_WORKERS          64      parallel workers
 #   RESULTS_DIR        results_chd_ewald   output directory
-#   EXCITATION_FACTOR  1.0
 #   TUNING_RATIO       0.5
+#
+# Excitation factor is not exposed here: this workflow uses test mode without PCD,
+# so --excitation-factor has no effect on the target; run_cpu_parallel.sh keeps
+# its default (1.0) for the positional argument it passes through.
 #
 # Expected outputs (inside RESULTS_DIR):
 #   TARGET_FUNCTION_<run_id>.dat   rotational average I(q)
@@ -33,7 +36,6 @@ export STARTING_XYZ="${STARTING_XYZ:-xyz/start.xyz}"
 export TARGET_FILE="${TARGET_FILE:-xyz/target_20.xyz}"
 export RESULTS_DIR="${RESULTS_DIR:-results_chd_ewald}"
 export N_WORKERS="${N_WORKERS:-64}"
-export EXCITATION_FACTOR="${EXCITATION_FACTOR:-1.0}"
 export TUNING_RATIO="${TUNING_RATIO:-0.5}"
 
 export EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:---config input_chd_ewald.toml --mode test --ewald-mode --qmin 0.0 --qmax 4.0 --qlen 41 --tmin 0.0 --tmax 1.0 --tlen 21 --pmin 0.0 --pmax 2.0 --plen 21}"
@@ -50,4 +52,4 @@ echo "  results_dir  = $RESULTS_DIR"
 echo "  workers      = $N_WORKERS"
 echo "  grid         = q(0.0-4.0, 41) theta(0-π, 21) phi(0-2π, 21)"
 
-"$REPO_ROOT/scripts/bash/run_cpu_parallel.sh" "$RUN_ID" "$EXCITATION_FACTOR" "$TUNING_RATIO"
+"$REPO_ROOT/scripts/bash/run_cpu_parallel.sh" "$RUN_ID"
