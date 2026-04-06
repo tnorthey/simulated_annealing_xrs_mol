@@ -1,0 +1,124 @@
+# ============================================================================
+# CHD Ewald test-mode configuration
+#
+# Target signal I(q,theta,phi) is generated from xyz/target_20.xyz via IAM
+# in test mode on a 3D Ewald grid. SA starts from xyz/start.xyz.
+# ============================================================================
+
+# ============================================================================
+# MODE CONFIGURATION
+# ============================================================================
+mode = "test"
+
+# ============================================================================
+# RUN PARAMETERS
+# ============================================================================
+[run_params]
+run_id = "chd_ewald"
+molecule = "chd"
+results_dir = "results_chd_ewald"
+
+# ============================================================================
+# FILE PATHS
+# ============================================================================
+[files]
+forcefield_file = "forcefields/openff_unconstrained-2.0.0.offxml"
+start_xyz_file = "xyz/start.xyz"
+start_sdf_file = "sdf/chd_start.sdf"
+reference_xyz_file = "xyz/start.xyz"
+target_file = "xyz/target_20.xyz"
+
+# ============================================================================
+# OPTIONS
+# ============================================================================
+[options]
+run_pyscf_modes_bool = false
+pyscf_basis = "6-31g**"
+verbose_bool = false
+write_dat_file_bool = true
+mm_param_method = "basic"
+gpu_backend = "cpu"
+gpu_emulation_bool = false
+gpu_chains = 1
+
+# ============================================================================
+# SAMPLING PARAMETERS
+# ============================================================================
+[sampling]
+sampling_bool = false
+boltzmann_temperature = 300.0
+
+# ============================================================================
+# SCATTERING PARAMETERS
+# ============================================================================
+[scattering_params]
+inelastic_bool = true
+ion_mode_bool = false
+pcd_mode_bool = false
+excitation_factor = 1.0
+
+# Q-vector parameters (scattering vector magnitude)
+[scattering_params.q]
+qmin = 0.0
+qmax = 4.0
+qlen = 41
+
+# Ewald sphere parameters (3D scattering mode)
+[scattering_params.ewald]
+ewald_mode_bool = true
+
+# Theta parameters (polar angle, units of pi)
+[scattering_params.ewald.th]
+tmin = 0.0
+tmax = 1.0
+tlen = 21
+
+# Phi parameters (azimuthal angle, units of pi)
+[scattering_params.ewald.ph]
+pmin = 0.0
+pmax = 2.0
+plen = 21
+
+# Noise parameters
+[scattering_params.noise]
+noise_value = 0.0
+noise_data_file = "data/noise.dat"
+
+# ============================================================================
+# SIMULATED ANNEALING PARAMETERS
+# ============================================================================
+[simulated_annealing_params]
+sa_starting_temp = 1.0
+sa_nsteps = 4000
+greedy_algorithm_bool = true
+ga_nsteps = 4000
+sa_step_size = 0.012
+ga_step_size = 0.012
+nrestarts = 2
+ntotalruns = 1
+bonds_bool = true
+angles_bool = true
+torsions_bool = true
+tuning_ratio_target = 0.5
+c_tuning_initial = 0.1
+n_tuning_update_freq = 0
+non_h_modes_only_bool = false
+hydrogen_mode_damping_factor = 0.2
+hf_energy_bool = false
+
+# ============================================================================
+# MOLECULE-SPECIFIC PARAMETERS: CHD (1,3-Cyclohexadiene)
+# ============================================================================
+[molecule_params]
+natoms = 14
+nmodes = 36
+hydrogen_mode_range = [28, 36]
+sa_mode_range = [0, 36]
+ga_mode_range = [0, 36]
+bond_ignore_array = []
+angle_ignore_array = []
+torsion_ignore_array = []
+rmsd_indices = [0, 1, 2, 3, 4, 5]
+bond_indices = [0, 5]
+angle_indices = [0, 3, 5]
+dihedral_indices = [0, 1, 4, 5]
