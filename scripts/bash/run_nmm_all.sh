@@ -13,8 +13,8 @@ usage() {
     cat <<EOF
 Usage: $0
 
-Runs run_parallel.sh for each time-step in [STEP_START..STEP_END].
-Each invocation auto-picks a random starting xyz (see run_parallel.sh --help).
+Runs run_cpu_parallel.sh for each time-step in [STEP_START..STEP_END].
+Each invocation auto-picks a random starting xyz (see run_cpu_parallel.sh --help).
 
 Environment variables (defaults shown):
   EXCITATION_FACTOR  $EXCITATION_FACTOR
@@ -22,7 +22,7 @@ Environment variables (defaults shown):
   STEP_START         $STEP_START
   STEP_END           $STEP_END
 
-Passed through to run_parallel.sh:
+Passed through to run_cpu_parallel.sh:
   XYZ_SOURCE_STEP    source time-step for starting xyz selection
   TOP_N              how many top files to consider (default 20)
   RESULTS_DIR        directory to search (default results)
