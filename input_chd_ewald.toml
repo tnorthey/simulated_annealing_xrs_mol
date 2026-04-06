@@ -24,7 +24,7 @@ results_dir = "results_chd_ewald"
 [files]
 forcefield_file = "forcefields/openff_unconstrained-2.0.0.offxml"
 start_xyz_file = "xyz/start.xyz"
-start_sdf_file = "sdf/chd_start.sdf"
+start_sdf_file = "sdf/start.sdf"
 reference_xyz_file = "xyz/start.xyz"
 target_file = "xyz/target_20.xyz"
 
@@ -89,12 +89,12 @@ noise_data_file = "data/noise.dat"
 # ============================================================================
 [simulated_annealing_params]
 sa_starting_temp = 1.0
-sa_nsteps = 4000
+sa_nsteps = 8000
 greedy_algorithm_bool = true
 ga_nsteps = 4000
-sa_step_size = 0.012
-ga_step_size = 0.012
-nrestarts = 2
+sa_step_size = 0.024
+ga_step_size = 0.024
+nrestarts = 1
 ntotalruns = 1
 bonds_bool = true
 angles_bool = true
