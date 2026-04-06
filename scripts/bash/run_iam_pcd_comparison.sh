@@ -5,8 +5,8 @@
 #   B: ion-corrected factors + PCD vs a reference DAT.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python3}"
 INPUT_XYZ="${INPUT_XYZ:-chd+_data/CCSD-neut.xyz}"
@@ -21,13 +21,13 @@ mkdir -p "$(dirname "$OUT_A")"
 mkdir -p "$(dirname "$OUT_B")"
 
 echo "=== Run A: PCD + correction from ab initio file: ${AB_INITIO_SCATTERING} ==="
-"$PYTHON" calculate_iam.py "$INPUT_XYZ" "$OUT_A" --inelastic --pcd \
+"$PYTHON" scripts/python/calculate_iam.py "$INPUT_XYZ" "$OUT_A" --inelastic --pcd \
   --reference "$INPUT_XYZ" \
   --ab-initio-scattering "$AB_INITIO_SCATTERING" \
   "${QFLAGS[@]}"
 
 echo "=== Run B: ion + PCD, reference CCSD-neut_iam_scat.dat ==="
-"$PYTHON" calculate_iam.py "$INPUT_XYZ" "$OUT_B" --inelastic --ion --pcd \
+"$PYTHON" scripts/python/calculate_iam.py "$INPUT_XYZ" "$OUT_B" --inelastic --ion --pcd \
   --reference-dat chd+_data/CCSD-neut_iam_scat.dat \
   "${QFLAGS[@]}"
 

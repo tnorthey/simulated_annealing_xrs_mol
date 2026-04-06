@@ -21,6 +21,8 @@ from typing import List, Optional, Sequence, Tuple
 import numpy as np
 import matplotlib.pyplot as plt
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def run_optimal_path(
     directory,
@@ -43,7 +45,7 @@ def run_optimal_path(
     output_xyz = os.path.join(output_dir, f"optimal_trajectory_subset_{subset_idx}.xyz")
 
     cmd = [
-        "python3", "optimal_path.py", directory,
+        "python3", os.path.join(_SCRIPT_DIR, "optimal_path.py"), directory,
         "--random-sample", str(random_sample),
         "--fit-weight", str(fit_weight),
         "--signal-weight", str(signal_weight),
@@ -87,7 +89,7 @@ def average_optimal_trajectories(
 
     cmd = [
         "python3",
-        "average_xyz.py",
+        os.path.join(_SCRIPT_DIR, "average_xyz.py"),
         *list(xyz_files),
         "--per-frame",
         "--align",
@@ -587,7 +589,7 @@ def analyze_geometry(
     verbose: bool = True,
 ) -> tuple[bool, str]:
     """Run analyze_geometry.py to extract specified geometric parameters."""
-    cmd = ["python3", "analyze_geometry.py", xyz_file]
+    cmd = ["python3", os.path.join(_SCRIPT_DIR, "analyze_geometry.py"), xyz_file]
     
     if bond is not None:
         cmd.extend(["--bond", str(bond[0]), str(bond[1])])
@@ -1091,7 +1093,7 @@ def plot_comparison(
                 plot_labels.append(f"{label} - {calc_name}")
     
     cmd = [
-        "python3", "plot_geometry.py",
+        "python3", os.path.join(_SCRIPT_DIR, "plot_geometry.py"),
     ] + csv_files + [
         output_png,
         "--columns",

@@ -1,5 +1,8 @@
 #!/bin/bash
 #
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO_ROOT"
+
 time_step=$1
 starting_xyz=$2
 excitation_factor=${3:-1.0}  # Default to 1.0 if not provided

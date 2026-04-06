@@ -3,7 +3,7 @@
 # save as ${RESULTS_DIR}/<prev>_mean.xyz (timestep ts-1), then run one CUDA job with many GPU chains.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python3}"
@@ -148,7 +148,7 @@ PY
         exit 1
     fi
 
-    AVG_CMD=("$PYTHON" "$REPO_ROOT/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$mean_out")
+    AVG_CMD=("$PYTHON" "$REPO_ROOT/scripts/python/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$mean_out")
     if [[ -n "${ALIGN_INDICES:-}" ]]; then
         # shellcheck disable=SC2206
         AI=($ALIGN_INDICES)

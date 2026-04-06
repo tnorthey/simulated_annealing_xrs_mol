@@ -1,5 +1,8 @@
 #!/bin/bash
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO_ROOT"
+
 excitation_factors=(0.140 0.471 0.492 0.515 0.538 0.559 0.577 0.592 0.604 0.612 0.618 0.622 0.625)
 
 path="eirik_data/sampled_frames"
@@ -9,7 +12,7 @@ do
     k=0
     for i in {17..29}
     do
-        ./run_parallel.sh $i $starting_xyz ${excitation_factors[k]}
+        "$REPO_ROOT/scripts/bash/run_parallel.sh" $i $starting_xyz ${excitation_factors[k]}
         ((k++))
         sleep 0.1 # For sequential output
         echo "Waiting for processes to finish" 
@@ -19,7 +22,7 @@ do
 
     for i in {30..99}
     do
-        ./run_parallel.sh $i $starting_xyz 0.628
+        "$REPO_ROOT/scripts/bash/run_parallel.sh" $i $starting_xyz 0.628
         sleep 0.1 # For sequential output
         echo "Waiting for processes to finish" 
         wait $(jobs -p)

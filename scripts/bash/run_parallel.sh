@@ -7,7 +7,7 @@
 #   3. (default)                -> random pick from XYZ_SOURCE_STEP pool
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 N_WORKERS="${N_WORKERS:-64}"
@@ -154,7 +154,7 @@ PY
         exit 1
     fi
 
-    AVG_CMD=("$PYTHON" "$REPO_ROOT/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$mean_out")
+    AVG_CMD=("$PYTHON" "$REPO_ROOT/scripts/python/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$mean_out")
     if [[ -n "$ALIGN_INDICES" ]]; then
         # shellcheck disable=SC2206
         AI=($ALIGN_INDICES)

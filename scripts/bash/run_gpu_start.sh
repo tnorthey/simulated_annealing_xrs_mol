@@ -3,7 +3,7 @@
 # Copies it to ${RESULTS_DIR}/${time_step}_mean.xyz and runs one CUDA job (default 1024 chains).
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python3}"

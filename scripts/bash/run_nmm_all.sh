@@ -1,10 +1,13 @@
 #!/bin/bash
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$REPO_ROOT"
+
 EXCITATION_FACTOR="${EXCITATION_FACTOR:-0.057}"
-TUNING_RATIO="${TUNING_RATIO:-0.9}"
+TUNING_RATIO="${TUNING_RATIO:-0.5}"
 STEP_START="${STEP_START:-18}"
-STEP_END="${STEP_END:-48}"
+STEP_END="${STEP_END:-39}"
 
 usage() {
     cat <<EOF
@@ -32,5 +35,5 @@ EOF
 
 for time_step in $(seq "$STEP_START" "$STEP_END"); do
     echo "=== time-step $time_step ==="
-    ./run_parallel.sh "$time_step" "$EXCITATION_FACTOR" "$TUNING_RATIO"
+    python3 run.py --run-id "$time_step" --target-file "nmm_data/target_"$time_step".dat" --excitation-factor "$EXCITATION_FACTOR" --tuning-ratio-target "$TUNING_RATIO"
 done
