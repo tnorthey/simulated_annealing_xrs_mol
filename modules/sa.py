@@ -249,7 +249,11 @@ class Annealing:
             HALF = 0.5
             # Reuse buffers to avoid per-step allocations
             summed_displacement = np.zeros((natoms, 3), dtype=np.float64)
-            if not ewald_mode:
+            if ewald_mode:
+                # 3D scattering in Ewald mode (q, theta, phi)
+                molecular = np.zeros((qlen, tlen, plen), dtype=np.float64)
+                predicted_function_ = np.empty((qlen, tlen, plen), dtype=np.float64)
+            else:
                 molecular = np.zeros(qlen, dtype=np.float64)
                 iam = np.empty(qlen, dtype=np.float64)
                 predicted_function_ = np.empty(qlen, dtype=np.float64)
@@ -291,15 +295,15 @@ class Annealing:
                     ewald_mode
                 ):  # x-ray signal in Ewald sphere, q = (q_radial, q_theta, q_phi)
                     # molecular
-                    molecular = np.zeros((qlen, tlen, plen))  # total molecular factor
+                    molecular[:, :, :] = 0.0  # total molecular factor
                     k = 0  # begin counter
                     for n in range(natoms - 1):
                         for m in range(n + 1, natoms):  # j > i
                             fnm = pre_molecular[k, :, :, :]
                             k += 1  # count iterations
-                            xnm = xyz[n, 0] - xyz[m, 0]
-                            ynm = xyz[n, 1] - xyz[m, 1]
-                            znm = xyz[n, 2] - xyz[m, 2]
+                            xnm = xyz_trial[n, 0] - xyz_trial[m, 0]
+                            ynm = xyz_trial[n, 1] - xyz_trial[m, 1]
+                            znm = xyz_trial[n, 2] - xyz_trial[m, 2]
                             molecular += (
                                 2 * fnm * np.cos((qx * xnm + qy * ynm + qz * znm))
                             )
@@ -329,6 +333,10 @@ class Annealing:
 
                 ##=#=#=# PCD & DSIGNAL CALCULATIONS #=#=#=##
                 if pcd_mode:
+                    if ewald_mode:
+                        # PCD mode currently only implemented for isotropic q.
+                        # (PCD depends on a 1D reference I_ref(q) baseline.)
+                        raise ValueError("PCD mode is not supported with ewald_mode")
                     inv_qlen = 1.0 / qlen
                     sse = 0.0
                     for qi in range(qlen):
@@ -359,40 +367,63 @@ class Annealing:
                     xray_contrib = sse * inv_qlen
                 else:
                     ### x-ray part of objective function
-                    ### TO DO: depends on ewald_mode ...
                     if ewald_mode:
+                        # 3D objective over (q, theta, phi)
                         n = qlen * tlen * plen
+                        inv_n = 1.0 / n
+                        sse = 0.0
+                        for qi in range(qlen):
+                            cq = correction_factor_q[qi]
+                            for tj in range(tlen):
+                                for pk in range(plen):
+                                    # Objective compares molecular-only contribution because
+                                    # `target_function` was pre-shifted outside the SA loop.
+                                    pred_mol_c = molecular[qi, tj, pk] * cq
+                                    diff = pred_mol_c - target_function[qi, tj, pk]
+                                    denom = abs_target_function[qi, tj, pk]
+                                    sse += (diff * diff) / denom
+                                    if inelastic:
+                                        predicted_function_[qi, tj, pk] = (
+                                            molecular[qi, tj, pk]
+                                            + atomic_total[qi, tj, pk]
+                                            + compton[qi, tj, pk]
+                                        ) * cq
+                                    else:
+                                        predicted_function_[qi, tj, pk] = (
+                                            molecular[qi, tj, pk]
+                                            + atomic_total[qi, tj, pk]
+                                        ) * cq
+                        xray_contrib = sse * inv_n
                     else:
                         n = qlen
-                    # Pre-compute inverse n to avoid division
-                    inv_n = 1.0 / n
-                    sse = 0.0
-                    for qi in range(qlen):
-                        cq = correction_factor_q[qi]
-                        # Objective compares *molecular-only* contribution because
-                        # `target_function` was pre-shifted outside the SA loop.
-                        if elastic_abi:
-                            pred_mol = iam[qi]
-                            pred_mol_c = cq * pred_mol
-                            diff = pred_mol_c - target_function[qi]
-                            sse += (diff * diff) / abs_target_function[qi]
-                            predicted_function_[qi] = cq * (
-                                atomic_total[qi] + iam[qi]
-                            )
-                        else:
-                            pred_mol = iam[qi]
-                            pred_mol_c = pred_mol * cq
-                            diff = pred_mol_c - target_function[qi]
-                            sse += (diff * diff) / abs_target_function[qi]
-                            if inelastic:
-                                predicted_function_[qi] = (
-                                    pred_mol + atomic_total[qi] + compton[qi]
-                                ) * cq
+                        inv_n = 1.0 / n
+                        sse = 0.0
+                        for qi in range(qlen):
+                            cq = correction_factor_q[qi]
+                            # Objective compares *molecular-only* contribution because
+                            # `target_function` was pre-shifted outside the SA loop.
+                            if elastic_abi:
+                                pred_mol = iam[qi]
+                                pred_mol_c = cq * pred_mol
+                                diff = pred_mol_c - target_function[qi]
+                                sse += (diff * diff) / abs_target_function[qi]
+                                predicted_function_[qi] = cq * (
+                                    atomic_total[qi] + iam[qi]
+                                )
                             else:
-                                predicted_function_[qi] = (
-                                    pred_mol + atomic_total[qi]
-                                ) * cq
-                    xray_contrib = sse * inv_n
+                                pred_mol = iam[qi]
+                                pred_mol_c = pred_mol * cq
+                                diff = pred_mol_c - target_function[qi]
+                                sse += (diff * diff) / abs_target_function[qi]
+                                if inelastic:
+                                    predicted_function_[qi] = (
+                                        pred_mol + atomic_total[qi] + compton[qi]
+                                    ) * cq
+                                else:
+                                    predicted_function_[qi] = (
+                                        pred_mol + atomic_total[qi]
+                                    ) * cq
+                        xray_contrib = sse * inv_n
 
                 ### harmonic oscillator part of f
                 # somehow this is faster in numba than the vectorised version
