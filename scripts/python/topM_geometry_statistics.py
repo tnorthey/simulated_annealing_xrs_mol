@@ -20,6 +20,7 @@ multiplies the dihedral column by -1 last.
 
 Usage:
     python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5
+    python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5 --dihedral 6 7 8 9
     python3 topM_geometry_statistics.py results/ --topM 100 --dihedral 2 3 4 5 --bond 0 1
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --show-individuals
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --dihedral-offset 180
@@ -153,14 +154,15 @@ def select_closest_to_mean(
 
 
 def select_closest_by_geometry(
-    geom: np.ndarray, target: np.ndarray, *, dihedral_col: int | None = None
+    geom: np.ndarray, target: np.ndarray, *, dihedral_cols: Sequence[int] | None = None
 ) -> int:
     """Return index of row in geom closest to target in geometry space."""
     diff = geom - target[None, :]
-    if dihedral_col is not None:
-        # Shortest signed angular difference in degrees.
-        ang = diff[:, dihedral_col]
-        diff[:, dihedral_col] = (ang + 180.0) % 360.0 - 180.0
+    if dihedral_cols is not None:
+        # Shortest signed angular differences in degrees (for each dihedral column).
+        for dc in dihedral_cols:
+            ang = diff[:, dc]
+            diff[:, dc] = (ang + 180.0) % 360.0 - 180.0
     d2 = np.sum(diff * diff, axis=1)
     return int(np.argmin(d2))
 
@@ -213,11 +215,18 @@ def compute_geometry_for_layer(
         if angle is not None:
             row.append(analysis.calculate_angle(xyz, angle[0], angle[1], angle[2]))
         if dihedral is not None:
-            row.append(
-                analysis.calculate_dihedral(
-                    xyz, dihedral[0], dihedral[1], dihedral[2], dihedral[3]
+            # Backwards compatible: a single dihedral tuple/list is accepted,
+            # but we also allow a list of dihedrals (each 4 indices).
+            if isinstance(dihedral, (list, tuple)) and len(dihedral) == 4 and all(
+                isinstance(x, (int, np.integer)) for x in dihedral
+            ):
+                dihedrals = [dihedral]
+            else:
+                dihedrals = list(dihedral)
+            for d in dihedrals:
+                row.append(
+                    analysis.calculate_dihedral(xyz, d[0], d[1], d[2], d[3])
                 )
-            )
         results.append(row)
     return np.array(results, dtype=np.float64)
 
@@ -241,15 +250,20 @@ def circular_std_deg(angles_deg: np.ndarray) -> float:
     return float(np.rad2deg(np.sqrt(-2.0 * np.log(R))))
 
 
-def _dihedral_column_index(bond=None, angle=None, dihedral=None) -> Optional[int]:
+def _dihedral_column_indices(
+    bond=None, angle=None, dihedral=None
+) -> Optional[List[int]]:
     if dihedral is None:
         return None
-    idx = 0
+    base = 0
     if bond is not None:
-        idx += 1
+        base += 1
     if angle is not None:
-        idx += 1
-    return idx
+        base += 1
+    n_dihedrals = 1
+    if isinstance(dihedral, list) and dihedral and isinstance(dihedral[0], (list, tuple)):
+        n_dihedrals = len(dihedral)
+    return list(range(base, base + n_dihedrals))
 
 
 def _column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
@@ -259,9 +273,14 @@ def _column_labels(bond=None, angle=None, dihedral=None) -> List[str]:
     if angle is not None:
         labels.append(f"Angle {angle[0] + 1}-{angle[1] + 1}-{angle[2] + 1} (°)")
     if dihedral is not None:
-        labels.append(
-            f"Dihedral {dihedral[0] + 1}-{dihedral[1] + 1}-{dihedral[2] + 1}-{dihedral[3] + 1} (°)"
-        )
+        if isinstance(dihedral, list) and dihedral and isinstance(dihedral[0], (list, tuple)):
+            dihedrals = dihedral
+        else:
+            dihedrals = [dihedral]
+        for d in dihedrals:
+            labels.append(
+                f"Dihedral {d[0] + 1}-{d[1] + 1}-{d[2] + 1}-{d[3] + 1} (°)"
+            )
     return labels
 
 
@@ -484,9 +503,13 @@ def main():
         "--dihedral",
         type=int,
         nargs=4,
+        action="append",
         default=None,
         metavar=("I", "J", "K", "L"),
-        help="Dihedral atom indices I J K L (0-indexed)",
+        help=(
+            "Dihedral atom indices I J K L (0-indexed). "
+            "May be provided multiple times to plot multiple dihedrals."
+        ),
     )
     parser.add_argument(
         "--dihedral-offset",
@@ -526,6 +549,14 @@ def main():
         "--show-individuals",
         action="store_true",
         help="Also plot each individual candidate as a faint line.",
+    )
+    parser.add_argument(
+        "--overlay",
+        action="store_true",
+        help=(
+            "Plot all requested coordinates on one shared axis (overlay), "
+            "instead of one subplot per coordinate."
+        ),
     )
     parser.add_argument(
         "--no-kabsch",
@@ -636,10 +667,8 @@ def main():
         if args.angle is not None:
             parts.append(f"angle-{args.angle[0]}-{args.angle[1]}-{args.angle[2]}")
         if args.dihedral is not None:
-            parts.append(
-                f"dihedral-{args.dihedral[0]}-{args.dihedral[1]}"
-                f"-{args.dihedral[2]}-{args.dihedral[3]}"
-            )
+            for d in args.dihedral:
+                parts.append(f"dihedral-{d[0]}-{d[1]}-{d[2]}-{d[3]}")
         if args.topM is not None:
             parts.append(f"topM-{args.topM}")
         args.output_plot = "_".join(parts) + ".png"
@@ -665,7 +694,7 @@ def main():
         bond=args.bond, angle=args.angle, dihedral=args.dihedral
     )
     n_cols = len(col_labels)
-    dihedral_col = _dihedral_column_index(
+    dihedral_cols = _dihedral_column_indices(
         bond=args.bond, angle=args.angle, dihedral=args.dihedral
     )
 
@@ -741,17 +770,18 @@ def main():
             geom = compute_geometry_for_layer(
                 layer, bond=args.bond, angle=args.angle, dihedral=args.dihedral
             )
-            if dihedral_col is not None:
-                if args.dihedral_offset != 0.0:
-                    geom[:, dihedral_col] = (
-                        geom[:, dihedral_col] + args.dihedral_offset
-                    )
-                if args.dihedral_negate:
-                    geom[:, dihedral_col] *= -1.0
+            if dihedral_cols is not None:
+                for dc in dihedral_cols:
+                    if args.dihedral_offset != 0.0:
+                        geom[:, dc] = geom[:, dc] + args.dihedral_offset
+                    if args.dihedral_negate:
+                        geom[:, dc] *= -1.0
             all_geom.append(geom)
 
             for ci in range(n_cols):
-                if ci == dihedral_col:
+                if dihedral_cols is not None and ci in dihedral_cols:
+                    # Compute circular statistics on the *raw dihedral* (before offset/negate),
+                    # then map back into the stored (offset/negate applied) representation.
                     if args.dihedral_negate:
                         wrapped = -geom[:, ci] - args.dihedral_offset
                     else:
@@ -767,7 +797,7 @@ def main():
 
             if using_geometry_closest:
                 closest_idx = select_closest_by_geometry(
-                    geom, means[ti, :], dihedral_col=dihedral_col
+                    geom, means[ti, :], dihedral_cols=dihedral_cols
                 )
             else:
                 closest_idx = select_closest_to_mean(
@@ -849,7 +879,7 @@ def main():
     tick_fs = 10.0 * font_scale
     legend_fs = 10.0 * font_scale
 
-    if n_cols == 1:
+    if n_cols == 1 or args.overlay:
         fig, ax = plt.subplots(figsize=(10, 6))
         axes = [ax]
     else:
@@ -857,45 +887,93 @@ def main():
         if not isinstance(axes, (list, np.ndarray)):
             axes = [axes]
 
-    for i in range(n_cols):
-        ax = axes[i]
+    closest_plot_label = (
+        "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
+    )
 
-        if args.show_individuals and all_geom:
-            max_candidates = max(g.shape[0] for g in all_geom)
-            for ci in range(max_candidates):
-                ys = []
-                xs = []
-                for ti in range(n_timesteps):
-                    if ci < all_geom[ti].shape[0]:
-                        xs.append(x[ti])
-                        ys.append(all_geom[ti][ci, i])
-                ax.plot(xs, ys, linewidth=0.3, alpha=0.15, color="grey")
+    if args.overlay and n_cols > 1:
+        ax = axes[0]
+        # Use consistent per-coordinate colors.
+        for i in range(n_cols):
+            color = f"C{i % 10}"
 
-        ax.plot(x, means[:, i], linewidth=2, label="mean", color="C0")
-        ax.fill_between(
-            x,
-            means[:, i] - stds[:, i],
-            means[:, i] + stds[:, i],
-            alpha=0.2,
-            color="C0",
-            label="±1σ",
-        )
-        closest_plot_label = (
-            "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
-        )
-        ax.plot(
-            x,
-            closest[:, i],
-            linewidth=2,
-            label=closest_plot_label,
-            color="C1",
-            linestyle="--",
-        )
-        ax.set_ylabel(col_labels[i], fontsize=label_fs)
+            if args.show_individuals and all_geom:
+                max_candidates = max(g.shape[0] for g in all_geom)
+                for ci in range(max_candidates):
+                    ys = []
+                    xs = []
+                    for ti in range(n_timesteps):
+                        if ci < all_geom[ti].shape[0]:
+                            xs.append(x[ti])
+                            ys.append(all_geom[ti][ci, i])
+                    ax.plot(xs, ys, linewidth=0.25, alpha=0.06, color=color)
+
+            ax.plot(
+                x,
+                means[:, i],
+                linewidth=2,
+                label=f"mean: {col_labels[i]}",
+                color=color,
+            )
+            ax.fill_between(
+                x,
+                means[:, i] - stds[:, i],
+                means[:, i] + stds[:, i],
+                alpha=0.12,
+                color=color,
+                linewidth=0,
+            )
+            ax.plot(
+                x,
+                closest[:, i],
+                linewidth=2,
+                label=f"{closest_plot_label}: {col_labels[i]}",
+                color=color,
+                linestyle="--",
+                alpha=0.95,
+            )
+
+        ax.set_ylabel("value", fontsize=label_fs)
         ax.tick_params(axis="both", labelsize=tick_fs)
         ax.grid(True, alpha=0.3)
-        if i == 0:
-            ax.legend(fontsize=legend_fs)
+        ax.legend(fontsize=legend_fs)
+    else:
+        for i in range(n_cols):
+            ax = axes[i]
+
+            if args.show_individuals and all_geom:
+                max_candidates = max(g.shape[0] for g in all_geom)
+                for ci in range(max_candidates):
+                    ys = []
+                    xs = []
+                    for ti in range(n_timesteps):
+                        if ci < all_geom[ti].shape[0]:
+                            xs.append(x[ti])
+                            ys.append(all_geom[ti][ci, i])
+                    ax.plot(xs, ys, linewidth=0.3, alpha=0.15, color="grey")
+
+            ax.plot(x, means[:, i], linewidth=2, label="mean", color="C0")
+            ax.fill_between(
+                x,
+                means[:, i] - stds[:, i],
+                means[:, i] + stds[:, i],
+                alpha=0.2,
+                color="C0",
+                label="±1σ",
+            )
+            ax.plot(
+                x,
+                closest[:, i],
+                linewidth=2,
+                label=closest_plot_label,
+                color="C1",
+                linestyle="--",
+            )
+            ax.set_ylabel(col_labels[i], fontsize=label_fs)
+            ax.tick_params(axis="both", labelsize=tick_fs)
+            ax.grid(True, alpha=0.3)
+            if i == 0:
+                ax.legend(fontsize=legend_fs)
 
     axes[-1].set_xlabel("time (fs)", fontsize=label_fs)
     xleft = 0.0 if args.xmin is None else float(args.xmin)
