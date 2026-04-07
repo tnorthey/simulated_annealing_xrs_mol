@@ -144,6 +144,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         help='Atom indices to use for alignment (default: all). Example: "0-5,8,10-12".',
     )
     p.add_argument(
+        "--translation-indices",
+        default="",
+        help=(
+            "Atom indices to use for translation centroids (default: same as --indices). "
+            'Example: "0-13" or "0-5".'
+        ),
+    )
+    p.add_argument(
+        "--translate-all",
+        action="store_true",
+        help="Use all atoms for translation centroids (rotation still uses --indices).",
+    )
+    p.add_argument(
         "--one-based",
         action="store_true",
         help="Interpret --indices as 1-based (e.g. '1-3' means atoms 0..2).",
@@ -169,6 +182,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     if len(indices) == 0:
         raise ValueError("No indices selected for alignment")
 
+    if args.translate_all and args.translation_indices.strip():
+        raise ValueError("Use either --translate-all or --translation-indices, not both")
+
+    if args.translate_all:
+        t_indices = list(range(natom))
+    elif args.translation_indices.strip():
+        t_indices = _parse_indices(
+            args.translation_indices, natom=natom, one_based=args.one_based
+        )
+        if len(t_indices) == 0:
+            raise ValueError("No indices selected for translation centroids")
+    else:
+        t_indices = indices
+
     xyz_util = Xyz()
 
     aligned: List[XyzFrame] = []
@@ -178,12 +205,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         for t in range(1, nframe):
             fr = frames[t]
 
-            ref_sel = prev_aligned.xyz[indices, :]
-            ref_centroid = ref_sel.mean(axis=0)
-            mov_sel = fr.xyz[indices, :]
-            mov_centroid = mov_sel.mean(axis=0)
+            ref_centroid = prev_aligned.xyz[t_indices, :].mean(axis=0)
+            mov_centroid = fr.xyz[t_indices, :].mean(axis=0)
 
-            rmsd, R = xyz_util.rmsd_kabsch(fr.xyz, prev_aligned.xyz, indices)
+            # Defensive: pass copies in case rmsd_kabsch ever mutates inputs.
+            rmsd, R = xyz_util.rmsd_kabsch(fr.xyz.copy(), prev_aligned.xyz.copy(), indices)
             xyz_aligned = (fr.xyz - mov_centroid) @ R + ref_centroid
 
             comment = fr.comment
@@ -200,14 +226,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
 
         ref = frames[args.ref_frame]
-        ref_sel = ref.xyz[indices, :]
-        ref_centroid = ref_sel.mean(axis=0)
+        ref_centroid = ref.xyz[t_indices, :].mean(axis=0)
 
         for fr in frames:
-            mov_sel = fr.xyz[indices, :]
-            mov_centroid = mov_sel.mean(axis=0)
+            mov_centroid = fr.xyz[t_indices, :].mean(axis=0)
 
-            rmsd, R = xyz_util.rmsd_kabsch(fr.xyz, ref.xyz, indices)
+            # Defensive: pass copies in case rmsd_kabsch ever mutates inputs.
+            rmsd, R = xyz_util.rmsd_kabsch(fr.xyz.copy(), ref.xyz.copy(), indices)
             xyz_aligned = (fr.xyz - mov_centroid) @ R + ref_centroid
 
             comment = fr.comment

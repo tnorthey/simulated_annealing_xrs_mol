@@ -86,9 +86,10 @@ class Xyz:
 
     def rmsd_kabsch(self, xyz, xyz_, indices):
         """RMSD between xyz and xyz_ for atom indices"""
-        # take the indices for xyz
-        xyz = xyz[indices, :]
-        xyz_ = xyz_[indices, :]
+        # Take the indices for xyz.
+        # IMPORTANT: copy to avoid mutating caller arrays (slicing can return views).
+        xyz = np.array(xyz[indices, :], dtype=float, copy=True)
+        xyz_ = np.array(xyz_[indices, :], dtype=float, copy=True)
         # centre them (remove effect of translations)
         xyz -= xyz.mean(axis=0)
         xyz_ -= xyz_.mean(axis=0)
