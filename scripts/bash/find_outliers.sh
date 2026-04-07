@@ -117,7 +117,7 @@ case "$action" in
     ;;
 esac
 
-if [[ "$action" == "delete" && "$yes_delete" -ne 1 ]]; then
+if [[ "$action" == "delete" && "$yes_delete" -ne 1 && "$dry_run" -ne 1 ]]; then
   echo "Refusing to delete without --yes" >&2
   echo "Tip: run with --dry-run first, then re-run with --yes" >&2
   exit 1
@@ -173,7 +173,7 @@ case "$action" in
   move)
     if [[ "$dry_run" -eq 1 ]]; then
       for f in "${outliers[@]}"; do
-        echo "would_move	$f	->	$outdir/" >&2
+        echo "would_move	$f	->	$outdir/"
       done
       printf "%s\n" "${outliers[@]}"
       exit 0
@@ -187,7 +187,7 @@ case "$action" in
   delete)
     if [[ "$dry_run" -eq 1 ]]; then
       for f in "${outliers[@]}"; do
-        echo "would_delete	$f" >&2
+        echo "would_delete	$f"
       done
       printf "%s\n" "${outliers[@]}"
       exit 0
