@@ -128,6 +128,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("input_xyz", help="Input XYZ trajectory (multi-frame XYZ).")
     p.add_argument("output_xyz", help="Output aligned XYZ trajectory.")
     p.add_argument(
+        "--sequential",
+        action="store_true",
+        help="Align frame t to the (aligned) frame t-1 (overrides --ref-frame).",
+    )
+    p.add_argument(
         "--ref-frame",
         type=int,
         default=0,
@@ -160,33 +165,59 @@ def main(argv: Sequence[str] | None = None) -> int:
     nframe = len(frames)
     natom = len(frames[0].atoms)
 
-    if args.ref_frame < 0 or args.ref_frame >= nframe:
-        raise ValueError(f"--ref-frame {args.ref_frame} out of range [0, {nframe-1}]")
-
     indices = _parse_indices(args.indices, natom=natom, one_based=args.one_based)
     if len(indices) == 0:
         raise ValueError("No indices selected for alignment")
 
-    ref = frames[args.ref_frame]
-    ref_sel = ref.xyz[indices, :]
-    ref_centroid = ref_sel.mean(axis=0)
-
     xyz_util = Xyz()
 
     aligned: List[XyzFrame] = []
-    for fr in frames:
-        mov_sel = fr.xyz[indices, :]
-        mov_centroid = mov_sel.mean(axis=0)
+    if args.sequential:
+        prev_aligned = frames[0]
+        aligned.append(prev_aligned)
+        for t in range(1, nframe):
+            fr = frames[t]
 
-        rmsd, R = xyz_util.rmsd_kabsch(fr.xyz, ref.xyz, indices)
-        xyz_aligned = (fr.xyz - mov_centroid) @ R + ref_centroid
+            ref_sel = prev_aligned.xyz[indices, :]
+            ref_centroid = ref_sel.mean(axis=0)
+            mov_sel = fr.xyz[indices, :]
+            mov_centroid = mov_sel.mean(axis=0)
 
-        comment = fr.comment
-        if args.annotate_rmsd:
-            suffix = f" | rmsd_kabsch={rmsd:.6f}A ref={args.ref_frame} idx={len(indices)}"
-            comment = (comment + suffix).strip()
+            rmsd, R = xyz_util.rmsd_kabsch(fr.xyz, prev_aligned.xyz, indices)
+            xyz_aligned = (fr.xyz - mov_centroid) @ R + ref_centroid
 
-        aligned.append(XyzFrame(comment=comment, atoms=fr.atoms, xyz=xyz_aligned))
+            comment = fr.comment
+            if args.annotate_rmsd:
+                suffix = f" | rmsd_kabsch={rmsd:.6f}A ref=t-1 idx={len(indices)}"
+                comment = (comment + suffix).strip()
+
+            prev_aligned = XyzFrame(comment=comment, atoms=fr.atoms, xyz=xyz_aligned)
+            aligned.append(prev_aligned)
+    else:
+        if args.ref_frame < 0 or args.ref_frame >= nframe:
+            raise ValueError(
+                f"--ref-frame {args.ref_frame} out of range [0, {nframe-1}]"
+            )
+
+        ref = frames[args.ref_frame]
+        ref_sel = ref.xyz[indices, :]
+        ref_centroid = ref_sel.mean(axis=0)
+
+        for fr in frames:
+            mov_sel = fr.xyz[indices, :]
+            mov_centroid = mov_sel.mean(axis=0)
+
+            rmsd, R = xyz_util.rmsd_kabsch(fr.xyz, ref.xyz, indices)
+            xyz_aligned = (fr.xyz - mov_centroid) @ R + ref_centroid
+
+            comment = fr.comment
+            if args.annotate_rmsd:
+                suffix = (
+                    f" | rmsd_kabsch={rmsd:.6f}A ref={args.ref_frame} idx={len(indices)}"
+                )
+                comment = (comment + suffix).strip()
+
+            aligned.append(XyzFrame(comment=comment, atoms=fr.atoms, xyz=xyz_aligned))
 
     write_xyz_trajectory(args.output_xyz, aligned)
     return 0
