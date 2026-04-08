@@ -42,6 +42,9 @@ if (!exists("COLB")) COLB = "#666666"
 if (!exists("LW")) LW = 2.0
 if (!exists("PS")) PS = 0.75
 
+# Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
+if (!exists("SHOW_KEY")) SHOW_KEY = 0
+
 # Column mapping (1-indexed)
 # Col 1 must be x. Each panel can plot up to 2 curves (A + optional B).
 xcol = 1
@@ -132,7 +135,8 @@ set style line 2 lw LW pt 5 ps PS
 # Errorbar lines: thinner than the main curve
 eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
 
-set key opaque box lw 0.6
+unset key
+if (SHOW_KEY) set key opaque box lw 0.6
 unset title
 
 # Shared x-range (only set if user provided both XMIN and XMAX)
@@ -160,7 +164,7 @@ if (exists("YTIC_STEP1")) set ytics YTIC_STEP1
 if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
 if (exists("Y1MIN") && exists("Y1MAX")) { set yrange [Y1MIN:Y1MAX] } else { unset yrange }
-set key top right
+if (SHOW_KEY) set key top right
 if (yBcol>0) {
   plot \
     DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 notitle, \
