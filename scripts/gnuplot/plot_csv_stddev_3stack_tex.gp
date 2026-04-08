@@ -38,6 +38,10 @@ if (!exists("COL3")) COL3 = "#d95f02"
 # Optional curve B color (if you enable yBcol>0)
 if (!exists("COLB")) COLB = "#666666"
 
+# Line/point styling knobs (override via -e "LW=...;PS=...")
+if (!exists("LW")) LW = 2.0
+if (!exists("PS")) PS = 0.75
+
 # Column mapping (1-indexed)
 # Col 1 must be x. Each panel can plot up to 2 curves (A + optional B).
 xcol = 1
@@ -82,9 +86,15 @@ if (exists("YTIC_STEP1")) YTIC_STEP1 = YTIC_STEP1 + 0
 if (exists("YTIC_STEP2")) YTIC_STEP2 = YTIC_STEP2 + 0
 if (exists("YTIC_STEP3")) YTIC_STEP3 = YTIC_STEP3 + 0
 
-# Figure size (inches) — tune for your paper layout
-W = 3.35
-H = 3.35
+# Figure size (inches) — tune for your paper layout (override via -e "W=...;H=...")
+if (!exists("W")) W = 3.35
+if (!exists("H")) H = 3.35
+
+# Multiplot margins (screen fractions; override via -e "MLEFT=...;...")
+if (!exists("MLEFT"))   MLEFT   = 0.14
+if (!exists("MRIGHT"))  MRIGHT  = 0.98
+if (!exists("MBOTTOM")) MBOTTOM = 0.16
+if (!exists("MTOP"))    MTOP    = 0.98
 
 # Typography
 font = "Latin Modern Roman,10"
@@ -111,14 +121,16 @@ set border linewidth 1.2
 set tics scale 0.75
 set xtics nomirror
 set ytics nomirror
+set mxtics 2
+set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
 
 # Styles (colors are used per-panel below via COL1/COL2/COL3)
-set style line 1 lw 2.0 pt 7 ps 0.75
-set style line 2 lw 2.0 pt 5 ps 0.75
+set style line 1 lw LW pt 7 ps PS
+set style line 2 lw LW pt 5 ps PS
 
 # Errorbar lines: thinner than the main curve
-eblw = 1.0
+eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
 
 set key opaque box lw 0.6
 unset title
@@ -131,7 +143,7 @@ if (exists("XMIN") && exists("XMAX")) { set xrange [XMIN:XMAX] } else { unset xr
 # -------------------------------
 # spacing 0,0 ensures no gaps between panels. We also suppress redundant x-tics.
 # margins left, right, bottom, top
-set multiplot layout 3,1 rowsfirst margins 0.14,0.98,0.16,0.98 spacing 0.0,0.0
+set multiplot layout 3,1 rowsfirst margins MLEFT,MRIGHT,MBOTTOM,MTOP spacing 0.0,0.0
 
 # Helper: apply y-range if both bounds are defined; else autoscale.
 #
