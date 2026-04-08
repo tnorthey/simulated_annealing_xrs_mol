@@ -68,9 +68,17 @@ if (!exists("Y3LABEL")) Y3LABEL = "$y_3$ (units)"
 
 # Tick spacing (explicit and easy).
 # By default, gnuplot chooses tics automatically.
-# To force spacing, set e.g. XTIC_STEP=50 and/or YTIC_STEP=0.2.
-if (exists("XTIC_STEP")) XTIC_STEP = XTIC_STEP + 0
-if (exists("YTIC_STEP")) YTIC_STEP = YTIC_STEP + 0
+# Shared x-axis:
+#   XTIC_STEP=50
+# Per-panel y-axis (preferred):
+#   YTIC_STEP1=0.2; YTIC_STEP2=5; YTIC_STEP3=1
+# Optional fallback (applies to all panels if a panel-specific value is not set):
+#   YTIC_STEP=0.5
+if (exists("XTIC_STEP"))  XTIC_STEP  = XTIC_STEP  + 0
+if (exists("YTIC_STEP"))  YTIC_STEP  = YTIC_STEP  + 0
+if (exists("YTIC_STEP1")) YTIC_STEP1 = YTIC_STEP1 + 0
+if (exists("YTIC_STEP2")) YTIC_STEP2 = YTIC_STEP2 + 0
+if (exists("YTIC_STEP3")) YTIC_STEP3 = YTIC_STEP3 + 0
 
 # Figure size (inches) — tune for your paper layout
 W = 3.35
@@ -134,8 +142,9 @@ unset xlabel
 set format x ""          # hide x tick labels (shared x-axis shown on bottom panel)
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics
-if (exists("YTIC_STEP")) set ytics YTIC_STEP
-if (!exists("YTIC_STEP")) set ytics
+if (exists("YTIC_STEP1")) set ytics YTIC_STEP1
+if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
 if (exists("Y1MIN") && exists("Y1MAX")) { set yrange [Y1MIN:Y1MAX] } else { unset yrange }
 set key top right
 if (yBcol>0) {
@@ -156,8 +165,9 @@ unset xlabel
 set format x ""
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics
-if (exists("YTIC_STEP")) set ytics YTIC_STEP
-if (!exists("YTIC_STEP")) set ytics
+if (exists("YTIC_STEP2")) set ytics YTIC_STEP2
+if (!exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (!exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
 if (exists("Y2MIN") && exists("Y2MAX")) { set yrange [Y2MIN:Y2MAX] } else { unset yrange }
 unset key
 if (yBcol>0) {
@@ -178,8 +188,9 @@ set xlabel XLABEL
 set format x "%g"        # show x tick labels only on bottom panel
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics
-if (exists("YTIC_STEP")) set ytics YTIC_STEP
-if (!exists("YTIC_STEP")) set ytics
+if (exists("YTIC_STEP3")) set ytics YTIC_STEP3
+if (!exists("YTIC_STEP3") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (!exists("YTIC_STEP3") && !exists("YTIC_STEP")) set ytics
 if (exists("Y3MIN") && exists("Y3MAX")) { set yrange [Y3MIN:Y3MAX] } else { unset yrange }
 unset key
 if (yBcol>0) {
