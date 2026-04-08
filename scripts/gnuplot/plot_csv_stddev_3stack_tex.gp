@@ -106,8 +106,8 @@ if (!exists("MRIGHT"))  MRIGHT  = 0.98
 if (!exists("MBOTTOM")) MBOTTOM = 0.16
 if (!exists("MTOP"))    MTOP    = 0.98
 
-# Typography
-font = "Latin Modern Roman,10"
+# Typography (override via -e "FONT='Latin Modern Roman,8'")
+if (!exists("FONT")) FONT = "Latin Modern Roman,10"
 
 # -------------------------------
 # Input parsing
@@ -121,7 +121,7 @@ set key autotitle columnhead
 # -------------------------------
 # Terminal: standalone LaTeX + PDF via cairo
 # -------------------------------
-set terminal cairolatex pdf standalone size W,H font font dashed color
+set terminal cairolatex pdf standalone size W,H font FONT dashed color
 set output sprintf("%s.tex", OUTBASE)
 
 # -------------------------------
