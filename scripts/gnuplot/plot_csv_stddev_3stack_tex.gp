@@ -174,13 +174,13 @@ if (exists("Y1MIN") && exists("Y1MAX")) { set yrange [Y1MIN:Y1MAX] } else { unse
 if (SHOW_KEY) set key top right
 if (yBcol>0) {
   plot \
-    DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 notitle, \
+    DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
     DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA, \
-    DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB notitle, \
+    DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
     DATA1 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB title nameB
 } else {
   plot \
-    DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 notitle, \
+    DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
     DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA
 }
 
@@ -197,13 +197,13 @@ if (exists("Y2MIN") && exists("Y2MAX")) { set yrange [Y2MIN:Y2MAX] } else { unse
 unset key
 if (yBcol>0) {
   plot \
-    DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 notitle, \
+    DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
     DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle, \
-    DATA2 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB notitle, \
+    DATA2 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
     DATA2 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
 } else {
   plot \
-    DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 notitle, \
+    DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
     DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle
 }
 
@@ -220,13 +220,13 @@ if (exists("Y3MIN") && exists("Y3MAX")) { set yrange [Y3MIN:Y3MAX] } else { unse
 unset key
 if (yBcol>0) {
   plot \
-    DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 notitle, \
+    DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 pt -1 notitle, \
     DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle, \
-    DATA3 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB notitle, \
+    DATA3 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
     DATA3 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
 } else {
   plot \
-    DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 notitle, \
+    DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 pt -1 notitle, \
     DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle
 }
 
