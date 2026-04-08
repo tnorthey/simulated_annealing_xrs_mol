@@ -35,7 +35,7 @@ xcol = 1
 
 # Curve A columns (mean and its standard deviation)
 yAcol  = 2
-sdAcol = 3
+sdAcol = 4
 nameA  = "Series A"
 
 # Optional curve B columns (set yBcol=0 to disable entirely)
@@ -44,7 +44,7 @@ sdBcol = 5
 nameB  = "Series B"
 
 # Axis labels (LaTeX allowed)
-if (!exists("XLABEL")) XLABEL = "$x$ (units)"
+if (!exists("XLABEL")) XLABEL = "$t$ (fs)"
 if (!exists("Y1LABEL")) Y1LABEL = "$y_1$ (units)"
 if (!exists("Y2LABEL")) Y2LABEL = "$y_2$ (units)"
 if (!exists("Y3LABEL")) Y3LABEL = "$y_3$ (units)"
@@ -59,7 +59,7 @@ if (!exists("Y3LABEL")) Y3LABEL = "$y_3$ (units)"
 
 # Figure size (inches) — tune for your paper layout
 W = 3.35
-H = 6.30
+H = 3.35
 
 # Typography
 font = "Latin Modern Roman,10"
@@ -104,7 +104,8 @@ if (exists("XMIN") && exists("XMAX")) { set xrange [XMIN:XMAX] } else { unset xr
 # Multiplot layout: 3 rows, 1 column, zero spacing
 # -------------------------------
 # spacing 0,0 ensures no gaps between panels. We also suppress redundant x-tics.
-set multiplot layout 3,1 rowsfirst margins 0.14,0.98,0.08,0.98 spacing 0.0,0.0
+# margins left, right, bottom, top
+set multiplot layout 3,1 rowsfirst margins 0.14,0.98,0.16,0.98 spacing 0.0,0.0
 
 # Helper: apply y-range if both bounds are defined; else autoscale.
 #
