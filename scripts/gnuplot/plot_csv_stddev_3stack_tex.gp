@@ -52,11 +52,13 @@ yBcol  = 0
 sdBcol = 5
 nameB  = "Series B"
 
-# Axis labels (LaTeX allowed)
-if (!exists("XLABEL")) XLABEL = "$t$ (fs)"
-if (!exists("Y1LABEL")) Y1LABEL = "$y_1$ (units)"
-if (!exists("Y2LABEL")) Y2LABEL = "$y_2$ (units)"
-if (!exists("Y3LABEL")) Y3LABEL = "$y_3$ (units)"
+# Axis labels (LaTeX allowed).
+# Use single quotes for defaults: some LaTeX strings behave better than with
+# double quotes depending on terminal/escaping.
+if (!exists("XLABEL"))  XLABEL  = '$t$ (fs)'
+if (!exists("Y1LABEL")) Y1LABEL = '$y_1$ (units)'
+if (!exists("Y2LABEL")) Y2LABEL = '$y_2$ (units)'
+if (!exists("Y3LABEL")) Y3LABEL = '$y_3$ (units)'
 
 # X-range shared across all panels (autoscale by default).
 # To force a range, pass BOTH bounds, e.g.:
