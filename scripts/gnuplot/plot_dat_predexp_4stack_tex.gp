@@ -60,6 +60,18 @@ if (!exists("PS")) PS = 0.75
 # Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
 if (!exists("SHOW_KEY")) SHOW_KEY = 0
 
+# Per-panel textbox labels (top-left inside each panel).
+# Set e.g. -e "TEXTBOX1='10 fs';TEXTBOX2='30 fs';TEXTBOX3='50 fs';TEXTBOX4='70 fs'"
+if (!exists("TEXTBOX1")) TEXTBOX1 = ''
+if (!exists("TEXTBOX2")) TEXTBOX2 = ''
+if (!exists("TEXTBOX3")) TEXTBOX3 = ''
+if (!exists("TEXTBOX4")) TEXTBOX4 = ''
+
+# Textbox placement (graph coordinates) and style
+if (!exists("TBX")) TBX = 0.02
+if (!exists("TBY")) TBY = 0.92
+if (!exists("TB_FONTSIZE")) TB_FONTSIZE = 10
+
 # Plot mode: choose between lines only or lines+points.
 # - PLOTMODE='LINES'  -> curves are drawn with 'with lines'
 # - PLOTMODE='LP'     -> curves are drawn with 'with linespoints' (default)
@@ -141,6 +153,8 @@ if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
 if (exists("Y1MIN") && exists("Y1MAX")) { set yrange [Y1MIN:Y1MAX] } else { unset yrange }
 if (SHOW_KEY) set key top right
+unset label
+if (strlen(TEXTBOX1) > 0) set label 1 TEXTBOX1 at graph TBX,TBY front tc rgb "black" font sprintf(",%d",TB_FONTSIZE) boxed
 plot \
   PRED1 using xcol:ycol with @PLOT_WITH ls 1 lc rgb COL1 title 'pred', \
   EXP1  using xcol:ycol with @PLOT_WITH ls 2 lc rgb COLEXP title 'exp'
@@ -156,6 +170,8 @@ if (!exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
 if (exists("Y2MIN") && exists("Y2MAX")) { set yrange [Y2MIN:Y2MAX] } else { unset yrange }
 unset key
+unset label
+if (strlen(TEXTBOX2) > 0) set label 2 TEXTBOX2 at graph TBX,TBY front tc rgb "black" font sprintf(",%d",TB_FONTSIZE) boxed
 plot \
   PRED2 using xcol:ycol with @PLOT_WITH ls 1 lc rgb COL2 notitle, \
   EXP2  using xcol:ycol with @PLOT_WITH ls 2 lc rgb COLEXP notitle
@@ -171,6 +187,8 @@ if (!exists("YTIC_STEP3") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP3") && !exists("YTIC_STEP")) set ytics
 if (exists("Y3MIN") && exists("Y3MAX")) { set yrange [Y3MIN:Y3MAX] } else { unset yrange }
 unset key
+unset label
+if (strlen(TEXTBOX3) > 0) set label 3 TEXTBOX3 at graph TBX,TBY front tc rgb "black" font sprintf(",%d",TB_FONTSIZE) boxed
 plot \
   PRED3 using xcol:ycol with @PLOT_WITH ls 1 lc rgb COL3 notitle, \
   EXP3  using xcol:ycol with @PLOT_WITH ls 2 lc rgb COLEXP notitle
@@ -186,6 +204,8 @@ if (!exists("YTIC_STEP4") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP4") && !exists("YTIC_STEP")) set ytics
 if (exists("Y4MIN") && exists("Y4MAX")) { set yrange [Y4MIN:Y4MAX] } else { unset yrange }
 unset key
+unset label
+if (strlen(TEXTBOX4) > 0) set label 4 TEXTBOX4 at graph TBX,TBY front tc rgb "black" font sprintf(",%d",TB_FONTSIZE) boxed
 plot \
   PRED4 using xcol:ycol with @PLOT_WITH ls 1 lc rgb COL4 notitle, \
   EXP4  using xcol:ycol with @PLOT_WITH ls 2 lc rgb COLEXP notitle
