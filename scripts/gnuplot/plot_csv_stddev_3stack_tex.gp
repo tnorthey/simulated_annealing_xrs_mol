@@ -45,8 +45,12 @@ if (!exists("PS")) PS = 0.75
 # Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
 if (!exists("SHOW_KEY")) SHOW_KEY = 0
 
-# If PS<=0, disable points entirely (use 'with lines' instead of 'linespoints').
-POINTS_ON = (PS > 0)
+# Plot mode: choose between lines only or lines+points.
+# - PLOTMODE='LINES'  -> curves are drawn with 'with lines'
+# - PLOTMODE='LP'     -> curves are drawn with 'with linespoints' (default)
+set macros
+if (!exists("PLOTMODE")) PLOTMODE = 'LP'
+PLOT_WITH = (PLOTMODE eq 'LINES') ? 'lines' : 'linespoints'
 
 # Column mapping (1-indexed)
 # Col 1 must be x. Each panel can plot up to 2 curves (A + optional B).
@@ -171,13 +175,13 @@ if (SHOW_KEY) set key top right
 if (yBcol>0) {
   plot \
     DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 notitle, \
-    DATA1 using xcol:yAcol        with (POINTS_ON ? linespoints : lines) ls 1 lc rgb COL1 title nameA, \
+    DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA, \
     DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB notitle, \
-    DATA1 using xcol:yBcol        with (POINTS_ON ? linespoints : lines) ls 2 lc rgb COLB title nameB
+    DATA1 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB title nameB
 } else {
   plot \
     DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 notitle, \
-    DATA1 using xcol:yAcol        with (POINTS_ON ? linespoints : lines) ls 1 lc rgb COL1 title nameA
+    DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA
 }
 
 # ---- Panel 2 ----
@@ -194,13 +198,13 @@ unset key
 if (yBcol>0) {
   plot \
     DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 notitle, \
-    DATA2 using xcol:yAcol        with (POINTS_ON ? linespoints : lines) ls 1 lc rgb COL2 notitle, \
+    DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle, \
     DATA2 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB notitle, \
-    DATA2 using xcol:yBcol        with (POINTS_ON ? linespoints : lines) ls 2 lc rgb COLB notitle
+    DATA2 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
 } else {
   plot \
     DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 notitle, \
-    DATA2 using xcol:yAcol        with (POINTS_ON ? linespoints : lines) ls 1 lc rgb COL2 notitle
+    DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle
 }
 
 # ---- Panel 3 ----
@@ -217,13 +221,13 @@ unset key
 if (yBcol>0) {
   plot \
     DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 notitle, \
-    DATA3 using xcol:yAcol        with (POINTS_ON ? linespoints : lines) ls 1 lc rgb COL3 notitle, \
+    DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle, \
     DATA3 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB notitle, \
-    DATA3 using xcol:yBcol        with (POINTS_ON ? linespoints : lines) ls 2 lc rgb COLB notitle
+    DATA3 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
 } else {
   plot \
     DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 notitle, \
-    DATA3 using xcol:yAcol        with (POINTS_ON ? linespoints : lines) ls 1 lc rgb COL3 notitle
+    DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle
 }
 
 unset multiplot
