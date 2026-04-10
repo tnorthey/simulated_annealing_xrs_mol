@@ -436,10 +436,16 @@ class Input_to_params:
                 f'Error: tuning_ratio_target ({self.tuning_ratio_target}) must be between 0 and 1\n'
                 f'  Suggestion: Set 0 <= tuning_ratio_target <= 1 (typically 0.3-0.7)'
             )
-        if self.c_tuning_initial <= 0:
+        if self.c_tuning_initial < 0:
             errors.append(
-                f'Error: c_tuning_initial ({self.c_tuning_initial}) must be positive\n'
-                f'  Suggestion: Set c_tuning_initial > 0 (typically 0.001-0.1)'
+                f'Error: c_tuning_initial ({self.c_tuning_initial}) must be >= 0\n'
+                f'  Suggestion: Set c_tuning_initial > 0 (typically 0.001-0.1), '
+                f'or set c_tuning_initial = 0 to enable signal_only_mode'
+            )
+        if self.c_tuning_initial == 0 and not self.signal_only_mode_bool:
+            errors.append(
+                "Error: c_tuning_initial = 0 requires signal_only_mode_bool = true\n"
+                "  Suggestion: Either set signal_only_mode_bool = true, or set c_tuning_initial > 0"
             )
         if self.n_tuning_update_freq < 0:
             errors.append(
