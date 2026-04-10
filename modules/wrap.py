@@ -1079,6 +1079,7 @@ class Wrapper:
         xyz_start_ = xyz_start  # save original xyz_start as xyz_start_
         # Tuning parameter
         c_tuning = p.c_tuning_initial  # initialise C_tuning
+        signal_only_mode = bool(getattr(p, "signal_only_mode_bool", False))
         use_gpu_persistent = (
             getattr(p, "gpu_backend", "cpu") == "cuda"
             and not getattr(p, "gpu_emulation_bool", False)
@@ -1258,51 +1259,60 @@ class Wrapper:
             # #endregion
 
             ### analysis on xyz_best
-            # bond-length of interest
-            bond_distance = np.linalg.norm(
-                xyz_best[p.bond_indices[0], :] - xyz_best[p.bond_indices[1], :]
-            )
-            # angle of interest
-            p0 = np.array(xyz_best[p.angle_indices[0], :])
-            p1 = np.array(xyz_best[p.angle_indices[1], :])  # central point
-            p2 = np.array(xyz_best[p.angle_indices[2], :])
-            angle_degrees = analysis.directional_angle_3d(p0, p1, p2, [0, 1, 0])
-            # dihedral of interest
-            p0 = np.array(xyz_best[p.dihedral_indices[0], :])
-            p1 = np.array(xyz_best[p.dihedral_indices[1], :])
-            p2 = np.array(xyz_best[p.dihedral_indices[2], :])
-            p3 = np.array(xyz_best[p.dihedral_indices[3], :])
-            dihedral = analysis.new_dihedral((p0, p1, p2, p3))
-            rmsd_target_bool = True
-            if rmsd_target_bool:
-                # rmsd compared to target
-                # Kabsch rotation to target
-                rmsd, r = m.rmsd_kabsch(xyz_best, target_xyz, p.rmsd_indices)
-                # MAPD compared to target
-                mapd = m.mapd_function(xyz_best, target_xyz, p.rmsd_indices)
-                # save target xyz
-                m.write_xyz(
-                    "%s/%s_target.xyz" % (p.results_dir, run_id),
-                    ".dat file case: xyz_start (not target_xyz)",
-                    atomlist,
-                    target_xyz,
+            # In signal-only mode, skip geometry/HF analysis entirely.
+            if signal_only_mode:
+                bond_distance = 0.0
+                angle_degrees = 0.0
+                dihedral = 0.0
+                rmsd = 0.0
+                mapd = 0.0
+                e_mol = 0.0
+            else:
+                # bond-length of interest
+                bond_distance = np.linalg.norm(
+                    xyz_best[p.bond_indices[0], :] - xyz_best[p.bond_indices[1], :]
                 )
-            else:
-                bond_distance, angle_degrees, dihedral = 0, 0, 0
-                rmsd, mapd, e_mol = 0, 0, 0
-            # HF energy with PySCF
-            if p.hf_energy and HAVE_PYSCF:
-                mol = gto.Mole()
-                arr = []
-                for i in range(len(atomlist)):
-                    arr.append((atomlist[i], xyz_best[i]))
-                mol.atom = arr
-                mol.basis = "6-31g*"
-                mol.build()
-                rhf_mol = scf.RHF(mol)  # run RHF
-                e_mol = rhf_mol.kernel()
-            else:
-                e_mol = 0
+                # angle of interest
+                p0 = np.array(xyz_best[p.angle_indices[0], :])
+                p1 = np.array(xyz_best[p.angle_indices[1], :])  # central point
+                p2 = np.array(xyz_best[p.angle_indices[2], :])
+                angle_degrees = analysis.directional_angle_3d(p0, p1, p2, [0, 1, 0])
+                # dihedral of interest
+                p0 = np.array(xyz_best[p.dihedral_indices[0], :])
+                p1 = np.array(xyz_best[p.dihedral_indices[1], :])
+                p2 = np.array(xyz_best[p.dihedral_indices[2], :])
+                p3 = np.array(xyz_best[p.dihedral_indices[3], :])
+                dihedral = analysis.new_dihedral((p0, p1, p2, p3))
+                rmsd_target_bool = True
+                if rmsd_target_bool:
+                    # rmsd compared to target
+                    # Kabsch rotation to target
+                    rmsd, r = m.rmsd_kabsch(xyz_best, target_xyz, p.rmsd_indices)
+                    # MAPD compared to target
+                    mapd = m.mapd_function(xyz_best, target_xyz, p.rmsd_indices)
+                    # save target xyz
+                    m.write_xyz(
+                        "%s/%s_target.xyz" % (p.results_dir, run_id),
+                        ".dat file case: xyz_start (not target_xyz)",
+                        atomlist,
+                        target_xyz,
+                    )
+                else:
+                    bond_distance, angle_degrees, dihedral = 0, 0, 0
+                    rmsd, mapd, e_mol = 0, 0, 0
+                # HF energy with PySCF
+                if p.hf_energy and HAVE_PYSCF:
+                    mol = gto.Mole()
+                    arr = []
+                    for i in range(len(atomlist)):
+                        arr.append((atomlist[i], xyz_best[i]))
+                    mol.atom = arr
+                    mol.basis = "6-31g*"
+                    mol.build()
+                    rhf_mol = scf.RHF(mol)  # run RHF
+                    e_mol = rhf_mol.kernel()
+                else:
+                    e_mol = 0
             # encode the analysis values into the xyz header
             header_str = "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f" % (
                 f_xray_best,

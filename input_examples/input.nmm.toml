@@ -147,6 +147,9 @@ torsions_bool = true
 tuning_ratio_target = 0.5
 # Initial tuning constant (C_tuning) for balancing X-ray vs. geometric constraints
 c_tuning_initial = 0.1
+# Signal-only mode: skip MD/MM priors entirely and optimize X-ray objective only.
+# Alias: c_tuning_initial = 0 implies signal_only_mode_bool = true.
+signal_only_mode_bool = false
 # Only use non-hydrogen normal modes in optimization
 non_h_modes_only_bool = false
 # Damping factor for hydrogen modes (multiplies step size for hydrogen modes, typically < 1.0)

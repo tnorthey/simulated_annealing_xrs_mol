@@ -235,6 +235,11 @@ class Input_to_params:
         self.c_tuning_initial = float(
             data["simulated_annealing_params"]["c_tuning_initial"]
         )
+        # Optional: signal-only mode (skip MD/MM priors entirely; X-ray objective only).
+        # Default False for backwards compatibility.
+        self.signal_only_mode_bool = bool(
+            data.get("simulated_annealing_params", {}).get("signal_only_mode_bool", False)
+        )
         # Optional: update c_tuning inside SA every N steps (0 disables; legacy behavior).
         self.n_tuning_update_freq = int(
             data.get("simulated_annealing_params", {}).get("n_tuning_update_freq", 0)
@@ -248,6 +253,30 @@ class Input_to_params:
         self.hf_energy = bool(
             data["simulated_annealing_params"]["hf_energy_bool"]
         )  # run PySCF HF energy
+
+        # ------------------------------------------------------------------
+        # Normalize signal-only mode / c_tuning_initial aliasing & precedence
+        # ------------------------------------------------------------------
+        # Requirement:
+        # - c_tuning_initial = 0  <=>  signal_only_mode_bool = true
+        # - If signal_only_mode_bool is true, force c_tuning_initial = 0
+        if self.c_tuning_initial == 0 and not self.signal_only_mode_bool:
+            self.signal_only_mode_bool = True
+            print(
+                "INFO: c_tuning_initial=0 implies signal_only_mode=true; "
+                "skipping MD/MM priors (OpenMM/SDF/MM params) and geometry terms."
+            )
+        if self.signal_only_mode_bool and self.c_tuning_initial != 0:
+            print(
+                "INFO: signal_only_mode=true forces c_tuning_initial=0; "
+                "skipping MD/MM priors (OpenMM/SDF/MM params) and geometry terms."
+            )
+            self.c_tuning_initial = 0.0
+        if self.signal_only_mode_bool:
+            # Ensure geometry terms are disabled consistently.
+            self.bonds_bool = False
+            self.angles_bool = False
+            self.torsions_bool = False
 
         # molecule params
         try:
@@ -663,10 +692,15 @@ class Input_to_params:
         
         # 9. Check for logical inconsistencies
         if not self.bonds_bool and not self.angles_bool and not self.torsions_bool:
-            warnings.append(
-                'Warning: All geometric constraints are disabled (bonds_bool, angles_bool, torsions_bool all False)\n'
-                '  Suggestion: Consider enabling at least one constraint type for better structure preservation'
-            )
+            if getattr(self, "signal_only_mode_bool", False):
+                warnings.append(
+                    "Info: signal_only_mode is enabled; all geometric constraints are disabled by design."
+                )
+            else:
+                warnings.append(
+                    'Warning: All geometric constraints are disabled (bonds_bool, angles_bool, torsions_bool all False)\n'
+                    '  Suggestion: Consider enabling at least one constraint type for better structure preservation'
+                )
         
         if self.sa_nsteps == 0 and self.ga_nsteps == 0:
             errors.append(

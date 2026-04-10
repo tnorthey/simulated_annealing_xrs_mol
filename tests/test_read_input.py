@@ -48,6 +48,103 @@ class TestInputToParams:
         # Other parameters should remain unchanged
         assert p.mode == "test"
 
+    def test_signal_only_alias_c_tuning_zero(self):
+        """c_tuning_initial=0 enables signal-only mode and disables geometry terms."""
+        toml_content = '''mode = "test"
+[run_params]
+run_id = "test"
+results_dir = "test"
+
+[files]
+forcefield_file = "test.offxml"
+start_xyz_file = "test.xyz"
+start_sdf_file = "test.sdf"
+reference_xyz_file = "test_ref.xyz"
+target_file = "test_target.xyz"
+
+[options]
+run_pyscf_modes_bool = false
+pyscf_basis = "6-31g"
+verbose_bool = false
+write_dat_file_bool = false
+
+[sampling]
+sampling_bool = false
+boltzmann_temperature = 300.0
+
+[scattering_params]
+inelastic_bool = true
+pcd_mode_bool = false
+excitation_factor = 1.0
+
+[scattering_params.q]
+qmin = 0.1
+qmax = 10.0
+qlen = 50
+
+[scattering_params.ewald]
+ewald_mode_bool = false
+
+[scattering_params.ewald.th]
+tmin = 0.0
+tmax = 1.0
+tlen = 21
+
+[scattering_params.ewald.ph]
+pmin = 0.0
+pmax = 2.0
+plen = 21
+
+[scattering_params.noise]
+noise_value = 0.0
+noise_data_file = "noise.dat"
+
+[simulated_annealing_params]
+sa_starting_temp = 1.0
+sa_nsteps = 1000
+greedy_algorithm_bool = false
+ga_nsteps = 5000
+sa_step_size = 0.01
+ga_step_size = 0.01
+nrestarts = 1
+ntotalruns = 1
+bonds_bool = true
+angles_bool = true
+torsions_bool = true
+tuning_ratio_target = 1.0
+c_tuning_initial = 0
+non_h_modes_only_bool = false
+hydrogen_mode_damping_factor = 0.2
+hf_energy_bool = false
+
+[molecule_params]
+natoms = 2
+nmodes = 6
+hydrogen_mode_range = [4, 6]
+sa_mode_range = [0, 6]
+ga_mode_range = [0, 6]
+bond_ignore_array = []
+angle_ignore_array = []
+torsion_ignore_array = []
+rmsd_indices = [0, 1]
+bond_indices = [0, 1]
+angle_indices = []
+dihedral_indices = []
+'''
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.toml', delete=False) as f:
+            f.write(toml_content)
+            temp_file = f.name
+        try:
+            p = Input_to_params(temp_file)
+            assert p.signal_only_mode_bool is True
+            assert p.c_tuning_initial == 0.0
+            assert p.bonds_bool is False
+            assert p.angles_bool is False
+            assert p.torsions_bool is False
+        finally:
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+
     def test_gpu_chains_validation(self, sample_toml_file):
         """Test gpu_chains must be >= 1."""
         overrides = {"options.gpu_chains": 0}

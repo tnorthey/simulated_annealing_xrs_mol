@@ -31,6 +31,17 @@ python3 run.py
 
 Parameters are documented in `input.toml`. Command-line arguments override TOML defaults.
 
+## Signal-only mode (X-ray objective only)
+
+To skip MD/MM priors entirely (no OpenMM system, no SDF creation, no bond/angle/dihedral terms in the SA objective), enable:
+- `simulated_annealing_params.signal_only_mode_bool = true`
+
+Alias:
+- Setting `simulated_annealing_params.c_tuning_initial = 0` is treated as **equivalent** to `signal_only_mode_bool = true` and prints an informational message.
+
+CLI:
+- `python3 run.py --signal-only-mode`
+
 ## Scripts
 
 Scripts are organized under `scripts/`:

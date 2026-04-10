@@ -11,6 +11,7 @@ from timeit import default_timer
 start = default_timer()
 
 # my modules
+import numpy as np
 import modules.mol as mol
 import modules.wrap as wrap
 import modules.read_input as read_input
@@ -181,6 +182,13 @@ def create_parser():
                          dest='simulated_annealing_params.c_tuning_initial',
                          help='Initial C tuning')
     sa_group.add_argument(
+        '--signal-only-mode',
+        action='store_true',
+        dest='simulated_annealing_params.signal_only_mode_bool',
+        help='Signal-only mode: skip MD/MM priors entirely (X-ray objective only). '
+             'Also implied by c_tuning_initial=0.',
+    )
+    sa_group.add_argument(
         '--n-tuning-update-freq',
         type=int,
         dest='simulated_annealing_params.n_tuning_update_freq',
@@ -225,8 +233,15 @@ m = mol.Xyz()
 w = wrap.Wrapper()
 p = read_input.Input_to_params(args.config, overrides=overrides)
 
-# Call the params function and add them to p object
-p = w.run_xyz_openff_mm_params(p, p.start_xyz_file)
+# Call the params function and add them to p object (unless signal-only mode)
+if getattr(p, "signal_only_mode_bool", False):
+    # Provide empty parameter arrays with correct shapes for SA.
+    p.bond_param_array = np.zeros((0, 4), dtype=np.float64)
+    p.angle_param_array = np.zeros((0, 5), dtype=np.float64)
+    p.torsion_param_array = np.zeros((0, 6), dtype=np.float64)
+    print("Signal-only mode enabled: skipping MM/OpenMM/SDF parameter setup.")
+else:
+    p = w.run_xyz_openff_mm_params(p, p.start_xyz_file)
 
 # Call the run function
 w.run(p)
