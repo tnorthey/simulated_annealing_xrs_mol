@@ -11,7 +11,7 @@ mode = "normal"
 # ============================================================================
 [run_params]
 # Unique identifier for this run (used in output filenames)
-run_id = "39"
+run_id = "nmm"
 # Directory where results will be saved
 results_dir = "results"
 
@@ -31,7 +31,10 @@ reference_xyz_file = "xyz/nmm_opt.xyz"
 # If empty string or not provided, reference IAM is calculated from reference_xyz_file
 #reference_dat_file = "data/chd_reference.dat"
 # Target file: XYZ file (for "test" mode) or DAT file (for "normal" mode)
-target_file = "nmm_data/target_39.dat"
+target_file = "nmm_data/target_18.dat"
+#ab_initio_scattering_file = "chd+_data/CCSD_neut_scat_plus44.dat"
+# When ab_initio_scattering_file is set: "elastic" => c = I_ab_initio / I_elastic_IAM(ref), SA uses c×I_elastic; "total" => c = I_ab_initio / I_total_IAM(ref), SA uses c×I_total (includes Compton if inelastic).
+#ab_initio_correction_mode = "elastic"
 
 # ============================================================================
 # OPTIONS
@@ -46,9 +49,9 @@ verbose_bool = false
 # Write DAT file output with scattering data
 write_dat_file_bool = true
 # MM parameter retrieval method: "sdf" (try SDF method first, fallback to basic) or "basic" (use basic method directly)
-mm_param_method = "basic"
+mm_param_method = "sdf"
 # GPU backend for simulated annealing: "cpu" or "cuda"
-gpu_backend = "cuda"
+gpu_backend = "cpu"
 # Emulate CUDA backend on CPU (useful for laptop testing)
 gpu_emulation_bool = false
 # Number of independent chains to run in parallel on GPU backend
@@ -124,19 +127,19 @@ noise_data_file = "data/noise.dat"
 # Starting temperature for simulated annealing (controls acceptance probability)
 sa_starting_temp = 1.0
 # Number of steps in simulated annealing phase
-sa_nsteps = 4000
+sa_nsteps = 8000
 # Enable greedy algorithm phase after simulated annealing
 greedy_algorithm_bool = true
 # Number of steps in greedy algorithm phase
-ga_nsteps = 20000
+ga_nsteps = 4000
 # Step size for simulated annealing (controls displacement magnitude)
 sa_step_size = 0.024
 # Step size for greedy algorithm
 ga_step_size = 0.024
 # Number of restarts (each restart uses best structure from previous restart)
-nrestarts = 5
+nrestarts = 1
 # Total number of runs (repeats entire process ntotalruns times)
-ntotalruns = 1
+ntotalruns = 8
 # Enable bond length constraints (harmonic oscillator potential)
 bonds_bool = true
 # Enable bond angle constraints (harmonic oscillator potential)
@@ -148,8 +151,11 @@ tuning_ratio_target = 0.5
 # Initial tuning constant (C_tuning) for balancing X-ray vs. geometric constraints
 c_tuning_initial = 0.1
 # Signal-only mode: skip MD/MM priors entirely and optimize X-ray objective only.
-# Alias: c_tuning_initial = 0 implies signal_only_mode_bool = true.
+# - When true: bonds/angles/torsions are disabled and MM/OpenMM/SDF setup is skipped.
+# - Alias: c_tuning_initial = 0 implies signal_only_mode_bool = true.
 signal_only_mode_bool = false
+# Optional: update c_tuning inside SA every N steps (0 disables; legacy behavior updates only between restarts)
+n_tuning_update_freq = 100
 # Only use non-hydrogen normal modes in optimization
 non_h_modes_only_bool = false
 # Damping factor for hydrogen modes (multiplies step size for hydrogen modes, typically < 1.0)
@@ -158,7 +164,7 @@ hydrogen_mode_damping_factor = 0.2
 hf_energy_bool = false
 
 # ============================================================================
-# MOLECULE PARAMETERS
+# MOLECULE-SPECIFIC PARAMETERS: CHD (1,3-Cyclohexadiene)
 # ============================================================================
 [molecule_params]
 # Number of atoms in the molecule
