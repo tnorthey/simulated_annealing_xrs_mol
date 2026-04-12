@@ -48,7 +48,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-import modules.analysis as analysis
+# Repo root (parent of `modules/`) so the script runs when invoked from any cwd.
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+import modules.analysis as analysis  # noqa: E402
 
 NAME_RE = re.compile(r"^(?P<t>\d+?)_(?P<fit>\d+(?:\.\d+)?)(?P<rest>.*)$")
 
