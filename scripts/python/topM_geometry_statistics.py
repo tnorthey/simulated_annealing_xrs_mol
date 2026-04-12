@@ -27,6 +27,17 @@ Usage:
 
 Time axis (default matches former hard-coded mapping: 10 + i*20 in fs):
     python3 topM_geometry_statistics.py results/ ... --dt 0.05 --time-units ps --time-origin 0
+    # N points from T0 to T1 (e.g. 99 rows → dt_eff = 5/98 ps, not 0.05):
+    python3 topM_geometry_statistics.py results/ ... --time-units ps --time-origin -1 --time-end 4
+    # Or one time per timestep (same order as sorted frames):
+    python3 topM_geometry_statistics.py results/ ... --time-file path/to/time.dat
+
+Uniform grid math: N equally spaced samples from T0 to T1 use
+dt_eff = (T1 - T0) / max(N - 1, 1) (e.g. 99 points from -1 ps to 4 ps → dt_eff = 5/98 ps,
+not 0.05 ps). Use --time-origin T0 --time-end T1 with --time-basis plot-index to match
+that linspace. If physics time is t = -1 + (step-1)*0.05 for 1-based step id, step 99 is
+at 3.9 ps unless the schedule uses a different rule. Use --time-basis filename-step so
+the axis follows the integer in each filename (e.g. 18_..., 99_...), not the plot row index.
 
 Target vs closest candidate scattering (optional):
     For each timestep the chosen structure is e.g. 18_000.12482393.xyz; the script overlays
@@ -66,6 +77,66 @@ def parse_name(path):
     t = int(m.group("t"))
     fit = float(m.group("fit"))
     return t, fit
+
+
+def sorted_timestep_ids_from_directory(directory: str) -> list[int]:
+    """Sorted timestep integers from ``<t>_<fit>...`` xyz names (same keys as load_topM_candidates)."""
+    xyzs = glob.glob(os.path.join(directory, "*.xyz"))
+    ids: set[int] = set()
+    for p in xyzs:
+        parsed = parse_name(p)
+        if parsed:
+            ids.add(parsed[0])
+    if not ids:
+        raise RuntimeError(
+            f"No xyz files with expected naming pattern found in {directory}"
+        )
+    return sorted(ids)
+
+
+def load_time_values_from_file(path: str) -> np.ndarray:
+    """Load one time per row; first column used if the file has multiple columns. Lines starting with # skipped."""
+    try:
+        raw = np.loadtxt(path, dtype=np.float64, comments="#")
+    except OSError as e:
+        raise SystemExit(f"--time-file: cannot read {path!r}: {e}") from e
+    except ValueError as e:
+        raise SystemExit(
+            f"--time-file: failed to parse numbers in {path!r}: {e}\n"
+            "Expected one value per line (whitespace-separated), or a single column."
+        ) from e
+    arr = np.atleast_1d(np.asarray(raw, dtype=np.float64))
+    if arr.ndim > 1:
+        arr = arr[:, 0]
+    return arr.reshape(-1)
+
+
+def build_time_axis(
+    *,
+    time_basis: str,
+    n: int,
+    timestep_ids: Sequence[int],
+    dt: float,
+    time_origin: float,
+    timestep_anchor: int | None,
+    time_end: float | None = None,
+) -> np.ndarray:
+    """Time coordinate for each row: plot row index, linspace endpoints, or filename step ids."""
+    if time_basis == "plot-index" and time_end is not None:
+        if n <= 0:
+            raise ValueError("n must be positive")
+        if n == 1:
+            return np.array([float(time_origin)], dtype=np.float64)
+        return np.linspace(float(time_origin), float(time_end), n, dtype=np.float64)
+    if time_basis == "filename-step":
+        if len(timestep_ids) != n:
+            raise ValueError("timestep_ids length must match n")
+        anchor = float(timestep_anchor if timestep_anchor is not None else timestep_ids[0])
+        t = np.asarray(timestep_ids, dtype=np.float64)
+        return np.asarray(time_origin, dtype=np.float64) + (t - anchor) * np.asarray(
+            dt, dtype=np.float64
+        )
+    return np.arange(n, dtype=np.float64) * float(dt) + float(time_origin)
 
 
 def read_xyz_coords(path):
@@ -615,8 +686,22 @@ def main():
         default=10.0,
         metavar="T0",
         help=(
-            "Time coordinate for the first timestep index (i=0). "
-            "Default: 10 (fs with default --time-units), matching the previous hard-coded mapping."
+            "With --time-basis plot-index: time at row i=0 (start of the axis). "
+            "With --time-basis filename-step: time when the filename step id equals "
+            "--timestep-anchor (or the smallest step id if unset). "
+            "Default: 10 (fs, plot-index), matching the previous hard-coded mapping."
+        ),
+    )
+    parser.add_argument(
+        "--time-end",
+        type=float,
+        default=None,
+        metavar="T1",
+        help=(
+            "Optional end time (same units as --time-units). Only with --time-basis plot-index: "
+            "use N equally spaced times from --time-origin to T1 (like numpy.linspace), "
+            "so dt_eff = (T1 - T0) / max(N-1, 1). Overrides --dt for the time axis. "
+            "Example: 99 frames from -1 ps to 4 ps → --time-units ps --time-origin -1 --time-end 4."
         ),
     )
     parser.add_argument(
@@ -627,6 +712,39 @@ def main():
         help=(
             "Label for the time axis and CSV time column (e.g. fs, ps, ns). "
             "Default: fs. Example for 0.05 ps spacing: --dt 0.05 --time-units ps --time-origin 0"
+        ),
+    )
+    parser.add_argument(
+        "--time-basis",
+        choices=["plot-index", "filename-step"],
+        default="plot-index",
+        help=(
+            "plot-index: time = --time-origin + i*--dt for row i (0..N-1), ignoring the integer "
+            "prefix in filenames. filename-step: time = --time-origin + (t - anchor)*--dt where t "
+            "is the prefix (e.g. 18_*.xyz -> 18). Anchor is --timestep-anchor or the smallest t. "
+            "Use filename-step to match external data keyed by simulation step id."
+        ),
+    )
+    parser.add_argument(
+        "--timestep-anchor",
+        type=int,
+        default=None,
+        metavar="T",
+        help=(
+            "With --time-basis filename-step: step id at which time equals --time-origin. "
+            "Default: smallest timestep id in the xyz directory."
+        ),
+    )
+    parser.add_argument(
+        "--time-file",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Text file with one time value per timestep (same row order as sorted frames: "
+            "one number per line, or first column if multiple). Lines starting with # are ignored. "
+            "Overrides --dt, --time-end, and --time-basis for the time axis. "
+            "Must have exactly as many values as timesteps (N rows in the output CSV)."
         ),
     )
     parser.add_argument(
@@ -687,8 +805,14 @@ def main():
         parser.error("--dihedral-offset requires --dihedral")
     if args.dihedral is None and args.dihedral_negate:
         parser.error("--dihedral-negate requires --dihedral")
-    if args.dt <= 0:
-        parser.error("--dt must be positive")
+    if args.dt <= 0 and not (
+        args.time_basis == "plot-index" and args.time_end is not None
+    ) and args.time_file is None:
+        parser.error("--dt must be positive (or use --time-end with plot-index, or --time-file)")
+    if args.time_end is not None and args.time_basis != "plot-index":
+        parser.error("--time-end is only valid with --time-basis plot-index")
+    if args.time_file is not None and not os.path.isfile(args.time_file):
+        parser.error(f"--time-file: not a readable file: {args.time_file!r}")
 
     rmsd_indices: list[int] | None = None
     if args.rmsd_indices is not None:
@@ -848,7 +972,40 @@ def main():
 
         print()  # finish progress line
 
-        x = np.arange(n_timesteps, dtype=np.float64) * float(args.dt) + float(args.time_origin)
+        if args.time_file is not None:
+            x = load_time_values_from_file(args.time_file)
+            if x.size != n_timesteps:
+                raise SystemExit(
+                    f"--time-file: need {n_timesteps} values (one per timestep), "
+                    f"got {x.size} in {args.time_file!r}"
+                )
+            print(
+                f"Time axis: {x.size} values from {args.time_file!r} "
+                f"(first/last = {float(x[0]):g} / {float(x[-1]):g} {args.time_units})"
+            )
+        else:
+            x = build_time_axis(
+                time_basis=args.time_basis,
+                n=n_timesteps,
+                timestep_ids=timesteps,
+                dt=float(args.dt),
+                time_origin=float(args.time_origin),
+                timestep_anchor=args.timestep_anchor,
+                time_end=args.time_end,
+            )
+            if args.time_basis == "plot-index" and args.time_end is not None:
+                eff = (float(args.time_end) - float(args.time_origin)) / max(n_timesteps - 1, 1)
+                print(
+                    f"Time axis (linspace): {n_timesteps} points from "
+                    f"{float(args.time_origin):g} to {float(args.time_end):g} {args.time_units}, "
+                    f"effective dt = {eff:g}"
+                )
+            elif args.time_basis == "filename-step":
+                anchor = args.timestep_anchor if args.timestep_anchor is not None else timesteps[0]
+                print(
+                    f"Time axis (filename-step): anchor step id={anchor}, "
+                    f"first/last time = {float(x[0]):g} / {float(x[-1]):g} {args.time_units}"
+                )
 
         # Write CSV
         time_col = f"time_{args.time_units}"
@@ -909,6 +1066,59 @@ def main():
             mean_frames.append((natoms_ref, comment, atoms_ref, mean_coords))
         write_xyz_trajectory(mean_frames, mean_xyz_path)
         print(f"Mean trajectory written to: {mean_xyz_path}")
+
+    if loaded_from_csv and args.time_basis == "filename-step":
+        t_ids = sorted_timestep_ids_from_directory(args.directory)
+        if len(t_ids) != n_timesteps:
+            raise SystemExit(
+                f"--time-basis filename-step: found {len(t_ids)} timestep ids under "
+                f"{args.directory!r} but CSV has {n_timesteps} rows. "
+                "Use --recompute after changing inputs, or fix the directory."
+            )
+        x = build_time_axis(
+            time_basis=args.time_basis,
+            n=n_timesteps,
+            timestep_ids=t_ids,
+            dt=float(args.dt),
+            time_origin=float(args.time_origin),
+            timestep_anchor=args.timestep_anchor,
+            time_end=None,
+        )
+        anchor = args.timestep_anchor if args.timestep_anchor is not None else t_ids[0]
+        print(
+            f"Time axis (filename-step, from directory): anchor step id={anchor}, "
+            f"first/last time = {float(x[0]):g} / {float(x[-1]):g} {args.time_units}"
+        )
+
+    if loaded_from_csv and args.time_basis == "plot-index" and args.time_end is not None:
+        x = build_time_axis(
+            time_basis=args.time_basis,
+            n=n_timesteps,
+            timestep_ids=timesteps,
+            dt=float(args.dt),
+            time_origin=float(args.time_origin),
+            timestep_anchor=args.timestep_anchor,
+            time_end=args.time_end,
+        )
+        eff = (float(args.time_end) - float(args.time_origin)) / max(n_timesteps - 1, 1)
+        print(
+            f"Time axis (linspace, overriding CSV times): {n_timesteps} points "
+            f"{float(args.time_origin):g} … {float(args.time_end):g} {args.time_units}, "
+            f"effective dt = {eff:g}"
+        )
+
+    if args.time_file is not None and loaded_from_csv:
+        tx = load_time_values_from_file(args.time_file)
+        if tx.size != n_timesteps:
+            raise SystemExit(
+                f"--time-file: need {n_timesteps} values (one per timestep), "
+                f"got {tx.size} in {args.time_file!r}"
+            )
+        x = tx
+        print(
+            f"Time axis: {tx.size} values from {args.time_file!r} (overriding CSV times), "
+            f"first/last = {float(x[0]):g} / {float(x[-1]):g} {args.time_units}"
+        )
 
     # --- Plot (always runs, using either fresh or cached data) ---
     print("Creating plot...")
