@@ -25,6 +25,9 @@ Usage:
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --show-individuals
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --dihedral-offset 180
 
+Time axis (default matches former hard-coded mapping: 10 + i*20 in fs):
+    python3 topM_geometry_statistics.py results/ ... --dt 0.05 --time-units ps --time-origin 0
+
 Target vs closest candidate scattering (optional):
     For each timestep the chosen structure is e.g. 18_000.12482393.xyz; the script overlays
     the sibling file 18_000.12482393.dat with TARGET_FUNCTION_18.dat (see --plot-target-comparison).
@@ -592,10 +595,40 @@ def main():
         help="Force recomputation even if CSV from a previous run exists.",
     )
     parser.add_argument(
-        "--xmin", type=float, default=None, help="Minimum x-axis value (time in fs)."
+        "--dt",
+        type=float,
+        default=20.0,
+        metavar="T",
+        help=(
+            "Spacing between consecutive timestep indices on the time axis "
+            "(same units as --time-units). Default: 20 (fs with default --time-units)."
+        ),
     )
     parser.add_argument(
-        "--xmax", type=float, default=None, help="Maximum x-axis value (time in fs)."
+        "--time-origin",
+        type=float,
+        default=10.0,
+        metavar="T0",
+        help=(
+            "Time coordinate for the first timestep index (i=0). "
+            "Default: 10 (fs with default --time-units), matching the previous hard-coded mapping."
+        ),
+    )
+    parser.add_argument(
+        "--time-units",
+        type=str,
+        default="fs",
+        metavar="UNIT",
+        help=(
+            "Label for the time axis and CSV time column (e.g. fs, ps, ns). "
+            "Default: fs. Example for 0.05 ps spacing: --dt 0.05 --time-units ps --time-origin 0"
+        ),
+    )
+    parser.add_argument(
+        "--xmin", type=float, default=None, help="Minimum x-axis value (time in --time-units)."
+    )
+    parser.add_argument(
+        "--xmax", type=float, default=None, help="Maximum x-axis value (time in --time-units)."
     )
     parser.add_argument(
         "--ymin", type=float, default=None, help="Minimum y-axis value."
@@ -649,6 +682,8 @@ def main():
         parser.error("--dihedral-offset requires --dihedral")
     if args.dihedral is None and args.dihedral_negate:
         parser.error("--dihedral-negate requires --dihedral")
+    if args.dt <= 0:
+        parser.error("--dt must be positive")
 
     rmsd_indices: list[int] | None = None
     if args.rmsd_indices is not None:
@@ -808,10 +843,11 @@ def main():
 
         print()  # finish progress line
 
-        x = np.arange(n_timesteps, dtype=np.float64) * 20.0 + 10.0
+        x = np.arange(n_timesteps, dtype=np.float64) * float(args.dt) + float(args.time_origin)
 
         # Write CSV
-        header_parts = ["time_fs"]
+        time_col = f"time_{args.time_units}"
+        header_parts = [time_col]
         closest_prefix = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
         for label in col_labels:
             short = label.split(" (")[0].replace(" ", "_")
@@ -975,7 +1011,7 @@ def main():
             if i == 0:
                 ax.legend(fontsize=legend_fs)
 
-    axes[-1].set_xlabel("time (fs)", fontsize=label_fs)
+    axes[-1].set_xlabel(f"time ({args.time_units})", fontsize=label_fs)
     xleft = 0.0 if args.xmin is None else float(args.xmin)
     xright = None if args.xmax is None else float(args.xmax)
     for ax in axes:
