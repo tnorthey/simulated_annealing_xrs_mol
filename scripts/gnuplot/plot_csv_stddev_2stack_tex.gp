@@ -162,18 +162,20 @@ set rmargin at screen MRIGHT
 #
 
 # Pre-build plot command strings (they include plot + line continuations)
-P1_WITHB = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-          .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
-          .DATA1." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-          .DATA1." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
-P1_NO_B  = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-          .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
-P2_WITHB = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-          .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle, "\
-          .DATA2." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-          .DATA2." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB notitle"
-P2_NO_B  = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-          .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle"
+# IMPORTANT: Quote filenames, since paths often contain '-' which gnuplot may
+# otherwise parse as subtraction in expressions.
+P1_WITHB = "plot '".DATA1."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+          ."     '".DATA1."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
+          ."     '".DATA1."' using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+          ."     '".DATA1."' using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
+P1_NO_B  = "plot '".DATA1."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+          ."     '".DATA1."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
+P2_WITHB = "plot '".DATA2."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+          ."     '".DATA2."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle, "\
+          ."     '".DATA2."' using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+          ."     '".DATA2."' using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB notitle"
+P2_NO_B  = "plot '".DATA2."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+          ."     '".DATA2."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle"
 
 # Compute split for 2-row case
 if (NROWS==2) AVAILH = MTOP - MBOTTOM
