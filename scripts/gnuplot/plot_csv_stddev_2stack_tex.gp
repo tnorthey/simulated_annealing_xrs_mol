@@ -21,6 +21,11 @@
 #             "DATA2='pred2.csv';DATA2B='exp2.csv';NAME2='Pred';NAME2B='Exp'" \
 #          scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
 #
+# Circular dihedral helper (simple fix for -179 vs +179 discontinuity):
+#   gnuplot -e "DIHEDRAL_TO3601=1;DIHEDRAL_TO3601B=1;DIHEDRAL_TO3602=1;DIHEDRAL_TO3602B=1" \
+#          scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+# This remaps negatives with: y<0 ? y+360 : y (applied after negate/offset).
+#
 # Control relative heights of the 2 panels (any positive numbers; normalized):
 #   gnuplot -e "RELH1=0.7;RELH2=0.3" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
 # ------------------------------------------------------------------------------
@@ -41,6 +46,12 @@ if (!exists("DATA2B")) DATA2B = ""
 # Examples:
 #   gnuplot -e "DIHEDRAL_NEGATE1=1;DIHEDRAL_OFFSET1=360" ...
 #   gnuplot -e "DIHEDRAL_NEGATE1B=1;DIHEDRAL_OFFSET1B=180" ...
+#
+# Optional "circular" remapping (helps with -179 vs +179 discontinuity):
+#   if enabled: y<0 ? y+360 : y
+# Examples:
+#   gnuplot -e "DIHEDRAL_TO3601=1" ...
+#   gnuplot -e "DIHEDRAL_TO3601B=1;DIHEDRAL_TO3602B=1" ...
 if (!exists("DIHEDRAL_OFFSET1"))  DIHEDRAL_OFFSET1  = 0
 if (!exists("DIHEDRAL_OFFSET1B")) DIHEDRAL_OFFSET1B = 0
 if (!exists("DIHEDRAL_OFFSET2"))  DIHEDRAL_OFFSET2  = 0
@@ -49,6 +60,10 @@ if (!exists("DIHEDRAL_NEGATE1"))  DIHEDRAL_NEGATE1  = 0
 if (!exists("DIHEDRAL_NEGATE1B")) DIHEDRAL_NEGATE1B = 0
 if (!exists("DIHEDRAL_NEGATE2"))  DIHEDRAL_NEGATE2  = 0
 if (!exists("DIHEDRAL_NEGATE2B")) DIHEDRAL_NEGATE2B = 0
+if (!exists("DIHEDRAL_TO3601"))   DIHEDRAL_TO3601   = 0
+if (!exists("DIHEDRAL_TO3601B"))  DIHEDRAL_TO3601B  = 0
+if (!exists("DIHEDRAL_TO3602"))   DIHEDRAL_TO3602   = 0
+if (!exists("DIHEDRAL_TO3602B"))  DIHEDRAL_TO3602B  = 0
 
 DIHEDRAL_OFFSET1  = DIHEDRAL_OFFSET1  + 0
 DIHEDRAL_OFFSET1B = DIHEDRAL_OFFSET1B + 0
@@ -58,11 +73,17 @@ DIHEDRAL_NEGATE1  = DIHEDRAL_NEGATE1  + 0
 DIHEDRAL_NEGATE1B = DIHEDRAL_NEGATE1B + 0
 DIHEDRAL_NEGATE2  = DIHEDRAL_NEGATE2  + 0
 DIHEDRAL_NEGATE2B = DIHEDRAL_NEGATE2B + 0
+DIHEDRAL_TO3601   = DIHEDRAL_TO3601   + 0
+DIHEDRAL_TO3601B  = DIHEDRAL_TO3601B  + 0
+DIHEDRAL_TO3602   = DIHEDRAL_TO3602   + 0
+DIHEDRAL_TO3602B  = DIHEDRAL_TO3602B  + 0
 
 MUL1  = (DIHEDRAL_NEGATE1  != 0) ? -1 : 1
 MUL1B = (DIHEDRAL_NEGATE1B != 0) ? -1 : 1
 MUL2  = (DIHEDRAL_NEGATE2  != 0) ? -1 : 1
 MUL2B = (DIHEDRAL_NEGATE2B != 0) ? -1 : 1
+
+to360(x) = (x < 0 ? x + 360 : x)
 
 # Auto-detect which panels are available by checking whether the CSV exists and is non-empty.
 is_nonempty_file(f) = int(system(sprintf("bash -lc \"test -s '%s' && echo 1 || echo 0\" ", f)))
@@ -98,11 +119,20 @@ if (!exists("COL2")) COL2 = "#7570b3"
 if (!exists("COL1B")) COL1B = "#d95f02"
 if (!exists("COL2B")) COL2B = "#e7298a"
 
+# Global color overrides (apply to both panels)
+# -e "COLOR='#000000'" forces COL1 and COL2 to the same color
+# -e "COLORB='#666666'" forces COL1B and COL2B to the same color
+if (exists("COLOR"))  COL1 = COLOR
+if (exists("COLOR"))  COL2 = COLOR
+if (exists("COLORB")) COL1B = COLORB
+if (exists("COLORB")) COL2B = COLORB
+
 # Optional curve B color (if you enable yBcol>0)
 if (!exists("COLB")) COLB = "#666666"
 
 # Line/point styling knobs (override via -e "LW=...;PS=...")
 if (!exists("LW")) LW = 2.0
+if (!exists("LWB")) LWB = LW
 if (!exists("PS")) PS = 0.75
 if (!exists("PSB")) PSB = PS
 PSB = PSB + 0
@@ -110,6 +140,8 @@ if (!exists("PT"))  PT  = 7
 if (!exists("PTB")) PTB = 5
 PT  = PT  + 0
 PTB = PTB + 0
+LW  = LW  + 0
+LWB = LWB + 0
 
 # Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
 if (!exists("SHOW_KEY")) SHOW_KEY = 0
@@ -200,10 +232,11 @@ set mxtics 2
 set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
 
-set style line 1 lw LW pt PT  ps PS
-set style line 2 lw LW pt PTB ps PSB
+set style line 1 lw LW  pt PT  ps PS
+set style line 2 lw LWB pt PTB ps PSB
 
 eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
+eblwB = (LWB < 1.0 ? 1.0 : 0.5*LWB)
 
 unset key
 if (SHOW_KEY) set key opaque box lw 0.6
@@ -245,15 +278,28 @@ if (exists("Y2MAX")) Y2MAX = Y2MAX + 0
 # Pre-build plot command strings (they include plot + line continuations)
 # IMPORTANT: Quote filenames, since paths often contain '-' which gnuplot may
 # otherwise parse as subtraction in expressions.
+# Build per-dataset y expressions (negate -> offset -> optional to360)
+YCOL = sprintf("%d", yAcol)
+
+YEXPR1  = "(MUL1*$".YCOL."+DIHEDRAL_OFFSET1)"
+YEXPR1B = "(MUL1B*$".YCOL."+DIHEDRAL_OFFSET1B)"
+YEXPR2  = "(MUL2*$".YCOL."+DIHEDRAL_OFFSET2)"
+YEXPR2B = "(MUL2B*$".YCOL."+DIHEDRAL_OFFSET2B)"
+
+if (DIHEDRAL_TO3601  != 0) YEXPR1  = "to360(".YEXPR1.")"
+if (DIHEDRAL_TO3601B != 0) YEXPR1B = "to360(".YEXPR1B.")"
+if (DIHEDRAL_TO3602  != 0) YEXPR2  = "to360(".YEXPR2.")"
+if (DIHEDRAL_TO3602B != 0) YEXPR2B = "to360(".YEXPR2B.")"
+
 # Base series (A) for a file: errorbars + curve.
-P1A = "'".DATA1."' using xcol:(MUL1*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1):sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-    ." '".DATA1."' using xcol:(MUL1*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1)        with @PLOT_WITH ls 1 lc rgb COL1 title NAME1"
-P1B = "'".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B):sdAcol with yerrorbars lw eblw lc rgb COL1B pt -1 notitle, "\
-    ." '".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B)        with @PLOT_WITHB ls 2 lc rgb COL1B title NAME1B"
-P2A = "'".DATA2."' using xcol:(MUL2*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2):sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-    ." '".DATA2."' using xcol:(MUL2*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2)        with @PLOT_WITH ls 1 lc rgb COL2 title NAME2"
-P2B = "'".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B):sdAcol with yerrorbars lw eblw lc rgb COL2B pt -1 notitle, "\
-    ." '".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B)        with @PLOT_WITHB ls 2 lc rgb COL2B title NAME2B"
+P1A = "'".DATA1."' using xcol:(".YEXPR1."):sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+    ." '".DATA1."' using xcol:(".YEXPR1.")        with @PLOT_WITH ls 1 lc rgb COL1 title NAME1"
+P1B = "'".DATA1B."' using xcol:(".YEXPR1B."):sdAcol with yerrorbars lw eblwB lc rgb COL1B pt -1 notitle, "\
+    ." '".DATA1B."' using xcol:(".YEXPR1B.")        with @PLOT_WITHB ls 2 lc rgb COL1B title NAME1B"
+P2A = "'".DATA2."' using xcol:(".YEXPR2."):sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+    ." '".DATA2."' using xcol:(".YEXPR2.")        with @PLOT_WITH ls 1 lc rgb COL2 title NAME2"
+P2B = "'".DATA2B."' using xcol:(".YEXPR2B."):sdAcol with yerrorbars lw eblwB lc rgb COL2B pt -1 notitle, "\
+    ." '".DATA2B."' using xcol:(".YEXPR2B.")        with @PLOT_WITHB ls 2 lc rgb COL2B title NAME2B"
 
 # Compose per-panel plot commands, optionally adding the second dataset file.
 P1_CMD = "plot ".P1A.(HAS1B ? ", ".P1B : "")
