@@ -109,6 +109,12 @@ if (!exists("MTOP"))    MTOP    = 0.98
 # Typography (override via -e "FONT='Latin Modern Roman,8'")
 if (!exists("FONT")) FONT = "Latin Modern Roman,10"
 
+# Extra LaTeX preamble for the standalone .tex (inserted before \begin{document}).
+# Example: chemistry with mhchem so labels can use \ce{...}:
+#   gnuplot -e 'LATEX_HEADER="\\usepackage[version=4]{mhchem}"' scripts/gnuplot/plot_csv_stddev_3stack_tex.gp
+# Then e.g. Y1LABEL='$\phi(\ce{C1-C2-C3-C4})$' (single-quoted gnuplot string passes backslashes to LaTeX).
+if (!exists("LATEX_HEADER")) LATEX_HEADER = ""
+
 # -------------------------------
 # Input parsing
 # -------------------------------
@@ -121,7 +127,9 @@ set key autotitle columnhead
 # -------------------------------
 # Terminal: standalone LaTeX + PDF via cairo
 # -------------------------------
-set terminal cairolatex pdf standalone size W,H font FONT dashed color
+# cairolatex `header` adds preamble lines (see LATEX_HEADER above).
+LATEX_HDR = (LATEX_HEADER ne "") ? " header '".LATEX_HEADER."'" : ""
+eval "set terminal cairolatex pdf standalone size ".sprintf("%g",W).",".sprintf("%g",H)." font '".FONT."' dashed color".LATEX_HDR
 set output sprintf("%s.tex", OUTBASE)
 
 # -------------------------------
