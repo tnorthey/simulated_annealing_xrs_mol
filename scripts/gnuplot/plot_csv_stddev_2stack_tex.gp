@@ -111,7 +111,11 @@ if (!exists("SHOW_KEY")) SHOW_KEY = 0
 # Plot mode: choose between lines only or lines+points.
 set macros
 if (!exists("PLOTMODE")) PLOTMODE = 'LP'
-PLOT_WITH = (PLOTMODE eq 'LINES') ? 'lines' : 'linespoints'
+if (!exists("PLOTMODEB")) PLOTMODEB = PLOTMODE
+
+# Supported values: 'LINES', 'LP', 'POINTS'
+PLOT_WITH  = (PLOTMODE  eq 'LINES')  ? 'lines'       : ((PLOTMODE  eq 'POINTS')  ? 'points' : 'linespoints')
+PLOT_WITHB = (PLOTMODEB eq 'LINES')  ? 'lines'       : ((PLOTMODEB eq 'POINTS') ? 'points' : 'linespoints')
 
 # Column mapping (1-indexed)
 xcol = 1
@@ -239,11 +243,11 @@ if (exists("Y2MAX")) Y2MAX = Y2MAX + 0
 P1A = "'".DATA1."' using xcol:(MUL1*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1):sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
     ." '".DATA1."' using xcol:(MUL1*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1)        with @PLOT_WITH ls 1 lc rgb COL1 title NAME1"
 P1B = "'".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B):sdAcol with yerrorbars lw eblw lc rgb COL1B pt -1 notitle, "\
-    ." '".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B)        with @PLOT_WITH ls 2 lc rgb COL1B title NAME1B"
+    ." '".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B)        with @PLOT_WITHB ls 2 lc rgb COL1B title NAME1B"
 P2A = "'".DATA2."' using xcol:(MUL2*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2):sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
     ." '".DATA2."' using xcol:(MUL2*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2)        with @PLOT_WITH ls 1 lc rgb COL2 title NAME2"
 P2B = "'".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B):sdAcol with yerrorbars lw eblw lc rgb COL2B pt -1 notitle, "\
-    ." '".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B)        with @PLOT_WITH ls 2 lc rgb COL2B title NAME2B"
+    ." '".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B)        with @PLOT_WITHB ls 2 lc rgb COL2B title NAME2B"
 
 # Compose per-panel plot commands, optionally adding the second dataset file.
 P1_CMD = "plot ".P1A.(HAS1B ? ", ".P1B : "")
