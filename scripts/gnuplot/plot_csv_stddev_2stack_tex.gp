@@ -315,11 +315,26 @@ if (exists("Y1MAX")) Y1MAX = Y1MAX + 0
 if (exists("Y2MIN")) Y2MIN = Y2MIN + 0
 if (exists("Y2MAX")) Y2MAX = Y2MAX + 0
 
+# Error rendering mode:
+# - default: classic yerrorbars
+# - optional: shaded band (mean ± SD) via filledcurves
+if (!exists("SHADE_ALPHA")) SHADE_ALPHA = 0.20
+SHADE_ALPHA = SHADE_ALPHA + 0
+if (!exists("SHADEDERRORS1"))  SHADEDERRORS1  = 0
+if (!exists("SHADEDERRORS1B")) SHADEDERRORS1B = 0
+if (!exists("SHADEDERRORS2"))  SHADEDERRORS2  = 0
+if (!exists("SHADEDERRORS2B")) SHADEDERRORS2B = 0
+SHADEDERRORS1  = SHADEDERRORS1  + 0
+SHADEDERRORS1B = SHADEDERRORS1B + 0
+SHADEDERRORS2  = SHADEDERRORS2  + 0
+SHADEDERRORS2B = SHADEDERRORS2B + 0
+
 # Pre-build plot command strings (they include plot + line continuations)
 # IMPORTANT: Quote filenames, since paths often contain '-' which gnuplot may
 # otherwise parse as subtraction in expressions.
 # Build per-dataset y expressions (negate -> optional to360 -> offset)
 YCOL = sprintf("%d", yAcol)
+SDCOL = sprintf("%d", sdAcol)
 
 YEXPR1  = "(MUL1*$".YCOL.")"
 YEXPR1B = "(MUL1B*$".YCOL.")"
@@ -336,15 +351,31 @@ YEXPR1B = "(".YEXPR1B."+DIHEDRAL_OFFSET1B)"
 YEXPR2  = "(".YEXPR2 ."+DIHEDRAL_OFFSET2)"
 YEXPR2B = "(".YEXPR2B."+DIHEDRAL_OFFSET2B)"
 
+# Shaded band expressions (mean ± SD). SD is taken from $SDCOL.
+YLO1  = "(".YEXPR1 ." - $".SDCOL.")"
+YHI1  = "(".YEXPR1 ." + $".SDCOL.")"
+YLO1B = "(".YEXPR1B." - $".SDCOL.")"
+YHI1B = "(".YEXPR1B." + $".SDCOL.")"
+YLO2  = "(".YEXPR2 ." - $".SDCOL.")"
+YHI2  = "(".YEXPR2 ." + $".SDCOL.")"
+YLO2B = "(".YEXPR2B." - $".SDCOL.")"
+YHI2B = "(".YEXPR2B." + $".SDCOL.")"
+
 # Base series (A) for a file: errorbars + curve.
-P1A = "'".DATA1."' using xcol:(".YEXPR1."):sdAcol with yerrorbars lw eblw1  lc rgb COL1  pt -1 notitle, "\
-    ." '".DATA1."' using xcol:(".YEXPR1.")        with @PLOT_WITH  ls 11 lc rgb COL1  title NAME1"
-P1B = "'".DATA1B."' using xcol:(".YEXPR1B."):sdAcol with yerrorbars lw eblw1B lc rgb COL1B pt -1 notitle, "\
-    ." '".DATA1B."' using xcol:(".YEXPR1B.")        with @PLOT_WITHB ls 12 lc rgb COL1B title NAME1B"
-P2A = "'".DATA2."' using xcol:(".YEXPR2."):sdAcol with yerrorbars lw eblw2  lc rgb COL2  pt -1 notitle, "\
-    ." '".DATA2."' using xcol:(".YEXPR2.")        with @PLOT_WITH  ls 21 lc rgb COL2  title NAME2"
-P2B = "'".DATA2B."' using xcol:(".YEXPR2B."):sdAcol with yerrorbars lw eblw2B lc rgb COL2B pt -1 notitle, "\
-    ." '".DATA2B."' using xcol:(".YEXPR2B.")        with @PLOT_WITHB ls 22 lc rgb COL2B title NAME2B"
+E1  = "'".DATA1 ."' using xcol:(".YEXPR1 ."):sdAcol with yerrorbars lw eblw1  lc rgb COL1  pt -1 notitle"
+E1B = "'".DATA1B."' using xcol:(".YEXPR1B."):sdAcol with yerrorbars lw eblw1B lc rgb COL1B pt -1 notitle"
+E2  = "'".DATA2 ."' using xcol:(".YEXPR2 ."):sdAcol with yerrorbars lw eblw2  lc rgb COL2  pt -1 notitle"
+E2B = "'".DATA2B."' using xcol:(".YEXPR2B."):sdAcol with yerrorbars lw eblw2B lc rgb COL2B pt -1 notitle"
+
+if (SHADEDERRORS1  != 0) E1  = "'".DATA1 ."' using xcol:(".YLO1 ."):(".YHI1 .") with filledcurves lc rgb COL1  fs transparent solid SHADE_ALPHA noborder notitle"
+if (SHADEDERRORS1B != 0) E1B = "'".DATA1B."' using xcol:(".YLO1B."):(".YHI1B.") with filledcurves lc rgb COL1B fs transparent solid SHADE_ALPHA noborder notitle"
+if (SHADEDERRORS2  != 0) E2  = "'".DATA2 ."' using xcol:(".YLO2 ."):(".YHI2 .") with filledcurves lc rgb COL2  fs transparent solid SHADE_ALPHA noborder notitle"
+if (SHADEDERRORS2B != 0) E2B = "'".DATA2B."' using xcol:(".YLO2B."):(".YHI2B.") with filledcurves lc rgb COL2B fs transparent solid SHADE_ALPHA noborder notitle"
+
+P1A = E1  .", '".DATA1 ."' using xcol:(".YEXPR1 .") with @PLOT_WITH  ls 11 lc rgb COL1  title NAME1"
+P1B = E1B .", '".DATA1B."' using xcol:(".YEXPR1B.") with @PLOT_WITHB ls 12 lc rgb COL1B title NAME1B"
+P2A = E2  .", '".DATA2 ."' using xcol:(".YEXPR2 .") with @PLOT_WITH  ls 21 lc rgb COL2  title NAME2"
+P2B = E2B .", '".DATA2B."' using xcol:(".YEXPR2B.") with @PLOT_WITHB ls 22 lc rgb COL2B title NAME2B"
 
 # Compose per-panel plot commands, optionally adding the second dataset file.
 P1_CMD = "plot ".P1A.(HAS1B ? ", ".P1B : "")
