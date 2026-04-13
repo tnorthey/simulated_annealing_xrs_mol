@@ -40,6 +40,15 @@
 # Example:
 #   gnuplot -e "FIT1=1;FIT1_XCUT=1.0;FIT1_POLY_DEG=4;FIT2=1;FIT2_XCUT=0.5;FIT2_POLY_DEG=3;SHOW_KEY=1" ...
 # Optional: FIT_LOG='fit.log' to record fit diagnostics; FIT1_COLOR / FIT2_COLOR for the overlay line.
+# Fit algorithm tuning (gnuplot 5.4 `set fit`; applied when FIT1 or FIT2 is used):
+#   FIT_MAXITER=N     — max Marquardt–Levenberg iterations (0 = unlimited, gnuplot default).
+#   FIT_LIMIT=eps     — relative chi-squared change for convergence (default in gnuplot ~1e-5); smaller → tighter fit, often more iterations.
+#   FIT_LIMIT_ABS=eps — optional absolute chi-squared change threshold.
+#   FIT_PRESCALE=1    — prescale parameters by initial values (helps when parameter scales differ a lot).
+#   FIT_START_LAMBDA  — ML damping start (underscore name: start_lambda in `set fit`).
+#   FIT_LAMBDA_FACTOR — factor to adjust lambda (underscore: lambda_factor).
+#   FIT_ERRORVARIABLES=1 — define param_err after each fit (e.g. a_err); see `help set fit`.
+#   FIT_VERBOSE=0|1|2|3 — 0 quiet (default), 1 results only, 2 brief per iteration, 3 verbose.
 # ------------------------------------------------------------------------------
 
 # -------------------------------
@@ -269,6 +278,16 @@ FIT2_Y0_GUESS = FIT2_Y0_GUESS + 0
 FIT2_A_GUESS  = FIT2_A_GUESS  + 0
 FIT2_TAU_GUESS = FIT2_TAU_GUESS + 0
 
+# Optional `set fit` tuning (used when FIT1 or FIT2 runs; see header comment).
+if (exists("FIT_MAXITER")) FIT_MAXITER = FIT_MAXITER + 0
+if (exists("FIT_LIMIT")) FIT_LIMIT = FIT_LIMIT + 0
+if (exists("FIT_LIMIT_ABS")) FIT_LIMIT_ABS = FIT_LIMIT_ABS + 0
+if (exists("FIT_PRESCALE")) FIT_PRESCALE = FIT_PRESCALE + 0
+if (exists("FIT_START_LAMBDA")) FIT_START_LAMBDA = FIT_START_LAMBDA + 0
+if (exists("FIT_LAMBDA_FACTOR")) FIT_LAMBDA_FACTOR = FIT_LAMBDA_FACTOR + 0
+if (exists("FIT_ERRORVARIABLES")) FIT_ERRORVARIABLES = FIT_ERRORVARIABLES + 0
+if (exists("FIT_VERBOSE")) FIT_VERBOSE = FIT_VERBOSE + 0
+
 # Legend labels for per-panel datasets
 if (!exists("NAME1"))  NAME1  = "Dataset 1"
 if (!exists("NAME1B")) NAME1B = "Dataset 1B"
@@ -430,8 +449,19 @@ if (!exists("FIT_DATA_SKIP")) FIT_DATA_SKIP = 1
 FIT_DATA_SKIP = FIT_DATA_SKIP + 0
 FIT_SK = (FIT_DATA_SKIP != 0) ? "skip 1 " : ""
 
-set fit quiet
+if (exists("FIT_VERBOSE") && FIT_VERBOSE == 1) set fit results
+if (exists("FIT_VERBOSE") && FIT_VERBOSE == 2) set fit brief
+if (exists("FIT_VERBOSE") && FIT_VERBOSE == 3) set fit verbose
+if (!(exists("FIT_VERBOSE") && FIT_VERBOSE >= 1 && FIT_VERBOSE <= 3)) set fit quiet
 if (exists("FIT_LOG")) eval "set fit logfile '".FIT_LOG."'"
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_MAXITER")) eval "set fit maxiter ".sprintf("%d", FIT_MAXITER)
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_LIMIT")) eval "set fit limit ".sprintf("%g", FIT_LIMIT)
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_LIMIT_ABS")) eval "set fit limit_abs ".sprintf("%g", FIT_LIMIT_ABS)
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_PRESCALE") && FIT_PRESCALE != 0) set fit prescale
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_PRESCALE") && FIT_PRESCALE == 0) set fit noprescale
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_START_LAMBDA")) eval "set fit start_lambda ".sprintf("%g", FIT_START_LAMBDA)
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_LAMBDA_FACTOR")) eval "set fit lambda_factor ".sprintf("%g", FIT_LAMBDA_FACTOR)
+if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_ERRORVARIABLES") && FIT_ERRORVARIABLES != 0) set fit errorvariables
 
 # ---- FIT1: exponential rise (x<=xc) + polynomial tail (x>=xc) on DATA1 ----
 FIT1_APPEND = ""
