@@ -213,6 +213,13 @@ if (!exists("XLABEL"))  XLABEL  = '$t$ (fs)'
 if (!exists("Y1LABEL")) Y1LABEL = '$y_1$ (units)'
 if (!exists("Y2LABEL")) Y2LABEL = '$y_2$ (units)'
 
+# Add whitespace between y-label and plot (offset in character units).
+# Increase to push the label further left (e.g. -e "YLABEL_OFFSETX=1.5").
+if (!exists("YLABEL_OFFSETX")) YLABEL_OFFSETX = 0.75
+if (!exists("YLABEL_OFFSETY")) YLABEL_OFFSETY = 0
+YLABEL_OFFSETX = YLABEL_OFFSETX + 0
+YLABEL_OFFSETY = YLABEL_OFFSETY + 0
+
 # Tick spacing (explicit and easy).
 if (exists("XTIC_STEP"))  XTIC_STEP  = XTIC_STEP  + 0
 if (exists("YTIC_STEP"))  YTIC_STEP  = YTIC_STEP  + 0
@@ -393,7 +400,7 @@ if (NROWS==1) set bmargin at screen MBOTTOM
 if (NROWS==2) set tmargin at screen MTOP
 if (NROWS==2) set bmargin at screen YSPLIT
 
-set ylabel Y1LABEL
+set ylabel Y1LABEL offset YLABEL_OFFSETX,YLABEL_OFFSETY
 if (NROWS==1) set xlabel XLABEL
 if (NROWS==2) unset xlabel
 if (NROWS==1) set format x "%g"
@@ -414,7 +421,7 @@ eval P1_CMD
 # ---- Panel 2 (only when NROWS==2) ----
 if (NROWS==2) set tmargin at screen YSPLIT
 if (NROWS==2) set bmargin at screen MBOTTOM
-if (NROWS==2) set ylabel Y2LABEL
+if (NROWS==2) set ylabel Y2LABEL offset YLABEL_OFFSETX,YLABEL_OFFSETY
 if (NROWS==2) set xlabel XLABEL
 if (NROWS==2) set format x "%g"
 if (NROWS==2 && exists("XTIC_STEP")) set xtics XTIC_STEP
