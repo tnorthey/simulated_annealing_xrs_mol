@@ -24,7 +24,7 @@
 # Circular dihedral helper (simple fix for -179 vs +179 discontinuity):
 #   gnuplot -e "DIHEDRAL_TO3601=1;DIHEDRAL_TO3601B=1;DIHEDRAL_TO3602=1;DIHEDRAL_TO3602B=1" \
 #          scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
-# This remaps negatives with: y<0 ? y+360 : y (applied after negate/offset).
+# This remaps negatives with: y<0 ? y+360 : y (applied before offset).
 #
 # Control relative heights of the 2 panels (any positive numbers; normalized):
 #   gnuplot -e "RELH1=0.7;RELH2=0.3" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
@@ -278,18 +278,23 @@ if (exists("Y2MAX")) Y2MAX = Y2MAX + 0
 # Pre-build plot command strings (they include plot + line continuations)
 # IMPORTANT: Quote filenames, since paths often contain '-' which gnuplot may
 # otherwise parse as subtraction in expressions.
-# Build per-dataset y expressions (negate -> offset -> optional to360)
+# Build per-dataset y expressions (negate -> optional to360 -> offset)
 YCOL = sprintf("%d", yAcol)
 
-YEXPR1  = "(MUL1*$".YCOL."+DIHEDRAL_OFFSET1)"
-YEXPR1B = "(MUL1B*$".YCOL."+DIHEDRAL_OFFSET1B)"
-YEXPR2  = "(MUL2*$".YCOL."+DIHEDRAL_OFFSET2)"
-YEXPR2B = "(MUL2B*$".YCOL."+DIHEDRAL_OFFSET2B)"
+YEXPR1  = "(MUL1*$".YCOL.")"
+YEXPR1B = "(MUL1B*$".YCOL.")"
+YEXPR2  = "(MUL2*$".YCOL.")"
+YEXPR2B = "(MUL2B*$".YCOL.")"
 
 if (DIHEDRAL_TO3601  != 0) YEXPR1  = "to360(".YEXPR1.")"
 if (DIHEDRAL_TO3601B != 0) YEXPR1B = "to360(".YEXPR1B.")"
 if (DIHEDRAL_TO3602  != 0) YEXPR2  = "to360(".YEXPR2.")"
 if (DIHEDRAL_TO3602B != 0) YEXPR2B = "to360(".YEXPR2B.")"
+
+YEXPR1  = "(".YEXPR1 ."+DIHEDRAL_OFFSET1)"
+YEXPR1B = "(".YEXPR1B."+DIHEDRAL_OFFSET1B)"
+YEXPR2  = "(".YEXPR2 ."+DIHEDRAL_OFFSET2)"
+YEXPR2B = "(".YEXPR2B."+DIHEDRAL_OFFSET2B)"
 
 # Base series (A) for a file: errorbars + curve.
 P1A = "'".DATA1."' using xcol:(".YEXPR1."):sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
