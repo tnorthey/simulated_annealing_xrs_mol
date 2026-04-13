@@ -104,6 +104,8 @@ if (!exists("COLB")) COLB = "#666666"
 # Line/point styling knobs (override via -e "LW=...;PS=...")
 if (!exists("LW")) LW = 2.0
 if (!exists("PS")) PS = 0.75
+if (!exists("PSB")) PSB = PS
+PSB = PSB + 0
 
 # Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
 if (!exists("SHOW_KEY")) SHOW_KEY = 0
@@ -195,7 +197,7 @@ set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
 
 set style line 1 lw LW pt 7 ps PS
-set style line 2 lw LW pt 5 ps PS
+set style line 2 lw LW pt 5 ps PSB
 
 eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
 
