@@ -666,6 +666,15 @@ def main():
         ),
     )
     parser.add_argument(
+        "--skip-closest",
+        action="store_true",
+        help=(
+            "Skip computing the closest-to-mean representative frame entirely. "
+            "The CSV will contain only mean and std columns (no closest_*), and "
+            "no closest-to-mean XYZ trajectory / sidecar will be written."
+        ),
+    )
+    parser.add_argument(
         "--recompute",
         action="store_true",
         help="Force recomputation even if CSV from a previous run exists.",
@@ -845,6 +854,7 @@ def main():
     plot_stem = os.path.splitext(args.output_plot)[0]
     csv_path = plot_stem + ".csv"
     using_geometry_closest = args.closest_selection == "geometry"
+    include_closest = not bool(args.skip_closest)
     closest_xyz_path = (
         plot_stem + "_closest_geometry_to_mean.xyz"
         if using_geometry_closest
@@ -869,26 +879,38 @@ def main():
             raw = np.loadtxt(csv_path, delimiter=",", skiprows=1)
             if raw.ndim == 1:
                 raw = raw.reshape(1, -1)
-            expected_cols = 1 + 3 * n_cols  # time + (mean, closest, std) per column
+            expected_cols = 1 + (3 * n_cols if include_closest else 2 * n_cols)
             if raw.shape[1] == expected_cols:
                 x = raw[:, 0]
                 means = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
-                closest = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
                 stds = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
                 for ci in range(n_cols):
-                    base = 1 + ci * 3
-                    means[:, ci] = raw[:, base]
-                    closest[:, ci] = raw[:, base + 1]
-                    stds[:, ci] = raw[:, base + 2]
+                    if include_closest:
+                        base = 1 + ci * 3
+                        means[:, ci] = raw[:, base]
+                        # closest[:, ci] loaded below after header check
+                        stds[:, ci] = raw[:, base + 2]
+                    else:
+                        base = 1 + ci * 2
+                        means[:, ci] = raw[:, base]
+                        stds[:, ci] = raw[:, base + 1]
                 n_timesteps = raw.shape[0]
                 closest_header_tag = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
                 try:
                     with open(csv_path, "r") as f:
                         header_line = f.readline().strip()
-                    loaded_from_csv = closest_header_tag in header_line
+                    if include_closest:
+                        loaded_from_csv = closest_header_tag in header_line
+                    else:
+                        loaded_from_csv = closest_header_tag not in header_line
                 except OSError:
                     loaded_from_csv = False
                 if loaded_from_csv:
+                    if include_closest:
+                        closest = np.zeros((raw.shape[0], n_cols), dtype=np.float64)
+                        for ci in range(n_cols):
+                            base = 1 + ci * 3
+                            closest[:, ci] = raw[:, base + 1]
                     print(
                         f"Loaded cached data from {csv_path} ({n_timesteps} timesteps). "
                         f"Use --recompute to force recalculation."
@@ -920,12 +942,15 @@ def main():
             f"topM={'all' if args.topM is None else args.topM}"
         )
 
-        if using_geometry_closest:
-            print("Computing geometry and selecting geometry-closest-to-mean frames...")
+        if include_closest:
+            if using_geometry_closest:
+                print("Computing geometry and selecting geometry-closest-to-mean frames...")
+            else:
+                print("Computing geometry and selecting RMSD-closest-to-mean frames...")
         else:
-            print("Computing geometry and selecting RMSD-closest-to-mean frames...")
+            print("Computing geometry statistics (mean/std); skipping closest-to-mean selection...")
         means = np.zeros((n_timesteps, n_cols), dtype=np.float64)
-        closest = np.zeros((n_timesteps, n_cols), dtype=np.float64)
+        closest = np.zeros((n_timesteps, n_cols), dtype=np.float64) if include_closest else None
         stds = np.zeros((n_timesteps, n_cols), dtype=np.float64)
 
         for ti, layer in enumerate(layers):
@@ -959,16 +984,18 @@ def main():
                     means[ti, ci] = np.mean(geom[:, ci])
                     stds[ti, ci] = np.std(geom[:, ci], ddof=0)
 
-            if using_geometry_closest:
-                closest_idx = select_closest_by_geometry(
-                    geom, means[ti, :], dihedral_cols=dihedral_cols
-                )
-            else:
-                closest_idx = select_closest_to_mean(
-                    layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices
-                )
-            closest_indices.append(closest_idx)
-            closest[ti, :] = geom[closest_idx, :]
+            if include_closest:
+                if using_geometry_closest:
+                    closest_idx = select_closest_by_geometry(
+                        geom, means[ti, :], dihedral_cols=dihedral_cols
+                    )
+                else:
+                    closest_idx = select_closest_to_mean(
+                        layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices
+                    )
+                closest_indices.append(closest_idx)
+                assert closest is not None
+                closest[ti, :] = geom[closest_idx, :]
 
         print()  # finish progress line
 
@@ -1013,11 +1040,18 @@ def main():
         closest_prefix = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
         for label in col_labels:
             short = label.split(" (")[0].replace(" ", "_")
-            header_parts.extend([f"mean_{short}", f"{closest_prefix}{short}", f"std_{short}"])
+            if include_closest:
+                header_parts.extend([f"mean_{short}", f"{closest_prefix}{short}", f"std_{short}"])
+            else:
+                header_parts.extend([f"mean_{short}", f"std_{short}"])
 
         cols_out = [x]
         for i in range(n_cols):
-            cols_out.extend([means[:, i], closest[:, i], stds[:, i]])
+            if include_closest:
+                assert closest is not None
+                cols_out.extend([means[:, i], closest[:, i], stds[:, i]])
+            else:
+                cols_out.extend([means[:, i], stds[:, i]])
         out_data = np.column_stack(cols_out)
         np.savetxt(
             csv_path,
@@ -1030,24 +1064,25 @@ def main():
         print(f"CSV written to: {csv_path}")
 
         # Write closest-to-mean and mean xyz trajectories
-        print("Writing closest-to-mean trajectory...")
-        closest_frames = []
-        for ti, layer_i in enumerate(layers):
-            mi = closest_indices[ti]
-            xyz_path = layer_i[mi]["xyz"]
-            closest_dat_paths.append(
-                os.path.abspath(os.path.splitext(xyz_path)[0] + ".dat")
-            )
-            n, comment, atoms, coords = read_xyz_frame(xyz_path)
-            sel_tag = "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
-            comment = f"{comment} | {sel_tag} | timestep={timesteps[ti]}"
-            closest_frames.append((n, comment, atoms, coords))
-        write_xyz_trajectory(closest_frames, closest_xyz_path)
-        print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
-        with open(closest_dat_paths_txt, "w", encoding="utf-8") as f:
-            for dp in closest_dat_paths:
-                f.write(dp + "\n")
-        print(f"Wrote {closest_dat_paths_txt} (sibling .dat paths for each chosen xyz)")
+        if include_closest:
+            print("Writing closest-to-mean trajectory...")
+            closest_frames = []
+            for ti, layer_i in enumerate(layers):
+                mi = closest_indices[ti]
+                xyz_path = layer_i[mi]["xyz"]
+                closest_dat_paths.append(
+                    os.path.abspath(os.path.splitext(xyz_path)[0] + ".dat")
+                )
+                n, comment, atoms, coords = read_xyz_frame(xyz_path)
+                sel_tag = "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
+                comment = f"{comment} | {sel_tag} | timestep={timesteps[ti]}"
+                closest_frames.append((n, comment, atoms, coords))
+            write_xyz_trajectory(closest_frames, closest_xyz_path)
+            print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
+            with open(closest_dat_paths_txt, "w", encoding="utf-8") as f:
+                for dp in closest_dat_paths:
+                    f.write(dp + "\n")
+            print(f"Wrote {closest_dat_paths_txt} (sibling .dat paths for each chosen xyz)")
 
         print("Writing mean trajectory...")
         mean_frames = []
@@ -1174,15 +1209,16 @@ def main():
                 color=color,
                 linewidth=0,
             )
-            ax.plot(
-                x,
-                closest[:, i],
-                linewidth=2,
-                label=f"{closest_plot_label}: {col_labels[i]}",
-                color=color,
-                linestyle="--",
-                alpha=0.95,
-            )
+            if include_closest:
+                ax.plot(
+                    x,
+                    closest[:, i],
+                    linewidth=2,
+                    label=f"{closest_plot_label}: {col_labels[i]}",
+                    color=color,
+                    linestyle="--",
+                    alpha=0.95,
+                )
 
         ax.set_ylabel("value", fontsize=label_fs)
         ax.tick_params(axis="both", labelsize=tick_fs)
@@ -1212,14 +1248,15 @@ def main():
                 color="C0",
                 label="±1σ",
             )
-            ax.plot(
-                x,
-                closest[:, i],
-                linewidth=2,
-                label=closest_plot_label,
-                color="C1",
-                linestyle="--",
-            )
+            if include_closest:
+                ax.plot(
+                    x,
+                    closest[:, i],
+                    linewidth=2,
+                    label=closest_plot_label,
+                    color="C1",
+                    linestyle="--",
+                )
             ax.set_ylabel(col_labels[i], fontsize=label_fs)
             ax.tick_params(axis="both", labelsize=tick_fs)
             ax.grid(True, alpha=0.3)
@@ -1240,6 +1277,8 @@ def main():
     print(f"Plot saved to: {args.output_plot}")
 
     if args.plot_target_comparison:
+        if not include_closest:
+            raise SystemExit("--plot-target-comparison requires closest-to-mean selection (omit --skip-closest).")
         if not closest_dat_paths:
             if os.path.isfile(closest_dat_paths_txt):
                 with open(closest_dat_paths_txt, encoding="utf-8") as f:
