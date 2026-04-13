@@ -127,6 +127,12 @@ if (exists("COLOR"))  COL2 = COLOR
 if (exists("COLORB")) COL1B = COLORB
 if (exists("COLORB")) COL2B = COLORB
 
+# Optional per-panel color aliases (equivalent to COL1/COL1B/COL2/COL2B)
+if (exists("COLOR1"))  COL1  = COLOR1
+if (exists("COLOR1B")) COL1B = COLOR1B
+if (exists("COLOR2"))  COL2  = COLOR2
+if (exists("COLOR2B")) COL2B = COLOR2B
+
 # Optional curve B color (if you enable yBcol>0)
 if (!exists("COLB")) COLB = "#666666"
 
@@ -142,6 +148,34 @@ PT  = PT  + 0
 PTB = PTB + 0
 LW  = LW  + 0
 LWB = LWB + 0
+
+# Per-panel/per-dataset overrides (default to global LW/LWB, PS/PSB, PT/PTB)
+if (!exists("LW1"))  LW1  = LW
+if (!exists("LW1B")) LW1B = LWB
+if (!exists("LW2"))  LW2  = LW
+if (!exists("LW2B")) LW2B = LWB
+LW1  = LW1  + 0
+LW1B = LW1B + 0
+LW2  = LW2  + 0
+LW2B = LW2B + 0
+
+if (!exists("PS1"))  PS1  = PS
+if (!exists("PS1B")) PS1B = PSB
+if (!exists("PS2"))  PS2  = PS
+if (!exists("PS2B")) PS2B = PSB
+PS1  = PS1  + 0
+PS1B = PS1B + 0
+PS2  = PS2  + 0
+PS2B = PS2B + 0
+
+if (!exists("PT1"))  PT1  = PT
+if (!exists("PT1B")) PT1B = PTB
+if (!exists("PT2"))  PT2  = PT
+if (!exists("PT2B")) PT2B = PTB
+PT1  = PT1  + 0
+PT1B = PT1B + 0
+PT2  = PT2  + 0
+PT2B = PT2B + 0
 
 # Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
 if (!exists("SHOW_KEY")) SHOW_KEY = 0
@@ -232,11 +266,17 @@ set mxtics 2
 set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
 
-set style line 1 lw LW  pt PT  ps PS
-set style line 2 lw LWB pt PTB ps PSB
+set style line 11 lw LW1  pt PT1  ps PS1
+set style line 12 lw LW1B pt PT1B ps PS1B
+set style line 21 lw LW2  pt PT2  ps PS2
+set style line 22 lw LW2B pt PT2B ps PS2B
 
 eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
 eblwB = (LWB < 1.0 ? 1.0 : 0.5*LWB)
+eblw1  = (LW1  < 1.0 ? 1.0 : 0.5*LW1)
+eblw1B = (LW1B < 1.0 ? 1.0 : 0.5*LW1B)
+eblw2  = (LW2  < 1.0 ? 1.0 : 0.5*LW2)
+eblw2B = (LW2B < 1.0 ? 1.0 : 0.5*LW2B)
 
 unset key
 if (SHOW_KEY) set key opaque box lw 0.6
@@ -297,14 +337,14 @@ YEXPR2  = "(".YEXPR2 ."+DIHEDRAL_OFFSET2)"
 YEXPR2B = "(".YEXPR2B."+DIHEDRAL_OFFSET2B)"
 
 # Base series (A) for a file: errorbars + curve.
-P1A = "'".DATA1."' using xcol:(".YEXPR1."):sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-    ." '".DATA1."' using xcol:(".YEXPR1.")        with @PLOT_WITH ls 1 lc rgb COL1 title NAME1"
-P1B = "'".DATA1B."' using xcol:(".YEXPR1B."):sdAcol with yerrorbars lw eblwB lc rgb COL1B pt -1 notitle, "\
-    ." '".DATA1B."' using xcol:(".YEXPR1B.")        with @PLOT_WITHB ls 2 lc rgb COL1B title NAME1B"
-P2A = "'".DATA2."' using xcol:(".YEXPR2."):sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-    ." '".DATA2."' using xcol:(".YEXPR2.")        with @PLOT_WITH ls 1 lc rgb COL2 title NAME2"
-P2B = "'".DATA2B."' using xcol:(".YEXPR2B."):sdAcol with yerrorbars lw eblwB lc rgb COL2B pt -1 notitle, "\
-    ." '".DATA2B."' using xcol:(".YEXPR2B.")        with @PLOT_WITHB ls 2 lc rgb COL2B title NAME2B"
+P1A = "'".DATA1."' using xcol:(".YEXPR1."):sdAcol with yerrorbars lw eblw1  lc rgb COL1  pt -1 notitle, "\
+    ." '".DATA1."' using xcol:(".YEXPR1.")        with @PLOT_WITH  ls 11 lc rgb COL1  title NAME1"
+P1B = "'".DATA1B."' using xcol:(".YEXPR1B."):sdAcol with yerrorbars lw eblw1B lc rgb COL1B pt -1 notitle, "\
+    ." '".DATA1B."' using xcol:(".YEXPR1B.")        with @PLOT_WITHB ls 12 lc rgb COL1B title NAME1B"
+P2A = "'".DATA2."' using xcol:(".YEXPR2."):sdAcol with yerrorbars lw eblw2  lc rgb COL2  pt -1 notitle, "\
+    ." '".DATA2."' using xcol:(".YEXPR2.")        with @PLOT_WITH  ls 21 lc rgb COL2  title NAME2"
+P2B = "'".DATA2B."' using xcol:(".YEXPR2B."):sdAcol with yerrorbars lw eblw2B lc rgb COL2B pt -1 notitle, "\
+    ." '".DATA2B."' using xcol:(".YEXPR2B.")        with @PLOT_WITHB ls 22 lc rgb COL2B title NAME2B"
 
 # Compose per-panel plot commands, optionally adding the second dataset file.
 P1_CMD = "plot ".P1A.(HAS1B ? ", ".P1B : "")
