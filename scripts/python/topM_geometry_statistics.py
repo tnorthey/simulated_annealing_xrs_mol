@@ -17,6 +17,8 @@ Dihedral convention: angles are kept as returned by arctan2 ([-180, 180]°), so
 crossing through 0 appears as a smooth change into negative values (no +360 jump).
 An optional --dihedral-offset is added (no modulo). Optional --dihedral-negate
 multiplies the dihedral column by -1 last.
+Optional --dihedral-wrap-360 adds 360 to negative dihedral values (after offset/negate),
+so output values are non-negative (useful for 0..360 style plots).
 
 Usage:
     python3 topM_geometry_statistics.py results/ --topM 50 --dihedral 2 3 4 5
@@ -610,6 +612,14 @@ def main():
         ),
     )
     parser.add_argument(
+        "--dihedral-wrap-360",
+        action="store_true",
+        help=(
+            "After offset/negate, add 360 to any negative dihedral values "
+            "(applies to plotted values + CSV). Only valid with --dihedral."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=str,
         default=None,
@@ -814,6 +824,8 @@ def main():
         parser.error("--dihedral-offset requires --dihedral")
     if args.dihedral is None and args.dihedral_negate:
         parser.error("--dihedral-negate requires --dihedral")
+    if args.dihedral is None and args.dihedral_wrap_360:
+        parser.error("--dihedral-wrap-360 requires --dihedral")
     if args.dt <= 0 and not (
         args.time_basis == "plot-index" and args.time_end is not None
     ) and args.time_file is None:
@@ -959,30 +971,44 @@ def main():
             geom = compute_geometry_for_layer(
                 layer, bond=args.bond, angle=args.angle, dihedral=args.dihedral
             )
-            if dihedral_cols is not None:
-                for dc in dihedral_cols:
-                    if args.dihedral_offset != 0.0:
-                        geom[:, dc] = geom[:, dc] + args.dihedral_offset
-                    if args.dihedral_negate:
-                        geom[:, dc] *= -1.0
+            # Keep a copy of the raw values for circular statistics before we apply any
+            # output transforms (offset/negate/wrap).
+            geom_raw = geom.copy()
             all_geom.append(geom)
 
             for ci in range(n_cols):
                 if dihedral_cols is not None and ci in dihedral_cols:
                     # Compute circular statistics on the *raw dihedral* (before offset/negate),
                     # then map back into the stored (offset/negate applied) representation.
+                    raw = geom_raw[:, ci]
                     if args.dihedral_negate:
-                        wrapped = -geom[:, ci] - args.dihedral_offset
+                        wrapped = -raw
                     else:
-                        wrapped = geom[:, ci] - args.dihedral_offset
-                    mean_d = circular_mean_deg(wrapped) + args.dihedral_offset
+                        wrapped = raw
+                    mean_d = circular_mean_deg(wrapped)
+                    # Map mean into the output representation: apply offset/negate/wrap.
+                    mean_d = mean_d + args.dihedral_offset
                     if args.dihedral_negate:
                         mean_d = -mean_d
+                    if args.dihedral_wrap_360 and mean_d < 0.0:
+                        mean_d = mean_d + 360.0
                     means[ti, ci] = mean_d
                     stds[ti, ci] = circular_std_deg(wrapped)
                 else:
                     means[ti, ci] = np.mean(geom[:, ci])
                     stds[ti, ci] = np.std(geom[:, ci], ddof=0)
+
+            # Apply output transforms to dihedral columns for storage/plotting/csv/closest selection.
+            if dihedral_cols is not None:
+                for dc in dihedral_cols:
+                    if args.dihedral_offset != 0.0:
+                        geom[:, dc] = geom[:, dc] + args.dihedral_offset
+                    if args.dihedral_negate:
+                        geom[:, dc] *= -1.0
+                    if args.dihedral_wrap_360:
+                        neg = geom[:, dc] < 0.0
+                        if np.any(neg):
+                            geom[neg, dc] = geom[neg, dc] + 360.0
 
             if include_closest:
                 if using_geometry_closest:
