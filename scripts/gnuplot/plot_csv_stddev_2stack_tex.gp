@@ -28,6 +28,17 @@
 #
 # Control relative heights of the 2 panels (any positive numbers; normalized):
 #   gnuplot -e "RELH1=0.7;RELH2=0.3" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+#
+# Piecewise least-squares fit on DATA1 / DATA2 (panel A curves only):
+#   Rise (x <= FITn_XCUT):  y0 + A*(1 - exp(-x/tau)) with y0 FIXED at FITn_Y0_GUESS (only A,tau are fit).
+#   Tail (x >= FITn_XCUT): Taylor polynomial in (x - FITn_TAIL_X0), degree FITn_POLY_DEG (0..6).
+# The two segments are fit independently; the curve may jump at x = FITn_XCUT.
+# Fits skip the first CSV row (header). For headerless files use FIT_DATA_SKIP=0.
+# By default the fit uses the same y-transform as the plot (dihedral/offset); use FIT_RAW=1 for raw column y.
+# Weights use column sd (yerror). Asymptotic stderrs from gnuplot are approximate.
+# Example:
+#   gnuplot -e "FIT1=1;FIT1_XCUT=1.0;FIT1_POLY_DEG=4;FIT2=1;FIT2_XCUT=0.5;FIT2_POLY_DEG=3;SHOW_KEY=1" ...
+# Optional: FIT_LOG='fit.log' to record fit diagnostics; FIT1_COLOR / FIT2_COLOR for the overlay line.
 # ------------------------------------------------------------------------------
 
 # -------------------------------
@@ -202,6 +213,40 @@ yBcol  = 0
 sdBcol = 5
 nameB  = "Series B"
 
+# Optional piecewise fit on DATA1 (panel 1) and DATA2 (panel 2); see header comment.
+if (!exists("FIT1")) FIT1 = 0
+if (!exists("FIT2")) FIT2 = 0
+FIT1 = FIT1 + 0
+FIT2 = FIT2 + 0
+if (!exists("FIT_RAW")) FIT_RAW = 0
+FIT_RAW = FIT_RAW + 0
+if (!exists("FIT1_POLY_DEG")) FIT1_POLY_DEG = 3
+if (!exists("FIT2_POLY_DEG")) FIT2_POLY_DEG = 3
+FIT1_POLY_DEG = FIT1_POLY_DEG + 0
+FIT2_POLY_DEG = FIT2_POLY_DEG + 0
+if (!exists("FIT1_LW")) FIT1_LW = 2.0
+if (!exists("FIT2_LW")) FIT2_LW = 2.0
+FIT1_LW = FIT1_LW + 0
+FIT2_LW = FIT2_LW + 0
+if (!exists("FIT1_COLOR")) FIT1_COLOR = "#333333"
+if (!exists("FIT2_COLOR")) FIT2_COLOR = "#333333"
+if (!exists("FIT1_TITLE")) FIT1_TITLE = "fit"
+if (!exists("FIT2_TITLE")) FIT2_TITLE = "fit"
+# Rise model: y = y0 + A*(1-exp(-x/tau)). Here y0 is FIXED at FITn_Y0_GUESS (not fitted);
+# only A and tau are fit (fewer DOF when the rise has few points).
+if (!exists("FIT1_Y0_GUESS")) FIT1_Y0_GUESS = 0
+if (!exists("FIT1_A_GUESS"))  FIT1_A_GUESS  = 1
+if (!exists("FIT1_TAU_GUESS")) FIT1_TAU_GUESS = 1
+if (!exists("FIT2_Y0_GUESS")) FIT2_Y0_GUESS = 0
+if (!exists("FIT2_A_GUESS"))  FIT2_A_GUESS  = 1
+if (!exists("FIT2_TAU_GUESS")) FIT2_TAU_GUESS = 1
+FIT1_Y0_GUESS = FIT1_Y0_GUESS + 0
+FIT1_A_GUESS  = FIT1_A_GUESS  + 0
+FIT1_TAU_GUESS = FIT1_TAU_GUESS + 0
+FIT2_Y0_GUESS = FIT2_Y0_GUESS + 0
+FIT2_A_GUESS  = FIT2_A_GUESS  + 0
+FIT2_TAU_GUESS = FIT2_TAU_GUESS + 0
+
 # Legend labels for per-panel datasets
 if (!exists("NAME1"))  NAME1  = "Dataset 1"
 if (!exists("NAME1B")) NAME1B = "Dataset 1B"
@@ -297,15 +342,6 @@ unset title
 unset xrange
 unset yrange
 
-# -------------------------------
-# Multiplot layout: 2 rows with adjustable relative heights
-# We use explicit screen margins so heights can differ.
-# -------------------------------
-set multiplot
-
-set lmargin at screen MLEFT
-set rmargin at screen MRIGHT
-
 #
 # Note on gnuplot syntax:
 # Some gnuplot builds complain about any "if (...) ..." constructs used inside
@@ -363,6 +399,107 @@ YEXPR1B = "(".YEXPR1B."+DIHEDRAL_OFFSET1B)"
 YEXPR2  = "(".YEXPR2 ."+DIHEDRAL_OFFSET2)"
 YEXPR2B = "(".YEXPR2B."+DIHEDRAL_OFFSET2B)"
 
+# y column used in fit (match plotted transform unless FIT_RAW)
+FITY1 = (FIT_RAW != 0) ? sprintf("$%d", yAcol) : YEXPR1
+FITY2 = (FIT_RAW != 0) ? sprintf("$%d", yAcol) : YEXPR2
+SDCOLN = sprintf("%d", sdAcol)
+
+if (!exists("FIT_DATA_SKIP")) FIT_DATA_SKIP = 1
+FIT_DATA_SKIP = FIT_DATA_SKIP + 0
+FIT_SK = (FIT_DATA_SKIP != 0) ? "skip 1 " : ""
+
+set fit quiet
+if (exists("FIT_LOG")) eval "set fit logfile '".FIT_LOG."'"
+
+# ---- FIT1: exponential rise (x<=xc) + polynomial tail (x>=xc) on DATA1 ----
+FIT1_APPEND = ""
+if (FIT1 != 0 && (FIT1_POLY_DEG < 0 || FIT1_POLY_DEG > 6)) print "ERROR: FIT1_POLY_DEG must be in [0,6]"
+if (FIT1 != 0 && (FIT1_POLY_DEG < 0 || FIT1_POLY_DEG > 6)) exit
+if (FIT1 != 0 && !exists("FIT1_XCUT")) print "ERROR: FIT1=1 requires FIT1_XCUT"
+if (FIT1 != 0 && !exists("FIT1_XCUT")) exit
+if (FIT1 != 0) FIT1_XCUT = FIT1_XCUT + 0
+if (FIT1 != 0 && !exists("FIT1_TAIL_X0")) FIT1_TAIL_X0 = FIT1_XCUT
+if (FIT1 != 0) FIT1_TAIL_X0 = FIT1_TAIL_X0 + 0
+if (FIT1 != 0) XCUT1STR = sprintf("%.12g", FIT1_XCUT)
+if (FIT1 != 0) XO1STR = sprintf("%.12g", FIT1_TAIL_X0)
+if (FIT1 != 0) y0_r1 = FIT1_Y0_GUESS
+if (FIT1 != 0) A_r1 = FIT1_A_GUESS
+if (FIT1 != 0) tau_r1 = FIT1_TAU_GUESS
+if (FIT1 != 0) f_rise_1(x) = y0_r1 + A_r1*(1-exp(-x/tau_r1))
+if (FIT1 != 0) eval "fit f_rise_1(x) '".DATA1."' ".FIT_SK."using 1:(($1<=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via A_r1,tau_r1"
+if (FIT1 != 0) b0_t1 = 1e-3
+if (FIT1 != 0) b1_t1 = 1e-3
+if (FIT1 != 0) b2_t1 = 1e-3
+if (FIT1 != 0) b3_t1 = 1e-3
+if (FIT1 != 0) b4_t1 = 1e-3
+if (FIT1 != 0) b5_t1 = 1e-3
+if (FIT1 != 0) b6_t1 = 1e-3
+if (FIT1 != 0 && FIT1_POLY_DEG==0) eval "f_tail_1(x) = b0_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG==1) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR."))"
+if (FIT1 != 0 && FIT1_POLY_DEG==2) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2"
+if (FIT1 != 0 && FIT1_POLY_DEG==3) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3"
+if (FIT1 != 0 && FIT1_POLY_DEG==4) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3 + b4_t1*(x-(".XO1STR."))**4"
+if (FIT1 != 0 && FIT1_POLY_DEG==5) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3 + b4_t1*(x-(".XO1STR."))**4 + b5_t1*(x-(".XO1STR."))**5"
+if (FIT1 != 0 && FIT1_POLY_DEG==6) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3 + b4_t1*(x-(".XO1STR."))**4 + b5_t1*(x-(".XO1STR."))**5 + b6_t1*(x-(".XO1STR."))**6"
+if (FIT1 != 0) VIA1T = "b0_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=1) VIA1T = VIA1T . ",b1_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=2) VIA1T = VIA1T . ",b2_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=3) VIA1T = VIA1T . ",b3_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=4) VIA1T = VIA1T . ",b4_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=5) VIA1T = VIA1T . ",b5_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=6) VIA1T = VIA1T . ",b6_t1"
+if (FIT1 != 0) eval "fit f_tail_1(x) '".DATA1."' ".FIT_SK."using 1:(($1>=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via ".VIA1T
+if (FIT1 != 0) f_fit_1(x) = (x<=FIT1_XCUT) ? f_rise_1(x) : f_tail_1(x)
+if (FIT1 != 0) print sprintf("FIT1 DATA1 rise: y0(fixed)=%g A=%g tau=%g", y0_r1, A_r1, tau_r1)
+if (FIT1 != 0) print sprintf("FIT1 DATA1 tail: degree %d expansion about x0=%g", FIT1_POLY_DEG, FIT1_TAIL_X0)
+if (FIT1 != 0 && SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR title '".FIT1_TITLE."'"
+if (FIT1 != 0 && !SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR notitle"
+
+# ---- FIT2: same on DATA2 (only when second panel exists) ----
+FIT2_APPEND = ""
+if (FIT2 != 0 && NROWS < 2) print "WARNING: FIT2 ignored (DATA2 / second panel not used)"
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_POLY_DEG < 0 || FIT2_POLY_DEG > 6)) print "ERROR: FIT2_POLY_DEG must be in [0,6]"
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_POLY_DEG < 0 || FIT2_POLY_DEG > 6)) exit
+if (FIT2 != 0 && NROWS >= 2 && !exists("FIT2_XCUT")) print "ERROR: FIT2=1 requires FIT2_XCUT"
+if (FIT2 != 0 && NROWS >= 2 && !exists("FIT2_XCUT")) exit
+if (FIT2 != 0 && NROWS >= 2) FIT2_XCUT = FIT2_XCUT + 0
+if (FIT2 != 0 && NROWS >= 2 && !exists("FIT2_TAIL_X0")) FIT2_TAIL_X0 = FIT2_XCUT
+if (FIT2 != 0 && NROWS >= 2) FIT2_TAIL_X0 = FIT2_TAIL_X0 + 0
+if (FIT2 != 0 && NROWS >= 2) XCUT2STR = sprintf("%.12g", FIT2_XCUT)
+if (FIT2 != 0 && NROWS >= 2) XO2STR = sprintf("%.12g", FIT2_TAIL_X0)
+if (FIT2 != 0 && NROWS >= 2) y0_r2 = FIT2_Y0_GUESS
+if (FIT2 != 0 && NROWS >= 2) A_r2 = FIT2_A_GUESS
+if (FIT2 != 0 && NROWS >= 2) tau_r2 = FIT2_TAU_GUESS
+if (FIT2 != 0 && NROWS >= 2) f_rise_2(x) = y0_r2 + A_r2*(1-exp(-x/tau_r2))
+if (FIT2 != 0 && NROWS >= 2) eval "fit f_rise_2(x) '".DATA2."' ".FIT_SK."using 1:(($1<=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via A_r2,tau_r2"
+if (FIT2 != 0 && NROWS >= 2) b0_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2) b1_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2) b2_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2) b3_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2) b4_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2) b5_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2) b6_t2 = 1e-3
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==0) eval "f_tail_2(x) = b0_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==1) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR."))"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==2) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==3) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==4) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3 + b4_t2*(x-(".XO2STR."))**4"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==5) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3 + b4_t2*(x-(".XO2STR."))**4 + b5_t2*(x-(".XO2STR."))**5"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==6) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3 + b4_t2*(x-(".XO2STR."))**4 + b5_t2*(x-(".XO2STR."))**5 + b6_t2*(x-(".XO2STR."))**6"
+if (FIT2 != 0 && NROWS >= 2) VIA2T = "b0_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=1) VIA2T = VIA2T . ",b1_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=2) VIA2T = VIA2T . ",b2_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=3) VIA2T = VIA2T . ",b3_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=4) VIA2T = VIA2T . ",b4_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=5) VIA2T = VIA2T . ",b5_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=6) VIA2T = VIA2T . ",b6_t2"
+if (FIT2 != 0 && NROWS >= 2) eval "fit f_tail_2(x) '".DATA2."' ".FIT_SK."using 1:(($1>=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via ".VIA2T
+if (FIT2 != 0 && NROWS >= 2) f_fit_2(x) = (x<=FIT2_XCUT) ? f_rise_2(x) : f_tail_2(x)
+if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 rise: y0(fixed)=%g A=%g tau=%g", y0_r2, A_r2, tau_r2)
+if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 tail: degree %d expansion about x0=%g", FIT2_POLY_DEG, FIT2_TAIL_X0)
+if (FIT2 != 0 && NROWS >= 2 && SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR title '".FIT2_TITLE."'"
+if (FIT2 != 0 && NROWS >= 2 && !SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR notitle"
+
 # Shaded band expressions (mean ± SD). SD is taken from $SDCOL.
 YLO1  = "(".YEXPR1 ." - $".SDCOL.")"
 YHI1  = "(".YEXPR1 ." + $".SDCOL.")"
@@ -384,14 +521,23 @@ if (SHADEDERRORS1B != 0) E1B = "'".DATA1B."' using xcol:(".YLO1B."):(".YHI1B.") 
 if (SHADEDERRORS2  != 0) E2  = "'".DATA2 ."' using xcol:(".YLO2 ."):(".YHI2 .") with filledcurves lc rgb COL2  fs transparent solid SHADE_ALPHA noborder notitle"
 if (SHADEDERRORS2B != 0) E2B = "'".DATA2B."' using xcol:(".YLO2B."):(".YHI2B.") with filledcurves lc rgb COL2B fs transparent solid SHADE_ALPHA noborder notitle"
 
-P1A = E1  .", '".DATA1 ."' using xcol:(".YEXPR1 .") with @PLOT_WITH  ls 11 lc rgb COL1  title NAME1"
+P1A = E1  .", '".DATA1 ."' using xcol:(".YEXPR1 .") with @PLOT_WITH  ls 11 lc rgb COL1  title NAME1".FIT1_APPEND
 P1B = E1B .", '".DATA1B."' using xcol:(".YEXPR1B.") with @PLOT_WITHB ls 12 lc rgb COL1B title NAME1B"
-P2A = E2  .", '".DATA2 ."' using xcol:(".YEXPR2 .") with @PLOT_WITH  ls 21 lc rgb COL2  title NAME2"
+P2A = E2  .", '".DATA2 ."' using xcol:(".YEXPR2 .") with @PLOT_WITH  ls 21 lc rgb COL2  title NAME2".FIT2_APPEND
 P2B = E2B .", '".DATA2B."' using xcol:(".YEXPR2B.") with @PLOT_WITHB ls 22 lc rgb COL2B title NAME2B"
 
 # Compose per-panel plot commands, optionally adding the second dataset file.
 P1_CMD = "plot ".P1A.(HAS1B ? ", ".P1B : "")
 P2_CMD = "plot ".P2A.(HAS2B ? ", ".P2B : "")
+
+# -------------------------------
+# Multiplot layout: 2 rows with adjustable relative heights
+# (started after fits and plot strings are ready)
+# -------------------------------
+set multiplot
+
+set lmargin at screen MLEFT
+set rmargin at screen MRIGHT
 
 # Compute split for 2-row case
 if (NROWS==2) AVAILH = MTOP - MBOTTOM
