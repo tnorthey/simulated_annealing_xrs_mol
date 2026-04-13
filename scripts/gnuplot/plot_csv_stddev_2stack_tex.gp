@@ -171,18 +171,14 @@ if (NROWS==1) {
   if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
   if (SHOW_KEY) set key top right
 
-  if (yBcol>0) {
-    plot \
-      DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
-      DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA, \
-      DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
-      DATA1 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB title nameB
-  }
-  if (yBcol<=0) {
-    plot \
-      DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
-      DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA
-  }
+  P1_WITHB = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
+            .DATA1." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+            .DATA1." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
+  P1_NO_B  = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
+  if (yBcol>0)  eval P1_WITHB
+  if (yBcol<=0) eval P1_NO_B
 }
 
 if (NROWS==2) {
@@ -204,18 +200,14 @@ if (NROWS==2) {
   if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
   if (SHOW_KEY) set key top right
 
-  if (yBcol>0) {
-    plot \
-      DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
-      DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA, \
-      DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
-      DATA1 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB title nameB
-  }
-  if (yBcol<=0) {
-    plot \
-      DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
-      DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA
-  }
+  P1_WITHB = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
+            .DATA1." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+            .DATA1." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
+  P1_NO_B  = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
+  if (yBcol>0)  eval P1_WITHB
+  if (yBcol<=0) eval P1_NO_B
 
   # ---- Panel 2 (bottom) ----
   set tmargin at screen YSPLIT
@@ -230,18 +222,14 @@ if (NROWS==2) {
   if (!exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
   unset key
 
-  if (yBcol>0) {
-    plot \
-      DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
-      DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle, \
-      DATA2 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
-      DATA2 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
-  }
-  if (yBcol<=0) {
-    plot \
-      DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
-      DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle
-  }
+  P2_WITHB = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+            .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle, "\
+            .DATA2." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+            .DATA2." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB notitle"
+  P2_NO_B  = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+            .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle"
+  if (yBcol>0)  eval P2_WITHB
+  if (yBcol<=0) eval P2_NO_B
 }
 
 unset multiplot
