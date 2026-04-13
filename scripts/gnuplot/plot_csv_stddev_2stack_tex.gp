@@ -106,6 +106,10 @@ if (!exists("LW")) LW = 2.0
 if (!exists("PS")) PS = 0.75
 if (!exists("PSB")) PSB = PS
 PSB = PSB + 0
+if (!exists("PT"))  PT  = 7
+if (!exists("PTB")) PTB = 5
+PT  = PT  + 0
+PTB = PTB + 0
 
 # Legend (key). Disabled by default; enable via -e "SHOW_KEY=1"
 if (!exists("SHOW_KEY")) SHOW_KEY = 0
@@ -196,8 +200,8 @@ set mxtics 2
 set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
 
-set style line 1 lw LW pt 7 ps PS
-set style line 2 lw LW pt 5 ps PSB
+set style line 1 lw LW pt PT  ps PS
+set style line 2 lw LW pt PTB ps PSB
 
 eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
 
