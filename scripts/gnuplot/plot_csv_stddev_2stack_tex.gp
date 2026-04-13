@@ -108,6 +108,10 @@ if (!exists("FONT")) FONT = "Latin Modern Roman,10"
 # Extra LaTeX preamble for the standalone .tex (inserted before \begin{document}).
 if (!exists("LATEX_HEADER")) LATEX_HEADER = ""
 
+# Mirror tics (show top x-tics and right y-tics). Disable via -e "MIRROR_TICS=0".
+if (!exists("MIRROR_TICS")) MIRROR_TICS = 1
+MIRROR_TICS = MIRROR_TICS + 0
+
 # -------------------------------
 # Input parsing
 # -------------------------------
@@ -127,8 +131,10 @@ set output sprintf("%s.tex", OUTBASE)
 # -------------------------------
 set border linewidth 1.2
 set tics scale 0.75
-set xtics nomirror
-set ytics nomirror
+if (MIRROR_TICS) set xtics mirror
+if (MIRROR_TICS) set ytics mirror
+if (!MIRROR_TICS) set xtics nomirror
+if (!MIRROR_TICS) set ytics nomirror
 set mxtics 2
 set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
