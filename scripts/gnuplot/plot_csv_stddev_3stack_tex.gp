@@ -29,20 +29,6 @@ if (!exists("DATA2"))   DATA2   = "data2.csv"
 if (!exists("DATA3"))   DATA3   = "data3.csv"
 if (!exists("OUTBASE")) OUTBASE = "figure"
 
-# Auto-detect which panels are available by checking whether the CSV exists and is non-empty.
-# (User-requested behavior: if DATA3 file is missing/empty, drop panel 3 and plot only 2.)
-is_nonempty_file(f) = int(system(sprintf("bash -lc \"test -s '%s' && echo 1 || echo 0\" ", f)))
-HAS1 = is_nonempty_file(DATA1)
-HAS2 = is_nonempty_file(DATA2)
-HAS3 = is_nonempty_file(DATA3)
-
-if (!HAS1) print sprintf("ERROR: DATA1 file missing or empty: %s", DATA1)
-if (!HAS1) exit
-
-NROWS = 1
-if (HAS2) NROWS = 2
-if (HAS3) NROWS = 3
-
 # Colors (panel curve A colors). Override via -e, e.g.:
 #   gnuplot -e "COL1='#000000';COL2='#377eb8';COL3='#e41a1c'" ...
 if (!exists("COL1")) COL1 = "#1b9e77"
@@ -169,77 +155,84 @@ if (SHOW_KEY) set key opaque box lw 0.6
 unset title
 
 # Shared x-range (only set if user provided both XMIN and XMAX)
-unset xrange
+if (exists("XMIN") && exists("XMAX")) { set xrange [XMIN:XMAX] } else { unset xrange }
 
 # -------------------------------
-# Multiplot layout: NROWS rows, 1 column, zero spacing
+# Multiplot layout: 3 rows, 1 column, zero spacing
 # -------------------------------
 # spacing 0,0 ensures no gaps between panels. We also suppress redundant x-tics.
 # margins left, right, bottom, top
-set multiplot layout NROWS,1 rowsfirst margins MLEFT,MRIGHT,MBOTTOM,MTOP spacing 0.0,0.0
+set multiplot layout 3,1 rowsfirst margins MLEFT,MRIGHT,MBOTTOM,MTOP spacing 0.0,0.0
 
 # ---- Panel 1 ----
 set ylabel Y1LABEL
 unset xlabel
 set format x ""
-if (NROWS==1) { set xlabel XLABEL; set format x "%g" }
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics
 if (exists("YTIC_STEP1")) set ytics YTIC_STEP1
 if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
 unset yrange
+if (exists("Y1MIN") && exists("Y1MAX")) { set yrange [Y1MIN:Y1MAX] } else { unset yrange }
 if (SHOW_KEY) set key top right
-if (yBcol>0) plot \
-  DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
-  DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA, \
-  DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
-  DATA1 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB title nameB
-if (yBcol<=0) plot \
-  DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
-  DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA
+if (yBcol>0) {
+  plot \
+    DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
+    DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA, \
+    DATA1 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
+    DATA1 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB title nameB
+} else {
+  plot \
+    DATA1 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, \
+    DATA1 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL1 title nameA
+}
 
 # ---- Panel 2 ----
-if (NROWS>=2) set ylabel Y2LABEL
-if (NROWS>=2) unset xlabel
-if (NROWS>=2) set format x ""
-if (NROWS==2) set xlabel XLABEL
-if (NROWS==2) set format x "%g"
-if (NROWS>=2 && exists("XTIC_STEP")) set xtics XTIC_STEP
-if (NROWS>=2 && !exists("XTIC_STEP")) set xtics
-if (NROWS>=2 && exists("YTIC_STEP2")) set ytics YTIC_STEP2
-if (NROWS>=2 && !exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
-if (NROWS>=2 && !exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
-if (NROWS>=2) unset yrange
-if (NROWS>=2) unset key
-if (NROWS>=2 && yBcol>0) plot \
-  DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
-  DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle, \
-  DATA2 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
-  DATA2 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
-if (NROWS>=2 && yBcol<=0) plot \
-  DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
-  DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle
+set ylabel Y2LABEL
+unset xlabel
+set format x ""
+if (exists("XTIC_STEP")) set xtics XTIC_STEP
+if (!exists("XTIC_STEP")) set xtics
+if (exists("YTIC_STEP2")) set ytics YTIC_STEP2
+if (!exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (!exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
+if (exists("Y2MIN") && exists("Y2MAX")) { set yrange [Y2MIN:Y2MAX] } else { unset yrange }
+unset key
+if (yBcol>0) {
+  plot \
+    DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
+    DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle, \
+    DATA2 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
+    DATA2 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
+} else {
+  plot \
+    DATA2 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, \
+    DATA2 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL2 notitle
+}
 
 # ---- Panel 3 ----
-if (NROWS>=3) set ylabel Y3LABEL
-if (NROWS>=3) set xlabel XLABEL
-if (NROWS>=3) set format x "%g"        # show x tick labels only on bottom panel
-if (NROWS>=3 && exists("XTIC_STEP")) set xtics XTIC_STEP
-if (NROWS>=3 && !exists("XTIC_STEP")) set xtics
-if (NROWS>=3 && exists("YTIC_STEP3")) set ytics YTIC_STEP3
-if (NROWS>=3 && !exists("YTIC_STEP3") && exists("YTIC_STEP")) set ytics YTIC_STEP
-if (NROWS>=3 && !exists("YTIC_STEP3") && !exists("YTIC_STEP")) set ytics
-if (NROWS>=3) unset yrange
-if (NROWS>=3) unset key
-if (NROWS>=3 && yBcol>0) plot \
-  DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 pt -1 notitle, \
-  DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle, \
-  DATA3 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
-  DATA3 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
-if (NROWS>=3 && yBcol<=0) plot \
-  DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 pt -1 notitle, \
-  DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle
+set ylabel Y3LABEL
+set xlabel XLABEL
+set format x "%g"        # show x tick labels only on bottom panel
+if (exists("XTIC_STEP")) set xtics XTIC_STEP
+if (!exists("XTIC_STEP")) set xtics
+if (exists("YTIC_STEP3")) set ytics YTIC_STEP3
+if (!exists("YTIC_STEP3") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (!exists("YTIC_STEP3") && !exists("YTIC_STEP")) set ytics
+if (exists("Y3MIN") && exists("Y3MAX")) { set yrange [Y3MIN:Y3MAX] } else { unset yrange }
+unset key
+if (yBcol>0) {
+  plot \
+    DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 pt -1 notitle, \
+    DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle, \
+    DATA3 using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, \
+    DATA3 using xcol:yBcol        with @PLOT_WITH ls 2 lc rgb COLB notitle
+} else {
+  plot \
+    DATA3 using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL3 pt -1 notitle, \
+    DATA3 using xcol:yAcol        with @PLOT_WITH ls 1 lc rgb COL3 notitle
+}
 
 unset multiplot
 unset output
