@@ -16,6 +16,11 @@
 #   gnuplot -e "DATA1='a.csv';DATA2='b.csv';OUTBASE='myfig'" \
 #          scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
 #
+# Compare two datasets per panel (e.g. predicted vs experiment):
+#   gnuplot -e "DATA1='pred1.csv';DATA1B='exp1.csv';NAME1='Pred';NAME1B='Exp';"\
+#             "DATA2='pred2.csv';DATA2B='exp2.csv';NAME2='Pred';NAME2B='Exp'" \
+#          scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+#
 # Control relative heights of the 2 panels (any positive numbers; normalized):
 #   gnuplot -e "RELH1=0.7;RELH2=0.3" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
 # ------------------------------------------------------------------------------
@@ -27,13 +32,49 @@ if (!exists("DATA1"))   DATA1   = "data1.csv"
 if (!exists("DATA2"))   DATA2   = "data2.csv"
 if (!exists("OUTBASE")) OUTBASE = "figure"
 
+# Optional second dataset per panel (e.g. experiment). Leave unset to disable.
+if (!exists("DATA1B")) DATA1B = ""
+if (!exists("DATA2B")) DATA2B = ""
+
+# Optional dihedral transforms (applied to y values only; sd stays positive).
+# For each dataset, you can negate and/or add an offset (degrees, etc.).
+# Examples:
+#   gnuplot -e "DIHEDRAL_NEGATE1=1;DIHEDRAL_OFFSET1=360" ...
+#   gnuplot -e "DIHEDRAL_NEGATE1B=1;DIHEDRAL_OFFSET1B=180" ...
+if (!exists("DIHEDRAL_OFFSET1"))  DIHEDRAL_OFFSET1  = 0
+if (!exists("DIHEDRAL_OFFSET1B")) DIHEDRAL_OFFSET1B = 0
+if (!exists("DIHEDRAL_OFFSET2"))  DIHEDRAL_OFFSET2  = 0
+if (!exists("DIHEDRAL_OFFSET2B")) DIHEDRAL_OFFSET2B = 0
+if (!exists("DIHEDRAL_NEGATE1"))  DIHEDRAL_NEGATE1  = 0
+if (!exists("DIHEDRAL_NEGATE1B")) DIHEDRAL_NEGATE1B = 0
+if (!exists("DIHEDRAL_NEGATE2"))  DIHEDRAL_NEGATE2  = 0
+if (!exists("DIHEDRAL_NEGATE2B")) DIHEDRAL_NEGATE2B = 0
+
+DIHEDRAL_OFFSET1  = DIHEDRAL_OFFSET1  + 0
+DIHEDRAL_OFFSET1B = DIHEDRAL_OFFSET1B + 0
+DIHEDRAL_OFFSET2  = DIHEDRAL_OFFSET2  + 0
+DIHEDRAL_OFFSET2B = DIHEDRAL_OFFSET2B + 0
+DIHEDRAL_NEGATE1  = DIHEDRAL_NEGATE1  + 0
+DIHEDRAL_NEGATE1B = DIHEDRAL_NEGATE1B + 0
+DIHEDRAL_NEGATE2  = DIHEDRAL_NEGATE2  + 0
+DIHEDRAL_NEGATE2B = DIHEDRAL_NEGATE2B + 0
+
+MUL1  = (DIHEDRAL_NEGATE1  != 0) ? -1 : 1
+MUL1B = (DIHEDRAL_NEGATE1B != 0) ? -1 : 1
+MUL2  = (DIHEDRAL_NEGATE2  != 0) ? -1 : 1
+MUL2B = (DIHEDRAL_NEGATE2B != 0) ? -1 : 1
+
 # Auto-detect which panels are available by checking whether the CSV exists and is non-empty.
 is_nonempty_file(f) = int(system(sprintf("bash -lc \"test -s '%s' && echo 1 || echo 0\" ", f)))
 HAS1 = is_nonempty_file(DATA1)
 HAS2 = is_nonempty_file(DATA2)
+HAS1B = (DATA1B ne "") ? is_nonempty_file(DATA1B) : 0
+HAS2B = (DATA2B ne "") ? is_nonempty_file(DATA2B) : 0
 
 if (!HAS1) print sprintf("ERROR: DATA1 file missing or empty: %s", DATA1)
 if (!HAS1) exit
+if ((DATA1B ne "") && !HAS1B) print sprintf("ERROR: DATA1B file missing or empty: %s", DATA1B)
+if ((DATA2B ne "") && !HAS2B) print sprintf("ERROR: DATA2B file missing or empty: %s", DATA2B)
 
 NROWS = 1
 if (HAS2) NROWS = 2
@@ -52,6 +93,10 @@ RELHSUM = RELH1 + RELH2
 #   gnuplot -e "COL1='#000000';COL2='#377eb8'" ...
 if (!exists("COL1")) COL1 = "#1b9e77"
 if (!exists("COL2")) COL2 = "#7570b3"
+
+# Secondary dataset colors (per panel)
+if (!exists("COL1B")) COL1B = "#d95f02"
+if (!exists("COL2B")) COL2B = "#e7298a"
 
 # Optional curve B color (if you enable yBcol>0)
 if (!exists("COLB")) COLB = "#666666"
@@ -80,6 +125,12 @@ nameA  = "Series A"
 yBcol  = 0
 sdBcol = 5
 nameB  = "Series B"
+
+# Legend labels for per-panel datasets
+if (!exists("NAME1"))  NAME1  = "Dataset 1"
+if (!exists("NAME1B")) NAME1B = "Dataset 1B"
+if (!exists("NAME2"))  NAME2  = "Dataset 2"
+if (!exists("NAME2B")) NAME2B = "Dataset 2B"
 
 # Axis labels (LaTeX allowed).
 if (!exists("XLABEL"))  XLABEL  = '$t$ (fs)'
@@ -184,18 +235,19 @@ if (exists("Y2MAX")) Y2MAX = Y2MAX + 0
 # Pre-build plot command strings (they include plot + line continuations)
 # IMPORTANT: Quote filenames, since paths often contain '-' which gnuplot may
 # otherwise parse as subtraction in expressions.
-P1_WITHB = "plot '".DATA1."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-          ."     '".DATA1."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
-          ."     '".DATA1."' using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-          ."     '".DATA1."' using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
-P1_NO_B  = "plot '".DATA1."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-          ."     '".DATA1."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
-P2_WITHB = "plot '".DATA2."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-          ."     '".DATA2."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle, "\
-          ."     '".DATA2."' using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-          ."     '".DATA2."' using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB notitle"
-P2_NO_B  = "plot '".DATA2."' using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-          ."     '".DATA2."' using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle"
+# Base series (A) for a file: errorbars + curve.
+P1A = "'".DATA1."' using xcol:(MUL1*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1):sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+    ." '".DATA1."' using xcol:(MUL1*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1)        with @PLOT_WITH ls 1 lc rgb COL1 title NAME1"
+P1B = "'".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B):sdAcol with yerrorbars lw eblw lc rgb COL1B pt -1 notitle, "\
+    ." '".DATA1B."' using xcol:(MUL1B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET1B)        with @PLOT_WITH ls 2 lc rgb COL1B title NAME1B"
+P2A = "'".DATA2."' using xcol:(MUL2*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2):sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+    ." '".DATA2."' using xcol:(MUL2*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2)        with @PLOT_WITH ls 1 lc rgb COL2 title NAME2"
+P2B = "'".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B):sdAcol with yerrorbars lw eblw lc rgb COL2B pt -1 notitle, "\
+    ." '".DATA2B."' using xcol:(MUL2B*$".sprintf("%d",yAcol)."+DIHEDRAL_OFFSET2B)        with @PLOT_WITH ls 2 lc rgb COL2B title NAME2B"
+
+# Compose per-panel plot commands, optionally adding the second dataset file.
+P1_CMD = "plot ".P1A.(HAS1B ? ", ".P1B : "")
+P2_CMD = "plot ".P2A.(HAS2B ? ", ".P2B : "")
 
 # Compute split for 2-row case
 if (NROWS==2) AVAILH = MTOP - MBOTTOM
@@ -225,8 +277,7 @@ if (SHOW_KEY) set key top right
 if (exists("Y1MIN") && exists("Y1MAX")) set yrange [Y1MIN:Y1MAX]
 if (!(exists("Y1MIN") && exists("Y1MAX"))) unset yrange
 
-if (yBcol>0)  eval P1_WITHB
-if (yBcol<=0) eval P1_NO_B
+eval P1_CMD
 
 # ---- Panel 2 (only when NROWS==2) ----
 if (NROWS==2) set tmargin at screen YSPLIT
@@ -242,8 +293,7 @@ if (NROWS==2 && !exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
 if (NROWS==2) unset key
 if (NROWS==2 && exists("Y2MIN") && exists("Y2MAX")) set yrange [Y2MIN:Y2MAX]
 if (NROWS==2 && !(exists("Y2MIN") && exists("Y2MAX"))) unset yrange
-if (NROWS==2 && yBcol>0)  eval P2_WITHB
-if (NROWS==2 && yBcol<=0) eval P2_NO_B
+if (NROWS==2) eval P2_CMD
 
 unset multiplot
 unset output
