@@ -44,10 +44,8 @@ if (!exists("RELH1")) RELH1 = 0.5
 if (!exists("RELH2")) RELH2 = 0.5
 RELH1 = RELH1 + 0
 RELH2 = RELH2 + 0
-if (RELH1 <= 0 || RELH2 <= 0) {
-  print "ERROR: RELH1 and RELH2 must be > 0"
-  exit
-}
+if (RELH1 <= 0 || RELH2 <= 0) print "ERROR: RELH1 and RELH2 must be > 0"
+if (RELH1 <= 0 || RELH2 <= 0) exit
 RELHSUM = RELH1 + RELH2
 
 # Colors (panel curve A colors). Override via -e, e.g.:
@@ -156,81 +154,69 @@ set multiplot
 set lmargin at screen MLEFT
 set rmargin at screen MRIGHT
 
-if (NROWS==1) {
-  # Single panel uses full vertical space
-  set tmargin at screen MTOP
-  set bmargin at screen MBOTTOM
+#
+# Note on gnuplot syntax:
+# Some gnuplot builds complain about any "if (...) ..." constructs used inside
+# curly-brace blocks. To stay maximally compatible, this script avoids `{}` in
+# control-flow and uses only single-line `if (cond) command` statements below.
+#
 
-  set ylabel Y1LABEL
-  set xlabel XLABEL
-  set format x "%g"
-  if (exists("XTIC_STEP")) set xtics XTIC_STEP
-  if (!exists("XTIC_STEP")) set xtics
-  if (exists("YTIC_STEP1")) set ytics YTIC_STEP1
-  if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
-  if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
-  if (SHOW_KEY) set key top right
+# Pre-build plot command strings (they include plot + line continuations)
+P1_WITHB = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+          .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
+          .DATA1." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+          .DATA1." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
+P1_NO_B  = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
+          .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
+P2_WITHB = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+          .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle, "\
+          .DATA2." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
+          .DATA2." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB notitle"
+P2_NO_B  = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
+          .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle"
 
-  P1_WITHB = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
-            .DATA1." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-            .DATA1." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
-  P1_NO_B  = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
-  if (yBcol>0)  eval P1_WITHB
-  if (yBcol<=0) eval P1_NO_B
-}
+# Compute split for 2-row case
+if (NROWS==2) AVAILH = MTOP - MBOTTOM
+if (NROWS==2) H2 = AVAILH * (RELH2 / RELHSUM)   # bottom panel height
+if (NROWS==2) YSPLIT = MBOTTOM + H2
 
-if (NROWS==2) {
-  AVAILH = MTOP - MBOTTOM
-  H1 = AVAILH * (RELH1 / RELHSUM)   # top panel
-  H2 = AVAILH * (RELH2 / RELHSUM)   # bottom panel
-  YSPLIT = MBOTTOM + H2
+# ---- Panel 1 ----
+# NROWS==1: single panel full height; NROWS==2: top panel uses [YSPLIT..MTOP]
+if (NROWS==1) set tmargin at screen MTOP
+if (NROWS==1) set bmargin at screen MBOTTOM
+if (NROWS==2) set tmargin at screen MTOP
+if (NROWS==2) set bmargin at screen YSPLIT
 
-  # ---- Panel 1 (top) ----
-  set tmargin at screen MTOP
-  set bmargin at screen YSPLIT
-  set ylabel Y1LABEL
-  unset xlabel
-  set format x ""
-  if (exists("XTIC_STEP")) set xtics XTIC_STEP
-  if (!exists("XTIC_STEP")) set xtics
-  if (exists("YTIC_STEP1")) set ytics YTIC_STEP1
-  if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
-  if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
-  if (SHOW_KEY) set key top right
+set ylabel Y1LABEL
+if (NROWS==1) set xlabel XLABEL
+if (NROWS==2) unset xlabel
+if (NROWS==1) set format x "%g"
+if (NROWS==2) set format x ""
 
-  P1_WITHB = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA, "\
-            .DATA1." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-            .DATA1." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB title nameB"
-  P1_NO_B  = "plot ".DATA1." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL1 pt -1 notitle, "\
-            .DATA1." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL1 title nameA"
-  if (yBcol>0)  eval P1_WITHB
-  if (yBcol<=0) eval P1_NO_B
+if (exists("XTIC_STEP")) set xtics XTIC_STEP
+if (!exists("XTIC_STEP")) set xtics
+if (exists("YTIC_STEP1")) set ytics YTIC_STEP1
+if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
+if (SHOW_KEY) set key top right
 
-  # ---- Panel 2 (bottom) ----
-  set tmargin at screen YSPLIT
-  set bmargin at screen MBOTTOM
-  set ylabel Y2LABEL
-  set xlabel XLABEL
-  set format x "%g"
-  if (exists("XTIC_STEP")) set xtics XTIC_STEP
-  if (!exists("XTIC_STEP")) set xtics
-  if (exists("YTIC_STEP2")) set ytics YTIC_STEP2
-  if (!exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
-  if (!exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
-  unset key
+if (yBcol>0)  eval P1_WITHB
+if (yBcol<=0) eval P1_NO_B
 
-  P2_WITHB = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-            .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle, "\
-            .DATA2." using xcol:yBcol:sdBcol with yerrorbars lw eblw lc rgb COLB pt -1 notitle, "\
-            .DATA2." using xcol:yBcol with @PLOT_WITH ls 2 lc rgb COLB notitle"
-  P2_NO_B  = "plot ".DATA2." using xcol:yAcol:sdAcol with yerrorbars lw eblw lc rgb COL2 pt -1 notitle, "\
-            .DATA2." using xcol:yAcol with @PLOT_WITH ls 1 lc rgb COL2 notitle"
-  if (yBcol>0)  eval P2_WITHB
-  if (yBcol<=0) eval P2_NO_B
-}
+# ---- Panel 2 (only when NROWS==2) ----
+if (NROWS==2) set tmargin at screen YSPLIT
+if (NROWS==2) set bmargin at screen MBOTTOM
+if (NROWS==2) set ylabel Y2LABEL
+if (NROWS==2) set xlabel XLABEL
+if (NROWS==2) set format x "%g"
+if (NROWS==2 && exists("XTIC_STEP")) set xtics XTIC_STEP
+if (NROWS==2 && !exists("XTIC_STEP")) set xtics
+if (NROWS==2 && exists("YTIC_STEP2")) set ytics YTIC_STEP2
+if (NROWS==2 && !exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
+if (NROWS==2 && !exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
+if (NROWS==2) unset key
+if (NROWS==2 && yBcol>0)  eval P2_WITHB
+if (NROWS==2 && yBcol<=0) eval P2_NO_B
 
 unset multiplot
 unset output
