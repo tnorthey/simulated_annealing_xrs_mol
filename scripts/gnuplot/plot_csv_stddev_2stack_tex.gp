@@ -31,7 +31,8 @@
 #
 # Piecewise least-squares fit on DATA1 / DATA2 (panel A curves only):
 #   Rise (x <= FITn_XCUT):  y0 + A*(1 - exp(-x/tau)) with y0 FIXED at FITn_Y0_GUESS (only A,tau are fit).
-#   Tail (x >= FITn_XCUT): Taylor polynomial in (x - FITn_TAIL_X0), degree FITn_POLY_DEG (0..6).
+#   Tail (x >= FITn_XCUT): Taylor polynomial in (x - FITn_TAIL_X0), degree FITn_POLY_DEG (0..6),
+#   plus optional damped sines: sum_k A_k*exp(-(x-x0)/L_k)*sin(W_k*(x-x0)+P_k) for FITn_NSIN=1..3.
 # The two segments are fit independently; the curve may jump at x = FITn_XCUT.
 # Fits skip the first CSV row (header). For headerless files use FIT_DATA_SKIP=0.
 # By default the fit uses the same y-transform as the plot (dihedral/offset); use FIT_RAW=1 for raw column y.
@@ -224,6 +225,27 @@ if (!exists("FIT1_POLY_DEG")) FIT1_POLY_DEG = 3
 if (!exists("FIT2_POLY_DEG")) FIT2_POLY_DEG = 3
 FIT1_POLY_DEG = FIT1_POLY_DEG + 0
 FIT2_POLY_DEG = FIT2_POLY_DEG + 0
+if (!exists("FIT1_NSIN")) FIT1_NSIN = 0
+if (!exists("FIT2_NSIN")) FIT2_NSIN = 0
+FIT1_NSIN = FIT1_NSIN + 0
+FIT2_NSIN = FIT2_NSIN + 0
+# Default guesses for each damped-sine term: A*exp(-(x-x0)/L)*sin(W*(x-x0)+P)
+if (!exists("FIT1_DS_A")) FIT1_DS_A = 0.01
+if (!exists("FIT1_DS_L")) FIT1_DS_L = 5
+if (!exists("FIT1_DS_W")) FIT1_DS_W = 1
+if (!exists("FIT1_DS_P")) FIT1_DS_P = 0
+if (!exists("FIT2_DS_A")) FIT2_DS_A = 0.01
+if (!exists("FIT2_DS_L")) FIT2_DS_L = 5
+if (!exists("FIT2_DS_W")) FIT2_DS_W = 1
+if (!exists("FIT2_DS_P")) FIT2_DS_P = 0
+FIT1_DS_A = FIT1_DS_A + 0
+FIT1_DS_L = FIT1_DS_L + 0
+FIT1_DS_W = FIT1_DS_W + 0
+FIT1_DS_P = FIT1_DS_P + 0
+FIT2_DS_A = FIT2_DS_A + 0
+FIT2_DS_L = FIT2_DS_L + 0
+FIT2_DS_W = FIT2_DS_W + 0
+FIT2_DS_P = FIT2_DS_P + 0
 if (!exists("FIT1_LW")) FIT1_LW = 2.0
 if (!exists("FIT2_LW")) FIT2_LW = 2.0
 FIT1_LW = FIT1_LW + 0
@@ -415,6 +437,8 @@ if (exists("FIT_LOG")) eval "set fit logfile '".FIT_LOG."'"
 FIT1_APPEND = ""
 if (FIT1 != 0 && (FIT1_POLY_DEG < 0 || FIT1_POLY_DEG > 6)) print "ERROR: FIT1_POLY_DEG must be in [0,6]"
 if (FIT1 != 0 && (FIT1_POLY_DEG < 0 || FIT1_POLY_DEG > 6)) exit
+if (FIT1 != 0 && (FIT1_NSIN < 0 || FIT1_NSIN > 3)) print "ERROR: FIT1_NSIN must be in [0,3]"
+if (FIT1 != 0 && (FIT1_NSIN < 0 || FIT1_NSIN > 3)) exit
 if (FIT1 != 0 && !exists("FIT1_XCUT")) print "ERROR: FIT1=1 requires FIT1_XCUT"
 if (FIT1 != 0 && !exists("FIT1_XCUT")) exit
 if (FIT1 != 0) FIT1_XCUT = FIT1_XCUT + 0
@@ -434,13 +458,30 @@ if (FIT1 != 0) b3_t1 = 1e-3
 if (FIT1 != 0) b4_t1 = 1e-3
 if (FIT1 != 0) b5_t1 = 1e-3
 if (FIT1 != 0) b6_t1 = 1e-3
-if (FIT1 != 0 && FIT1_POLY_DEG==0) eval "f_tail_1(x) = b0_t1"
-if (FIT1 != 0 && FIT1_POLY_DEG==1) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR."))"
-if (FIT1 != 0 && FIT1_POLY_DEG==2) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2"
-if (FIT1 != 0 && FIT1_POLY_DEG==3) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3"
-if (FIT1 != 0 && FIT1_POLY_DEG==4) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3 + b4_t1*(x-(".XO1STR."))**4"
-if (FIT1 != 0 && FIT1_POLY_DEG==5) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3 + b4_t1*(x-(".XO1STR."))**4 + b5_t1*(x-(".XO1STR."))**5"
-if (FIT1 != 0 && FIT1_POLY_DEG==6) eval "f_tail_1(x) = b0_t1 + b1_t1*(x-(".XO1STR.")) + b2_t1*(x-(".XO1STR."))**2 + b3_t1*(x-(".XO1STR."))**3 + b4_t1*(x-(".XO1STR."))**4 + b5_t1*(x-(".XO1STR."))**5 + b6_t1*(x-(".XO1STR."))**6"
+if (FIT1 != 0 && FIT1_NSIN>=1) ds1a1 = FIT1_DS_A
+if (FIT1 != 0 && FIT1_NSIN>=1) ds1l1 = FIT1_DS_L
+if (FIT1 != 0 && FIT1_NSIN>=1) ds1w1 = FIT1_DS_W
+if (FIT1 != 0 && FIT1_NSIN>=1) ds1p1 = FIT1_DS_P
+if (FIT1 != 0 && FIT1_NSIN>=2) ds1a2 = FIT1_DS_A
+if (FIT1 != 0 && FIT1_NSIN>=2) ds1l2 = FIT1_DS_L
+if (FIT1 != 0 && FIT1_NSIN>=2) ds1w2 = FIT1_DS_W + 0.1
+if (FIT1 != 0 && FIT1_NSIN>=2) ds1p2 = FIT1_DS_P
+if (FIT1 != 0 && FIT1_NSIN>=3) ds1a3 = FIT1_DS_A
+if (FIT1 != 0 && FIT1_NSIN>=3) ds1l3 = FIT1_DS_L
+if (FIT1 != 0 && FIT1_NSIN>=3) ds1w3 = FIT1_DS_W + 0.2
+if (FIT1 != 0 && FIT1_NSIN>=3) ds1p3 = FIT1_DS_P
+if (FIT1 != 0) POLY1 = "b0_t1"
+if (FIT1 != 0 && FIT1_POLY_DEG>=1) POLY1 = POLY1 . " + b1_t1*(x-(".XO1STR."))"
+if (FIT1 != 0 && FIT1_POLY_DEG>=2) POLY1 = POLY1 . " + b2_t1*(x-(".XO1STR."))**2"
+if (FIT1 != 0 && FIT1_POLY_DEG>=3) POLY1 = POLY1 . " + b3_t1*(x-(".XO1STR."))**3"
+if (FIT1 != 0 && FIT1_POLY_DEG>=4) POLY1 = POLY1 . " + b4_t1*(x-(".XO1STR."))**4"
+if (FIT1 != 0 && FIT1_POLY_DEG>=5) POLY1 = POLY1 . " + b5_t1*(x-(".XO1STR."))**5"
+if (FIT1 != 0 && FIT1_POLY_DEG>=6) POLY1 = POLY1 . " + b6_t1*(x-(".XO1STR."))**6"
+if (FIT1 != 0) DS1 = ""
+if (FIT1 != 0 && FIT1_NSIN>=1) DS1 = DS1 . " + ds1a1*exp(-(x-(".XO1STR."))/ds1l1)*sin(ds1w1*(x-(".XO1STR."))+ds1p1)"
+if (FIT1 != 0 && FIT1_NSIN>=2) DS1 = DS1 . " + ds1a2*exp(-(x-(".XO1STR."))/ds1l2)*sin(ds1w2*(x-(".XO1STR."))+ds1p2)"
+if (FIT1 != 0 && FIT1_NSIN>=3) DS1 = DS1 . " + ds1a3*exp(-(x-(".XO1STR."))/ds1l3)*sin(ds1w3*(x-(".XO1STR."))+ds1p3)"
+if (FIT1 != 0) eval "f_tail_1(x) = ".POLY1.DS1
 if (FIT1 != 0) VIA1T = "b0_t1"
 if (FIT1 != 0 && FIT1_POLY_DEG>=1) VIA1T = VIA1T . ",b1_t1"
 if (FIT1 != 0 && FIT1_POLY_DEG>=2) VIA1T = VIA1T . ",b2_t1"
@@ -448,10 +489,13 @@ if (FIT1 != 0 && FIT1_POLY_DEG>=3) VIA1T = VIA1T . ",b3_t1"
 if (FIT1 != 0 && FIT1_POLY_DEG>=4) VIA1T = VIA1T . ",b4_t1"
 if (FIT1 != 0 && FIT1_POLY_DEG>=5) VIA1T = VIA1T . ",b5_t1"
 if (FIT1 != 0 && FIT1_POLY_DEG>=6) VIA1T = VIA1T . ",b6_t1"
+if (FIT1 != 0 && FIT1_NSIN>=1) VIA1T = VIA1T . ",ds1a1,ds1l1,ds1w1,ds1p1"
+if (FIT1 != 0 && FIT1_NSIN>=2) VIA1T = VIA1T . ",ds1a2,ds1l2,ds1w2,ds1p2"
+if (FIT1 != 0 && FIT1_NSIN>=3) VIA1T = VIA1T . ",ds1a3,ds1l3,ds1w3,ds1p3"
 if (FIT1 != 0) eval "fit f_tail_1(x) '".DATA1."' ".FIT_SK."using 1:(($1>=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via ".VIA1T
 if (FIT1 != 0) f_fit_1(x) = (x<=FIT1_XCUT) ? f_rise_1(x) : f_tail_1(x)
 if (FIT1 != 0) print sprintf("FIT1 DATA1 rise: y0(fixed)=%g A=%g tau=%g", y0_r1, A_r1, tau_r1)
-if (FIT1 != 0) print sprintf("FIT1 DATA1 tail: degree %d expansion about x0=%g", FIT1_POLY_DEG, FIT1_TAIL_X0)
+if (FIT1 != 0) print sprintf("FIT1 DATA1 tail: poly deg %d + %d damped sine(s), x0=%g", FIT1_POLY_DEG, FIT1_NSIN, FIT1_TAIL_X0)
 if (FIT1 != 0 && SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR title '".FIT1_TITLE."'"
 if (FIT1 != 0 && !SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR notitle"
 
@@ -460,6 +504,8 @@ FIT2_APPEND = ""
 if (FIT2 != 0 && NROWS < 2) print "WARNING: FIT2 ignored (DATA2 / second panel not used)"
 if (FIT2 != 0 && NROWS >= 2 && (FIT2_POLY_DEG < 0 || FIT2_POLY_DEG > 6)) print "ERROR: FIT2_POLY_DEG must be in [0,6]"
 if (FIT2 != 0 && NROWS >= 2 && (FIT2_POLY_DEG < 0 || FIT2_POLY_DEG > 6)) exit
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_NSIN < 0 || FIT2_NSIN > 3)) print "ERROR: FIT2_NSIN must be in [0,3]"
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_NSIN < 0 || FIT2_NSIN > 3)) exit
 if (FIT2 != 0 && NROWS >= 2 && !exists("FIT2_XCUT")) print "ERROR: FIT2=1 requires FIT2_XCUT"
 if (FIT2 != 0 && NROWS >= 2 && !exists("FIT2_XCUT")) exit
 if (FIT2 != 0 && NROWS >= 2) FIT2_XCUT = FIT2_XCUT + 0
@@ -479,13 +525,30 @@ if (FIT2 != 0 && NROWS >= 2) b3_t2 = 1e-3
 if (FIT2 != 0 && NROWS >= 2) b4_t2 = 1e-3
 if (FIT2 != 0 && NROWS >= 2) b5_t2 = 1e-3
 if (FIT2 != 0 && NROWS >= 2) b6_t2 = 1e-3
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==0) eval "f_tail_2(x) = b0_t2"
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==1) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR."))"
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==2) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2"
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==3) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3"
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==4) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3 + b4_t2*(x-(".XO2STR."))**4"
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==5) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3 + b4_t2*(x-(".XO2STR."))**4 + b5_t2*(x-(".XO2STR."))**5"
-if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG==6) eval "f_tail_2(x) = b0_t2 + b1_t2*(x-(".XO2STR.")) + b2_t2*(x-(".XO2STR."))**2 + b3_t2*(x-(".XO2STR."))**3 + b4_t2*(x-(".XO2STR."))**4 + b5_t2*(x-(".XO2STR."))**5 + b6_t2*(x-(".XO2STR."))**6"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=1) ds2a1 = FIT2_DS_A
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=1) ds2l1 = FIT2_DS_L
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=1) ds2w1 = FIT2_DS_W
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=1) ds2p1 = FIT2_DS_P
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) ds2a2 = FIT2_DS_A
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) ds2l2 = FIT2_DS_L
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) ds2w2 = FIT2_DS_W + 0.1
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) ds2p2 = FIT2_DS_P
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) ds2a3 = FIT2_DS_A
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) ds2l3 = FIT2_DS_L
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) ds2w3 = FIT2_DS_W + 0.2
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) ds2p3 = FIT2_DS_P
+if (FIT2 != 0 && NROWS >= 2) POLY2 = "b0_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=1) POLY2 = POLY2 . " + b1_t2*(x-(".XO2STR."))"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=2) POLY2 = POLY2 . " + b2_t2*(x-(".XO2STR."))**2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=3) POLY2 = POLY2 . " + b3_t2*(x-(".XO2STR."))**3"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=4) POLY2 = POLY2 . " + b4_t2*(x-(".XO2STR."))**4"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=5) POLY2 = POLY2 . " + b5_t2*(x-(".XO2STR."))**5"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=6) POLY2 = POLY2 . " + b6_t2*(x-(".XO2STR."))**6"
+if (FIT2 != 0 && NROWS >= 2) DS2 = ""
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=1) DS2 = DS2 . " + ds2a1*exp(-(x-(".XO2STR."))/ds2l1)*sin(ds2w1*(x-(".XO2STR."))+ds2p1)"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) DS2 = DS2 . " + ds2a2*exp(-(x-(".XO2STR."))/ds2l2)*sin(ds2w2*(x-(".XO2STR."))+ds2p2)"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) DS2 = DS2 . " + ds2a3*exp(-(x-(".XO2STR."))/ds2l3)*sin(ds2w3*(x-(".XO2STR."))+ds2p3)"
+if (FIT2 != 0 && NROWS >= 2) eval "f_tail_2(x) = ".POLY2.DS2
 if (FIT2 != 0 && NROWS >= 2) VIA2T = "b0_t2"
 if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=1) VIA2T = VIA2T . ",b1_t2"
 if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=2) VIA2T = VIA2T . ",b2_t2"
@@ -493,10 +556,13 @@ if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=3) VIA2T = VIA2T . ",b3_t2"
 if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=4) VIA2T = VIA2T . ",b4_t2"
 if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=5) VIA2T = VIA2T . ",b5_t2"
 if (FIT2 != 0 && NROWS >= 2 && FIT2_POLY_DEG>=6) VIA2T = VIA2T . ",b6_t2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=1) VIA2T = VIA2T . ",ds2a1,ds2l1,ds2w1,ds2p1"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) VIA2T = VIA2T . ",ds2a2,ds2l2,ds2w2,ds2p2"
+if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) VIA2T = VIA2T . ",ds2a3,ds2l3,ds2w3,ds2p3"
 if (FIT2 != 0 && NROWS >= 2) eval "fit f_tail_2(x) '".DATA2."' ".FIT_SK."using 1:(($1>=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via ".VIA2T
 if (FIT2 != 0 && NROWS >= 2) f_fit_2(x) = (x<=FIT2_XCUT) ? f_rise_2(x) : f_tail_2(x)
 if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 rise: y0(fixed)=%g A=%g tau=%g", y0_r2, A_r2, tau_r2)
-if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 tail: degree %d expansion about x0=%g", FIT2_POLY_DEG, FIT2_TAIL_X0)
+if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 tail: poly deg %d + %d damped sine(s), x0=%g", FIT2_POLY_DEG, FIT2_NSIN, FIT2_TAIL_X0)
 if (FIT2 != 0 && NROWS >= 2 && SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR title '".FIT2_TITLE."'"
 if (FIT2 != 0 && NROWS >= 2 && !SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR notitle"
 
