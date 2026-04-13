@@ -1,7 +1,7 @@
 #!/usr/bin/env gnuplot
 # ------------------------------------------------------------------------------
 # Plot 2 vertically stacked subfigures (shared x-axis) from 2 CSV files.
-# Each CSV contains columns: x, y, sd  (optionally more curves: y2, sd2, ...)
+# Each CSV contains columns: time, data, SD  (i.e. x, y, sd)
 #
 # Output: standalone LaTeX file (<OUTBASE>.tex) that compiles directly to PDF.
 #
@@ -160,7 +160,7 @@ xcol = 1
 
 # Curve A columns (mean and its standard deviation)
 yAcol  = 2
-sdAcol = 4
+sdAcol = 3
 nameA  = "Series A"
 
 # Optional curve B columns (set yBcol=0 to disable entirely)
