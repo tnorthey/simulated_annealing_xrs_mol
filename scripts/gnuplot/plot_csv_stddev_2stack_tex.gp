@@ -161,6 +161,20 @@ set rmargin at screen MRIGHT
 # control-flow and uses only single-line `if (cond) command` statements below.
 #
 
+# Shared x-range (only set if user provided both XMIN and XMAX)
+# Example:
+#   gnuplot -e "XMIN=0;XMAX=10" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+if (exists("XMIN")) XMIN = XMIN + 0
+if (exists("XMAX")) XMAX = XMAX + 0
+if (exists("XMIN") && exists("XMAX")) set xrange [XMIN:XMAX]
+if (!(exists("XMIN") && exists("XMAX"))) unset xrange
+
+# Per-panel y-ranges (only set if user provided both bounds)
+if (exists("Y1MIN")) Y1MIN = Y1MIN + 0
+if (exists("Y1MAX")) Y1MAX = Y1MAX + 0
+if (exists("Y2MIN")) Y2MIN = Y2MIN + 0
+if (exists("Y2MAX")) Y2MAX = Y2MAX + 0
+
 # Pre-build plot command strings (they include plot + line continuations)
 # IMPORTANT: Quote filenames, since paths often contain '-' which gnuplot may
 # otherwise parse as subtraction in expressions.
@@ -202,6 +216,9 @@ if (!exists("YTIC_STEP1") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (!exists("YTIC_STEP1") && !exists("YTIC_STEP")) set ytics
 if (SHOW_KEY) set key top right
 
+if (exists("Y1MIN") && exists("Y1MAX")) set yrange [Y1MIN:Y1MAX]
+if (!(exists("Y1MIN") && exists("Y1MAX"))) unset yrange
+
 if (yBcol>0)  eval P1_WITHB
 if (yBcol<=0) eval P1_NO_B
 
@@ -217,6 +234,8 @@ if (NROWS==2 && exists("YTIC_STEP2")) set ytics YTIC_STEP2
 if (NROWS==2 && !exists("YTIC_STEP2") && exists("YTIC_STEP")) set ytics YTIC_STEP
 if (NROWS==2 && !exists("YTIC_STEP2") && !exists("YTIC_STEP")) set ytics
 if (NROWS==2) unset key
+if (NROWS==2 && exists("Y2MIN") && exists("Y2MAX")) set yrange [Y2MIN:Y2MAX]
+if (NROWS==2 && !(exists("Y2MIN") && exists("Y2MAX"))) unset yrange
 if (NROWS==2 && yBcol>0)  eval P2_WITHB
 if (NROWS==2 && yBcol<=0) eval P2_NO_B
 
