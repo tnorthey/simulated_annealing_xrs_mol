@@ -30,7 +30,9 @@
 #   gnuplot -e "RELH1=0.7;RELH2=0.3" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
 #
 # Piecewise least-squares fit on DATA1 / DATA2 (panel A curves only):
-#   Rise (x <= FITn_XCUT):  y0 + A*(1 - exp(-x/tau)) with y0 FIXED at FITn_Y0_GUESS (only A,tau are fit).
+#   Rise (x <= FITn_XCUT): either
+#     - exponential rise: y0 + A*(1 - exp(-x/tau)) with y0 FIXED at FITn_Y0_GUESS (only A,tau are fit), or
+#     - linear rise:      y0 + m*x with y0 FIXED at FITn_Y0_GUESS (only m is fit).
 #   Tail (x >= FITn_XCUT): Taylor polynomial in (x - FITn_TAIL_X0), degree FITn_POLY_DEG (0..6),
 #   plus optional damped sines: sum_k A_k*exp(-(x-x0)/L_k)*sin(W_k*(x-x0)+P_k) for FITn_NSIN=1..3.
 # The two segments are fit independently; the curve may jump at x = FITn_XCUT.
@@ -39,6 +41,8 @@
 # Weights use column sd (yerror). Asymptotic stderrs from gnuplot are approximate.
 # Example:
 #   gnuplot -e "FIT1=1;FIT1_XCUT=1.0;FIT1_POLY_DEG=4;FIT2=1;FIT2_XCUT=0.5;FIT2_POLY_DEG=3;SHOW_KEY=1" ...
+# Linear rise instead of exponential:
+#   gnuplot -e "FIT1=1;FIT1_RISE_MODEL='LINEAR';FIT1_M_GUESS=0.2;FIT1_XCUT=1.0;FIT1_POLY_DEG=3" ...
 # Optional: FIT_LOG='fit.log' to record fit diagnostics; FIT1_COLOR / FIT2_COLOR for the overlay line.
 # Fit algorithm tuning (gnuplot 5.4 `set fit`; applied when FIT1 or FIT2 is used):
 #   FIT_MAXITER=N     — max Marquardt–Levenberg iterations (0 = unlimited, gnuplot default).
@@ -268,15 +272,21 @@ if (!exists("FIT2_TITLE")) FIT2_TITLE = "fit"
 if (!exists("FIT1_Y0_GUESS")) FIT1_Y0_GUESS = 0
 if (!exists("FIT1_A_GUESS"))  FIT1_A_GUESS  = 1
 if (!exists("FIT1_TAU_GUESS")) FIT1_TAU_GUESS = 1
+if (!exists("FIT1_RISE_MODEL")) FIT1_RISE_MODEL = "EXP"
+if (!exists("FIT1_M_GUESS")) FIT1_M_GUESS = 0
 if (!exists("FIT2_Y0_GUESS")) FIT2_Y0_GUESS = 0
 if (!exists("FIT2_A_GUESS"))  FIT2_A_GUESS  = 1
 if (!exists("FIT2_TAU_GUESS")) FIT2_TAU_GUESS = 1
+if (!exists("FIT2_RISE_MODEL")) FIT2_RISE_MODEL = "EXP"
+if (!exists("FIT2_M_GUESS")) FIT2_M_GUESS = 0
 FIT1_Y0_GUESS = FIT1_Y0_GUESS + 0
 FIT1_A_GUESS  = FIT1_A_GUESS  + 0
 FIT1_TAU_GUESS = FIT1_TAU_GUESS + 0
+FIT1_M_GUESS = FIT1_M_GUESS + 0
 FIT2_Y0_GUESS = FIT2_Y0_GUESS + 0
 FIT2_A_GUESS  = FIT2_A_GUESS  + 0
 FIT2_TAU_GUESS = FIT2_TAU_GUESS + 0
+FIT2_M_GUESS = FIT2_M_GUESS + 0
 
 # Optional `set fit` tuning (used when FIT1 or FIT2 runs; see header comment).
 if (exists("FIT_MAXITER")) FIT_MAXITER = FIT_MAXITER + 0
@@ -479,8 +489,11 @@ if (FIT1 != 0) XO1STR = sprintf("%.12g", FIT1_TAIL_X0)
 if (FIT1 != 0) y0_r1 = FIT1_Y0_GUESS
 if (FIT1 != 0) A_r1 = FIT1_A_GUESS
 if (FIT1 != 0) tau_r1 = FIT1_TAU_GUESS
-if (FIT1 != 0) f_rise_1(x) = y0_r1 + A_r1*(1-exp(-x/tau_r1))
-if (FIT1 != 0) eval "fit f_rise_1(x) '".DATA1."' ".FIT_SK."using 1:(($1<=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via A_r1,tau_r1"
+if (FIT1 != 0) m_r1 = FIT1_M_GUESS
+if (FIT1 != 0 && (FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FIT1_RISE_MODEL eq "linear" || FIT1_RISE_MODEL eq "lin")) f_rise_1(x) = y0_r1 + m_r1*x
+if (FIT1 != 0 && !(FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FIT1_RISE_MODEL eq "linear" || FIT1_RISE_MODEL eq "lin")) f_rise_1(x) = y0_r1 + A_r1*(1-exp(-x/tau_r1))
+if (FIT1 != 0 && (FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FIT1_RISE_MODEL eq "linear" || FIT1_RISE_MODEL eq "lin")) eval "fit f_rise_1(x) '".DATA1."' ".FIT_SK."using 1:(($1<=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via m_r1"
+if (FIT1 != 0 && !(FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FIT1_RISE_MODEL eq "linear" || FIT1_RISE_MODEL eq "lin")) eval "fit f_rise_1(x) '".DATA1."' ".FIT_SK."using 1:(($1<=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via A_r1,tau_r1"
 if (FIT1 != 0) b0_t1 = 1e-3
 if (FIT1 != 0) b1_t1 = 1e-3
 if (FIT1 != 0) b2_t1 = 1e-3
@@ -524,7 +537,8 @@ if (FIT1 != 0 && FIT1_NSIN>=2) VIA1T = VIA1T . ",ds1a2,ds1l2,ds1w2,ds1p2"
 if (FIT1 != 0 && FIT1_NSIN>=3) VIA1T = VIA1T . ",ds1a3,ds1l3,ds1w3,ds1p3"
 if (FIT1 != 0) eval "fit f_tail_1(x) '".DATA1."' ".FIT_SK."using 1:(($1>=".XCUT1STR.")?(".FITY1."):(1/0)):".SDCOLN." yerror via ".VIA1T
 if (FIT1 != 0) f_fit_1(x) = (x<=FIT1_XCUT) ? f_rise_1(x) : f_tail_1(x)
-if (FIT1 != 0) print sprintf("FIT1 DATA1 rise: y0(fixed)=%g A=%g tau=%g", y0_r1, A_r1, tau_r1)
+if (FIT1 != 0 && (FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FIT1_RISE_MODEL eq "linear" || FIT1_RISE_MODEL eq "lin")) print sprintf("FIT1 DATA1 rise (linear): y0(fixed)=%g m=%g", y0_r1, m_r1)
+if (FIT1 != 0 && !(FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FIT1_RISE_MODEL eq "linear" || FIT1_RISE_MODEL eq "lin")) print sprintf("FIT1 DATA1 rise (exp): y0(fixed)=%g A=%g tau=%g", y0_r1, A_r1, tau_r1)
 if (FIT1 != 0) print sprintf("FIT1 DATA1 tail: poly deg %d + %d damped sine(s), x0=%g", FIT1_POLY_DEG, FIT1_NSIN, FIT1_TAIL_X0)
 if (FIT1 != 0 && SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR title '".FIT1_TITLE."'"
 if (FIT1 != 0 && !SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR notitle"
@@ -546,8 +560,11 @@ if (FIT2 != 0 && NROWS >= 2) XO2STR = sprintf("%.12g", FIT2_TAIL_X0)
 if (FIT2 != 0 && NROWS >= 2) y0_r2 = FIT2_Y0_GUESS
 if (FIT2 != 0 && NROWS >= 2) A_r2 = FIT2_A_GUESS
 if (FIT2 != 0 && NROWS >= 2) tau_r2 = FIT2_TAU_GUESS
-if (FIT2 != 0 && NROWS >= 2) f_rise_2(x) = y0_r2 + A_r2*(1-exp(-x/tau_r2))
-if (FIT2 != 0 && NROWS >= 2) eval "fit f_rise_2(x) '".DATA2."' ".FIT_SK."using 1:(($1<=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via A_r2,tau_r2"
+if (FIT2 != 0 && NROWS >= 2) m_r2 = FIT2_M_GUESS
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL eq "LIN" || FIT2_RISE_MODEL eq "linear" || FIT2_RISE_MODEL eq "lin")) f_rise_2(x) = y0_r2 + m_r2*x
+if (FIT2 != 0 && NROWS >= 2 && !(FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL eq "LIN" || FIT2_RISE_MODEL eq "linear" || FIT2_RISE_MODEL eq "lin")) f_rise_2(x) = y0_r2 + A_r2*(1-exp(-x/tau_r2))
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL eq "LIN" || FIT2_RISE_MODEL eq "linear" || FIT2_RISE_MODEL eq "lin")) eval "fit f_rise_2(x) '".DATA2."' ".FIT_SK."using 1:(($1<=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via m_r2"
+if (FIT2 != 0 && NROWS >= 2 && !(FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL eq "LIN" || FIT2_RISE_MODEL eq "linear" || FIT2_RISE_MODEL eq "lin")) eval "fit f_rise_2(x) '".DATA2."' ".FIT_SK."using 1:(($1<=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via A_r2,tau_r2"
 if (FIT2 != 0 && NROWS >= 2) b0_t2 = 1e-3
 if (FIT2 != 0 && NROWS >= 2) b1_t2 = 1e-3
 if (FIT2 != 0 && NROWS >= 2) b2_t2 = 1e-3
@@ -591,7 +608,8 @@ if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=2) VIA2T = VIA2T . ",ds2a2,ds2l2,ds2w2
 if (FIT2 != 0 && NROWS >= 2 && FIT2_NSIN>=3) VIA2T = VIA2T . ",ds2a3,ds2l3,ds2w3,ds2p3"
 if (FIT2 != 0 && NROWS >= 2) eval "fit f_tail_2(x) '".DATA2."' ".FIT_SK."using 1:(($1>=".XCUT2STR.")?(".FITY2."):(1/0)):".SDCOLN." yerror via ".VIA2T
 if (FIT2 != 0 && NROWS >= 2) f_fit_2(x) = (x<=FIT2_XCUT) ? f_rise_2(x) : f_tail_2(x)
-if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 rise: y0(fixed)=%g A=%g tau=%g", y0_r2, A_r2, tau_r2)
+if (FIT2 != 0 && NROWS >= 2 && (FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL eq "LIN" || FIT2_RISE_MODEL eq "linear" || FIT2_RISE_MODEL eq "lin")) print sprintf("FIT2 DATA2 rise (linear): y0(fixed)=%g m=%g", y0_r2, m_r2)
+if (FIT2 != 0 && NROWS >= 2 && !(FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL eq "LIN" || FIT2_RISE_MODEL eq "linear" || FIT2_RISE_MODEL eq "lin")) print sprintf("FIT2 DATA2 rise (exp): y0(fixed)=%g A=%g tau=%g", y0_r2, A_r2, tau_r2)
 if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 tail: poly deg %d + %d damped sine(s), x0=%g", FIT2_POLY_DEG, FIT2_NSIN, FIT2_TAIL_X0)
 if (FIT2 != 0 && NROWS >= 2 && SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR title '".FIT2_TITLE."'"
 if (FIT2 != 0 && NROWS >= 2 && !SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR notitle"
