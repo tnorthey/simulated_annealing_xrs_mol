@@ -298,6 +298,21 @@ if (exists("FIT_LAMBDA_FACTOR")) FIT_LAMBDA_FACTOR = FIT_LAMBDA_FACTOR + 0
 if (exists("FIT_ERRORVARIABLES")) FIT_ERRORVARIABLES = FIT_ERRORVARIABLES + 0
 if (exists("FIT_VERBOSE")) FIT_VERBOSE = FIT_VERBOSE + 0
 
+# Optional: export fitted curve(s) to CSV after fitting.
+# Examples:
+#   gnuplot -e "DATA1='a.csv';FIT1=1;FIT1_XCUT=1.0;FIT1_CSV='fit1.csv';FIT1_CSV_NPTS=1000" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+#   gnuplot -e "DATA2='b.csv';FIT2=1;FIT2_XCUT=0.5;FIT2_CSV='fit2.csv';FIT2_CSV_XMIN=0;FIT2_CSV_XMAX=10" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+if (!exists("FIT1_CSV")) FIT1_CSV = ""
+if (!exists("FIT2_CSV")) FIT2_CSV = ""
+if (!exists("FIT1_CSV_NPTS")) FIT1_CSV_NPTS = 1000
+if (!exists("FIT2_CSV_NPTS")) FIT2_CSV_NPTS = 1000
+FIT1_CSV_NPTS = FIT1_CSV_NPTS + 0
+FIT2_CSV_NPTS = FIT2_CSV_NPTS + 0
+if (exists("FIT1_CSV_XMIN")) FIT1_CSV_XMIN = FIT1_CSV_XMIN + 0
+if (exists("FIT1_CSV_XMAX")) FIT1_CSV_XMAX = FIT1_CSV_XMAX + 0
+if (exists("FIT2_CSV_XMIN")) FIT2_CSV_XMIN = FIT2_CSV_XMIN + 0
+if (exists("FIT2_CSV_XMAX")) FIT2_CSV_XMAX = FIT2_CSV_XMAX + 0
+
 # Legend labels for per-panel datasets
 if (!exists("NAME1"))  NAME1  = "Dataset 1"
 if (!exists("NAME1B")) NAME1B = "Dataset 1B"
@@ -542,6 +557,15 @@ if (FIT1 != 0 && !(FIT1_RISE_MODEL eq "LINEAR" || FIT1_RISE_MODEL eq "LIN" || FI
 if (FIT1 != 0) print sprintf("FIT1 DATA1 tail: poly deg %d + %d damped sine(s), x0=%g", FIT1_POLY_DEG, FIT1_NSIN, FIT1_TAIL_X0)
 if (FIT1 != 0 && SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR title '".FIT1_TITLE."'"
 if (FIT1 != 0 && !SHOW_KEY) FIT1_APPEND = ", f_fit_1(x) with lines lw FIT1_LW lc rgb FIT1_COLOR notitle"
+DO_FIT1_CSV = (FIT1 != 0 && FIT1_CSV ne "") ? 1 : 0
+if (DO_FIT1_CSV && FIT1_CSV_NPTS < 2) FIT1_CSV_NPTS = 2
+if (DO_FIT1_CSV) stats DATA1 skip FIT_DATA_SKIP using 1 name "S1" nooutput
+if (DO_FIT1_CSV) FIT1_XMIN_E = exists("FIT1_CSV_XMIN") ? FIT1_CSV_XMIN : S1_min
+if (DO_FIT1_CSV) FIT1_XMAX_E = exists("FIT1_CSV_XMAX") ? FIT1_CSV_XMAX : S1_max
+if (DO_FIT1_CSV && FIT1_XMAX_E <= FIT1_XMIN_E) FIT1_XMAX_E = FIT1_XMIN_E + 1e-12
+if (DO_FIT1_CSV) dx1 = (FIT1_XMAX_E - FIT1_XMIN_E) / (FIT1_CSV_NPTS - 1.0)
+if (DO_FIT1_CSV) eval sprintf("set print '%s'; print 'x,y_fit'; do for [i=0:%d] { xx=FIT1_XMIN_E + i*dx1; print sprintf('%%.12g,%%.12g', xx, f_fit_1(xx)) }; set print", FIT1_CSV, FIT1_CSV_NPTS-1)
+if (DO_FIT1_CSV) print sprintf("Wrote FIT1 CSV: %s (%d points).", FIT1_CSV, FIT1_CSV_NPTS)
 
 # ---- FIT2: same on DATA2 (only when second panel exists) ----
 FIT2_APPEND = ""
@@ -613,6 +637,15 @@ if (FIT2 != 0 && NROWS >= 2 && !(FIT2_RISE_MODEL eq "LINEAR" || FIT2_RISE_MODEL 
 if (FIT2 != 0 && NROWS >= 2) print sprintf("FIT2 DATA2 tail: poly deg %d + %d damped sine(s), x0=%g", FIT2_POLY_DEG, FIT2_NSIN, FIT2_TAIL_X0)
 if (FIT2 != 0 && NROWS >= 2 && SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR title '".FIT2_TITLE."'"
 if (FIT2 != 0 && NROWS >= 2 && !SHOW_KEY) FIT2_APPEND = ", f_fit_2(x) with lines lw FIT2_LW lc rgb FIT2_COLOR notitle"
+DO_FIT2_CSV = (FIT2 != 0 && NROWS >= 2 && FIT2_CSV ne "") ? 1 : 0
+if (DO_FIT2_CSV && FIT2_CSV_NPTS < 2) FIT2_CSV_NPTS = 2
+if (DO_FIT2_CSV) stats DATA2 skip FIT_DATA_SKIP using 1 name "S2" nooutput
+if (DO_FIT2_CSV) FIT2_XMIN_E = exists("FIT2_CSV_XMIN") ? FIT2_CSV_XMIN : S2_min
+if (DO_FIT2_CSV) FIT2_XMAX_E = exists("FIT2_CSV_XMAX") ? FIT2_CSV_XMAX : S2_max
+if (DO_FIT2_CSV && FIT2_XMAX_E <= FIT2_XMIN_E) FIT2_XMAX_E = FIT2_XMIN_E + 1e-12
+if (DO_FIT2_CSV) dx2 = (FIT2_XMAX_E - FIT2_XMIN_E) / (FIT2_CSV_NPTS - 1.0)
+if (DO_FIT2_CSV) eval sprintf("set print '%s'; print 'x,y_fit'; do for [i=0:%d] { xx=FIT2_XMIN_E + i*dx2; print sprintf('%%.12g,%%.12g', xx, f_fit_2(xx)) }; set print", FIT2_CSV, FIT2_CSV_NPTS-1)
+if (DO_FIT2_CSV) print sprintf("Wrote FIT2 CSV: %s (%d points).", FIT2_CSV, FIT2_CSV_NPTS)
 
 # Shaded band expressions (mean ± SD). SD is taken from $SDCOL.
 YLO1  = "(".YEXPR1 ." - $".SDCOL.")"
