@@ -233,6 +233,22 @@ if (!exists("FIT1")) FIT1 = 0
 if (!exists("FIT2")) FIT2 = 0
 FIT1 = FIT1 + 0
 FIT2 = FIT2 + 0
+
+# Optional: plot an existing fit CSV instead of fitting.
+# If enabled, no fitting is performed for that panel.
+# Expected CSV columns: x,y_fit (header optional; gnuplot will ignore it with `skip 1` below).
+# Example:
+#   gnuplot -e "DATA1='data.csv';PLOT_FIT1_CSV='fit.csv';OUTBASE='fig'" scripts/gnuplot/plot_csv_stddev_2stack_tex.gp
+if (!exists("PLOT_FIT1_CSV")) PLOT_FIT1_CSV = ""
+if (!exists("PLOT_FIT2_CSV")) PLOT_FIT2_CSV = ""
+if (!exists("PLOT_FIT1_TITLE")) PLOT_FIT1_TITLE = "fit"
+if (!exists("PLOT_FIT2_TITLE")) PLOT_FIT2_TITLE = "fit"
+if (!exists("PLOT_FIT1_COLOR")) PLOT_FIT1_COLOR = "#333333"
+if (!exists("PLOT_FIT2_COLOR")) PLOT_FIT2_COLOR = "#333333"
+if (!exists("PLOT_FIT1_LW")) PLOT_FIT1_LW = 2.0
+if (!exists("PLOT_FIT2_LW")) PLOT_FIT2_LW = 2.0
+PLOT_FIT1_LW = PLOT_FIT1_LW + 0
+PLOT_FIT2_LW = PLOT_FIT2_LW + 0
 if (!exists("FIT_RAW")) FIT_RAW = 0
 FIT_RAW = FIT_RAW + 0
 if (!exists("FIT1_POLY_DEG")) FIT1_POLY_DEG = 3
@@ -506,8 +522,16 @@ if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_START_LAMBDA")) eval "set fit start_
 if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_LAMBDA_FACTOR")) eval "set fit lambda_factor ".sprintf("%g", FIT_LAMBDA_FACTOR)
 if ((FIT1 != 0 || FIT2 != 0) && exists("FIT_ERRORVARIABLES") && FIT_ERRORVARIABLES != 0) set fit errorvariables
 
+# If user provided a fit CSV to plot, disable fitting for that panel and just overlay the file.
+PLOT_FIT1_ENABLED = (PLOT_FIT1_CSV ne "") ? 1 : 0
+PLOT_FIT2_ENABLED = (PLOT_FIT2_CSV ne "") ? 1 : 0
+if (PLOT_FIT1_ENABLED) FIT1 = 0
+if (PLOT_FIT2_ENABLED) FIT2 = 0
+
 # ---- FIT1: exponential rise (x<=xc) + polynomial tail (x>=xc) on DATA1 ----
 FIT1_APPEND = ""
+if (PLOT_FIT1_ENABLED && SHOW_KEY)  FIT1_APPEND = ", '".PLOT_FIT1_CSV."' using 1:2 skip 1 with lines lw PLOT_FIT1_LW lc rgb PLOT_FIT1_COLOR title '".PLOT_FIT1_TITLE."'"
+if (PLOT_FIT1_ENABLED && !SHOW_KEY) FIT1_APPEND = ", '".PLOT_FIT1_CSV."' using 1:2 skip 1 with lines lw PLOT_FIT1_LW lc rgb PLOT_FIT1_COLOR notitle"
 if (FIT1 != 0 && (FIT1_POLY_DEG < 0 || FIT1_POLY_DEG > 6)) print "ERROR: FIT1_POLY_DEG must be in [0,6]"
 if (FIT1 != 0 && (FIT1_POLY_DEG < 0 || FIT1_POLY_DEG > 6)) exit
 if (FIT1 != 0 && (FIT1_NSIN < 0 || FIT1_NSIN > 3)) print "ERROR: FIT1_NSIN must be in [0,3]"
@@ -594,6 +618,8 @@ if (DO_FIT1_CSV) print sprintf("Wrote FIT1 CSV: %s (%d points).", FIT1_CSV, FIT1
 
 # ---- FIT2: same on DATA2 (only when second panel exists) ----
 FIT2_APPEND = ""
+if (PLOT_FIT2_ENABLED && SHOW_KEY)  FIT2_APPEND = ", '".PLOT_FIT2_CSV."' using 1:2 skip 1 with lines lw PLOT_FIT2_LW lc rgb PLOT_FIT2_COLOR title '".PLOT_FIT2_TITLE."'"
+if (PLOT_FIT2_ENABLED && !SHOW_KEY) FIT2_APPEND = ", '".PLOT_FIT2_CSV."' using 1:2 skip 1 with lines lw PLOT_FIT2_LW lc rgb PLOT_FIT2_COLOR notitle"
 if (FIT2 != 0 && NROWS < 2) print "WARNING: FIT2 ignored (DATA2 / second panel not used)"
 if (FIT2 != 0 && NROWS >= 2 && (FIT2_POLY_DEG < 0 || FIT2_POLY_DEG > 6)) print "ERROR: FIT2_POLY_DEG must be in [0,6]"
 if (FIT2 != 0 && NROWS >= 2 && (FIT2_POLY_DEG < 0 || FIT2_POLY_DEG > 6)) exit
