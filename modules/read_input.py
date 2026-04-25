@@ -428,10 +428,10 @@ class Input_to_params:
                 )
         
         # 4. Validate simulated annealing parameters
-        if self.sa_starting_temp <= 0:
+        if self.sa_starting_temp < 0.0 or self.sa_starting_temp > 1.0:
             errors.append(
-                f'Error: sa_starting_temp ({self.sa_starting_temp}) must be positive\n'
-                f'  Suggestion: Set sa_starting_temp > 0 (typically 0.1-10.0)'
+                f"Error: sa_starting_temp ({self.sa_starting_temp}) must be in the range [0, 1]\n"
+                f"  Suggestion: Set 0 <= sa_starting_temp <= 1 (e.g., 0.2 or 1.0)"
             )
         if self.sa_nsteps < 1:
             errors.append(

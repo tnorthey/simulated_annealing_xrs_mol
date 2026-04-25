@@ -48,12 +48,27 @@ class Xyz:
     def write_xyz(self, fname: str, comment: str, atoms, xyz):
         """Write .xyz file"""
         natom = len(atoms)
-        xyz = xyz.astype("|S10")  # convert to string array (max length 10)
-        atoms_xyz = np.append(np.transpose([atoms]), xyz, axis=1)
+        xyz = np.asarray(xyz, dtype=np.float64)
+        if xyz.shape != (natom, 3):
+            raise ValueError(
+                f"xyz must have shape (natom, 3) = ({natom}, 3); got {xyz.shape}"
+            )
+        if not np.isfinite(xyz).all():
+            bad = np.argwhere(~np.isfinite(xyz))
+            preview = bad[:10].tolist()
+            raise ValueError(
+                f"Refusing to write non-finite xyz to {fname!r}; "
+                f"{bad.shape[0]} non-finite entries (showing up to 10): {preview}"
+            )
+        atoms = np.asarray(atoms, dtype=str).reshape(natom)
+        # Keep mixed types as object array so np.savetxt can apply per-column formats.
+        atoms_xyz = np.empty((natom, 4), dtype=object)
+        atoms_xyz[:, 0] = atoms
+        atoms_xyz[:, 1:] = xyz
         np.savetxt(
             fname,
             atoms_xyz,
-            fmt="%s",
+            fmt=["%s", "%.16e", "%.16e", "%.16e"],
             delimiter=" ",
             header=str(natom) + "\n" + comment,
             footer="",

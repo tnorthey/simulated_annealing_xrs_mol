@@ -150,6 +150,13 @@ dihedral_indices = []
         overrides = {"options.gpu_chains": 0}
         with pytest.raises(SystemExit):
             Input_to_params(sample_toml_file, overrides=overrides)
+
+    def test_sa_starting_temp_validation_range(self, sample_toml_file):
+        """sa_starting_temp must be within [0, 1]."""
+        with pytest.raises(SystemExit):
+            Input_to_params(sample_toml_file, overrides={"simulated_annealing_params.sa_starting_temp": -0.1})
+        with pytest.raises(SystemExit):
+            Input_to_params(sample_toml_file, overrides={"simulated_annealing_params.sa_starting_temp": 1.1})
     
     def test_mode_validation(self):
         """Test mode validation"""

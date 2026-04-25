@@ -1331,6 +1331,22 @@ class Wrapper:
                 and chain_results["xyz_best_all"].shape[0] > 1
             )
 
+            def _assert_xyz_sane(xyz_arr: np.ndarray, label: str, max_abs_coord: float = 1e3):
+                xyz_arr = np.asarray(xyz_arr, dtype=np.float64)
+                if not np.isfinite(xyz_arr).all():
+                    bad = np.argwhere(~np.isfinite(xyz_arr))
+                    preview = bad[:10].tolist()
+                    raise ValueError(
+                        f"{label}: xyz contains non-finite values; "
+                        f"{bad.shape[0]} non-finite entries (showing up to 10): {preview}"
+                    )
+                mabs = float(np.max(np.abs(xyz_arr))) if xyz_arr.size else 0.0
+                if mabs > float(max_abs_coord):
+                    raise ValueError(
+                        f"{label}: xyz has an absurd coordinate magnitude: max(|coord|)={mabs:g} Å "
+                        f"(threshold {max_abs_coord:g} Å). This usually indicates a numerical glitch."
+                    )
+
             # In multi-chain mode, write all chains and do not emit a special
             # best-chain file; otherwise keep legacy single-output behavior.
             if multi_chain_mode:
@@ -1357,6 +1373,7 @@ class Wrapper:
                 for chain_idx in range(xyz_best_all.shape[0]):
                     xyz_chain = xyz_best_all[chain_idx]
                     f_xray_chain = float(f_xray_best_all[chain_idx])
+                    _assert_xyz_sane(xyz_chain, f"chain[{chain_idx}] before write_xyz")
 
                     # bond-length of interest
                     bond_distance_chain = np.linalg.norm(
@@ -1426,6 +1443,7 @@ class Wrapper:
                 ### write best structure to xyz file (single-chain/CPU behavior)
                 print("writing to xyz... (f: %10.8f)" % f_xray_best)
                 f_best_str = ("%10.8f" % f_xray_best).zfill(12)
+                _assert_xyz_sane(xyz_best, "best_structure before write_xyz")
                 m.write_xyz(
                     "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
                     header_str,

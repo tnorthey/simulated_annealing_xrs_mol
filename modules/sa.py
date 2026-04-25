@@ -320,11 +320,15 @@ class Annealing:
                             r = np.sqrt(dx * dx + dy * dy + dz * dz)
                             for qi in range(qlen):
                                 qd = qvector[qi] * r
+                                # Stable sin(qd)/qd evaluation (limit is 1 at qd -> 0)
+                                if qd == 0.0:
+                                    sinc = 1.0
+                                else:
+                                    sinc = np.sin(qd) / qd
                                 molecular[qi] += (
                                     2.0
                                     * pre_molecular[k, qi]
-                                    * np.sin(qd)
-                                    / qd
+                                    * sinc
                                 )
                             k += 1
                     for qi in range(qlen):
@@ -753,8 +757,10 @@ class Annealing:
                 dz = xyz_trial[:, pair_i_xp, 2] - xyz_trial[:, pair_j_xp, 2]
                 r_pairs = xp.sqrt(dx * dx + dy * dy + dz * dz)
                 qd = r_pairs[:, :, xp.newaxis] * qvector_xp[xp.newaxis, xp.newaxis, :]
+                # Stable sin(qd)/qd evaluation (limit is 1 at qd -> 0)
+                sinc = xp.where(qd == 0.0, 1.0, xp.sin(qd) / qd)
                 iam = xp.sum(
-                    2.0 * pre_molecular_xp[xp.newaxis, :, :] * xp.sin(qd) / qd,
+                    2.0 * pre_molecular_xp[xp.newaxis, :, :] * sinc,
                     axis=1,
                 )
 
