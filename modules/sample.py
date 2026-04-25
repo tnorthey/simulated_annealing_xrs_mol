@@ -44,7 +44,9 @@ class Sample:
         )
         return masses_amu * amu_to_kg
 
-    def generate_boltzmann_displacement(self, modes, freqs_cm1, T=300.0, atomic_numbers=None):
+    def generate_boltzmann_displacement(
+        self, modes, freqs_cm1, T=300.0, atomic_numbers=None, reduced_mass_amu=None
+    ):
         """
         Sample a classical thermal displacement from normal modes (Å).
 
@@ -57,19 +59,25 @@ class Sample:
             modes: (N_modes, N_atoms, 3) Normal mode direction vectors (typically dimensionless)
             T: Temperature in K
             atomic_numbers: (N_atoms,) Atomic numbers (needed for correct scaling)
+            reduced_mass_amu: Optional (N_modes,) reduced masses in atomic mass units (amu),
+                as returned by PySCF thermo.harmonic_analysis results["reduced_mass"].
 
         Returns:
             displacement: (N_atoms, 3) displacement in Å
         """
-        if atomic_numbers is None:
+        if reduced_mass_amu is None and atomic_numbers is None:
             raise ValueError(
-                "generate_boltzmann_displacement requires atomic_numbers to avoid "
-                "unphysically large displacements (missing mode effective masses)."
+                "generate_boltzmann_displacement requires either reduced_mass_amu "
+                "(preferred; from PySCF) or atomic_numbers (fallback) to scale amplitudes."
             )
 
         modes = np.asarray(modes, dtype=np.float64)
         freqs_cm1 = np.asarray(freqs_cm1, dtype=np.float64)
-        atomic_numbers = np.asarray(atomic_numbers, dtype=np.int64)
+        atomic_numbers = (
+            None if atomic_numbers is None else np.asarray(atomic_numbers, dtype=np.int64)
+        )
+        if reduced_mass_amu is not None:
+            reduced_mass_amu = np.asarray(reduced_mass_amu, dtype=np.float64).reshape(-1)
 
         if modes.ndim != 3:
             raise ValueError(f"modes must be (N_modes, N_atoms, 3); got shape {modes.shape}")
@@ -77,15 +85,21 @@ class Sample:
             raise ValueError(
                 f"freqs_cm1 must be (N_modes,) matching modes; got {freqs_cm1.shape} vs {modes.shape[0]}"
             )
-        if atomic_numbers.ndim != 1 or atomic_numbers.shape[0] != modes.shape[1]:
+        if atomic_numbers is not None:
+            if atomic_numbers.ndim != 1 or atomic_numbers.shape[0] != modes.shape[1]:
+                raise ValueError(
+                    f"atomic_numbers must be (N_atoms,) matching modes; got {atomic_numbers.shape} vs {modes.shape[1]}"
+                )
+        if reduced_mass_amu is not None and reduced_mass_amu.shape[0] != modes.shape[0]:
             raise ValueError(
-                f"atomic_numbers must be (N_atoms,) matching modes; got {atomic_numbers.shape} vs {modes.shape[1]}"
+                f"reduced_mass_amu must be (N_modes,) matching modes; got {reduced_mass_amu.shape} vs {modes.shape[0]}"
             )
 
         # Physical constants (SI)
         kB = 1.380649e-23  # J/K
         c_cm_s = 2.99792458e10  # speed of light in cm/s
         angstrom_per_meter = 1e10
+        amu_to_kg = 1.66053906660e-27
 
         # Angular frequencies in rad/s
         omega = 2.0 * np.pi * c_cm_s * freqs_cm1  # (N_modes,)
@@ -96,10 +110,14 @@ class Sample:
         safe_norms = np.where(norms > 0.0, norms, 1.0)
         modes_unit = modes / safe_norms[:, None, None]
 
-        # Mode effective mass μ_i = Σ_a m_a * |e_{i,a}|^2  (if e is dimensionless direction vector)
-        masses_kg = self._atomic_masses_kg(atomic_numbers)  # (N_atoms,)
-        per_atom_weight = np.sum(modes_unit * modes_unit, axis=2)  # (N_modes, N_atoms)
-        mu = np.sum(per_atom_weight * masses_kg[None, :], axis=1)  # (N_modes,)
+        if reduced_mass_amu is not None:
+            # Prefer reduced masses from the same normal-mode analysis that produced `modes`.
+            mu = reduced_mass_amu * amu_to_kg  # (N_modes,) kg
+        else:
+            # Fallback: compute an effective mass from per-atom weights (approximation).
+            masses_kg = self._atomic_masses_kg(atomic_numbers)  # (N_atoms,)
+            per_atom_weight = np.sum(modes_unit * modes_unit, axis=2)  # (N_modes, N_atoms)
+            mu = np.sum(per_atom_weight * masses_kg[None, :], axis=1)  # (N_modes,)
 
         # Classical coordinate std for each mode: σ_q = sqrt(kB*T / (μ * ω^2))
         denom = mu * omega * omega

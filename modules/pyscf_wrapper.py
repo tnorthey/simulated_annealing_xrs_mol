@@ -27,11 +27,14 @@ class Pyscf_wrapper:
         results = thermo.harmonic_analysis(mol, hess)
         frequencies_cm1 = results["freq_wavenumber"]
         mode_vectors = results["norm_mode"]  # normal modes
+        reduced_mass = results.get("reduced_mass", None)
         
         if save_to_npy:
            # Save to .npy files
            np.save("data/modes.npy", mode_vectors)
            np.save("data/freqs.npy", frequencies_cm1)
+           if reduced_mass is not None:
+               np.save("data/reduced_mass.npy", reduced_mass)
         
-        return mode_vectors, frequencies_cm1
+        return mode_vectors, frequencies_cm1, reduced_mass
 

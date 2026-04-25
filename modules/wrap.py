@@ -774,7 +774,7 @@ class Wrapper:
         ###### mode displacements ######
         if p.run_pyscf_modes_bool:
             print("Running PySCF normal modes calculation...")
-            displacements, freq_cm1 = _pyscfw().xyz_calc_modes(
+            displacements, freq_cm1, reduced_mass = _pyscfw().xyz_calc_modes(
                 p.reference_xyz_file, save_to_npy=True, basis=p.pyscf_basis
             )
         else:
@@ -787,6 +787,8 @@ class Wrapper:
             if os.path.exists(modes_npy_file) and os.path.exists(freqs_npy_file):
                 displacements = np.load(modes_npy_file)
                 freqs_cm1 = np.load(freqs_npy_file)
+                rm_file = "data/reduced_mass.npy"
+                reduced_mass = np.load(rm_file) if os.path.exists(rm_file) else None
             else:
                 print(
                     'EITHER "data/modes.npy" or "data/freqs.npy" DOES NOT EXIST. CHANGE run_pyscf_modes TO True. EXITING...'
@@ -1120,6 +1122,7 @@ class Wrapper:
                             freqs_cm1,
                             p.boltzmann_temperature,
                             atomic_numbers=atomic_numbers,
+                            reduced_mass_amu=reduced_mass,
                         )
                         # add sampled displacements to xyz
                         xyz_start += sampling_displacements
