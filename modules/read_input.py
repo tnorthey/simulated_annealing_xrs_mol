@@ -229,9 +229,12 @@ class Input_to_params:
         self.bonds_bool = bool(data["simulated_annealing_params"]["bonds_bool"])
         self.angles_bool = bool(data["simulated_annealing_params"]["angles_bool"])
         self.torsions_bool = bool(data["simulated_annealing_params"]["torsions_bool"])
-        self.tuning_ratio_target = float(
+        # NOTE: Keep the input TOML parameter name unchanged, but interpret it as
+        # "1 - tuning_ratio_target" everywhere else in the codebase.
+        self.tuning_ratio_target_input = float(
             data["simulated_annealing_params"]["tuning_ratio_target"]
         )
+        self.tuning_ratio_target = 1.0 - self.tuning_ratio_target_input
         self.c_tuning_initial = float(
             data["simulated_annealing_params"]["c_tuning_initial"]
         )
@@ -460,10 +463,11 @@ class Input_to_params:
                 f'Error: ntotalruns ({self.ntotalruns}) must be at least 1\n'
                 f'  Suggestion: Set ntotalruns >= 1 (typically 1-10)'
             )
-        if self.tuning_ratio_target < 0 or self.tuning_ratio_target > 1:
+        # Validate the user-provided value (before the 1-x transform)
+        if self.tuning_ratio_target_input < 0 or self.tuning_ratio_target_input > 1:
             errors.append(
-                f'Error: tuning_ratio_target ({self.tuning_ratio_target}) must be between 0 and 1\n'
-                f'  Suggestion: Set 0 <= tuning_ratio_target <= 1 (typically 0.3-0.7)'
+                f'Error: tuning_ratio_target ({self.tuning_ratio_target_input}) must be between 0 and 1\n'
+                f'  Suggestion: Set 0 <= tuning_ratio_target <= 1 (note: code uses 1 - tuning_ratio_target)'
             )
         if self.c_tuning_initial < 0:
             errors.append(
