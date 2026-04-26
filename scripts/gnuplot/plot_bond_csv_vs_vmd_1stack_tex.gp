@@ -6,6 +6,10 @@
 # first line in the shell), three columns: time, mean, stddev.
 # The VMD file is whitespace-separated; default columns 1:time, 2:bond (Å).
 #
+# To use a single-column external time file for the x-axis for both series, use
+# scripts/bash/plot_bond_csv_vmd_compare.sh (4th arg or env TIME_PLOT_FILE); the
+# shell merges it with the y columns by row. Row counts must match.
+#
 # Output: standalone LaTeX (<OUTBASE>.tex); compile with: pdflatex <OUTBASE>.tex
 #
 # Example:
@@ -41,7 +45,7 @@ VMD_TSCALE = VMD_TSCALE + 0
 VMD_TOFF = VMD_TOFF + 0
 
 # Legend (titles are passed to cairolatex; use TeX or plain text)
-if (!exists("NAME1"))  NAME1  = "NMM (mean $\\pm$ SD)"
+if (!exists("NAME1"))  NAME1  = "mean $\\pm$ SD"
 if (!exists("NAME2"))  NAME2  = "VMD"
 if (!exists("SHOW_KEY")) SHOW_KEY = 1
 

@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-# Compare C1–C6 bond length: NMM (or similar) CSV with mean/std vs VMD .dat trajectory.
+# Compare C1–C6 bond length: stats CSV (mean/std) vs VMD .dat trajectory.
 # Run from repo root, or pass absolute paths.
 #
 # Usage (order matters: stats first, VMD second):
-#   ./scripts/bash/plot_bond_csv_vmd_compare.sh <stats_mean_std.csv> <vmd_traj.dat> [output.pdf]
+#   ./scripts/bash/plot_bond_csv_vmd_compare.sh <stats_mean_std.csv> <vmd_traj.dat> [output.pdf] [time.dat]
 #
 # stats CSV: header line, then comma-separated time_fs, mean, std (3+ columns).
 # VMD .dat:  whitespace, two numbers per line (e.g. frame/ time, bond length).
+# time.dat:  optional, one time value per line (replaces the first column in both stats and VMD data).
+#            Must have the same number of rows as the stats and VMD files (not counting the CSV header).
+#            4th argument, or set env  TIME_PLOT_FILE  (e.g. when you omit a custom [output.pdf] you can use TIME_PLOT_FILE=time.dat).
 #
 # If you pass a .dat and a .csv in the wrong order, the script will swap them when it can tell.
 #
 # Defaults (if args omitted, paths are under repo root):
 #   CSV:   bond_c1c6_mean_std.csv
 #   VMD:   vmd_c1c6_traj099.dat
-#   PDF:   nmm_bond_c1c6_compare.pdf
+#   PDF:   bond_c1c6_compare.pdf
 #
 # Requires: gnuplot 5.4+, pdflatex
 
@@ -24,13 +27,19 @@ cd "$ROOT"
 
 CSV_IN="${1:-bond_c1c6_mean_std.csv}"
 VMD_IN="${2:-vmd_c1c6_traj099.dat}"
-OUT_PDF="${3:-nmm_bond_c1c6_compare.pdf}"
+OUT_PDF="${3:-bond_c1c6_compare.pdf}"
+# 4th arg or TIME_PLOT_FILE: one-column time series replacing x in both inputs
+TIME_IN="${4:-${TIME_PLOT_FILE:-}}"
 OUTBASE="figure_bond_c1c6_compare"
 TMP_WS="${ROOT}/scripts/gnuplot/_tmp_bond_mean_std_ws.dat"
+TMP_RETIME_STATS="${ROOT}/scripts/gnuplot/_tmp_bond_retime_stats.dat"
+TMP_RETIME_VMD="${ROOT}/scripts/gnuplot/_tmp_bond_retime_vmd.dat"
+TMP_TIME_NORM="${ROOT}/scripts/gnuplot/_tmp_bond_time_col.dat"
 
 if [[ "$CSV_IN" != /* ]]; then CSV_IN="${ROOT}/${CSV_IN}"; fi
 if [[ "$VMD_IN" != /* ]]; then VMD_IN="${ROOT}/${VMD_IN}"; fi
 if [[ "$OUT_PDF" != /* ]]; then OUT_PDF="${ROOT}/${OUT_PDF}"; fi
+if [[ -n "$TIME_IN" && "$TIME_IN" != /* ]]; then TIME_IN="${ROOT}/${TIME_IN}"; fi
 
 if [[ ! -s "$CSV_IN" ]]; then
   echo "ERROR: CSV not found or empty: $CSV_IN" >&2
@@ -80,8 +89,35 @@ if [[ ! -s "$TMP_WS" ]]; then
   exit 1
 fi
 
-gnuplot -e "DATA1='${TMP_WS}';
-            DATA_VMD='${VMD_IN}';
+PLOT_DATA1="$TMP_WS"
+PLOT_VMD="$VMD_IN"
+if [[ -n "$TIME_IN" ]]; then
+  if [[ ! -s "$TIME_IN" ]]; then
+    echo "ERROR: time file not found or empty: $TIME_IN" >&2
+    exit 1
+  fi
+  tr -d '\r' < "$TIME_IN" | awk 'NF { print $1 }' > "$TMP_TIME_NORM"
+  if [[ ! -s "$TMP_TIME_NORM" ]]; then
+    echo "ERROR: no time values in file: $TIME_IN" >&2
+    exit 1
+  fi
+  nt=$(wc -l < "$TMP_TIME_NORM" | tr -d ' ')
+  ns=$(wc -l < "$TMP_WS" | tr -d ' ')
+  nv=$(wc -l < "$VMD_IN" | tr -d ' ')
+  if [[ "$nt" -ne "$ns" || "$nt" -ne "$nv" ]]; then
+    echo "ERROR: time file must have the same number of lines as the stats and VMD data (after the stats header)." >&2
+    echo "  Counts: time=$nt  stats=$ns  vmd=$nv  (time: $TIME_IN)" >&2
+    exit 1
+  fi
+  paste -d' ' "$TMP_TIME_NORM" <(awk '{ print $2, $3 }' "$TMP_WS") > "$TMP_RETIME_STATS"
+  paste -d' ' "$TMP_TIME_NORM" <(awk '{ print $2 }' "$VMD_IN") > "$TMP_RETIME_VMD"
+  PLOT_DATA1="$TMP_RETIME_STATS"
+  PLOT_VMD="$TMP_RETIME_VMD"
+  echo "NOTE: x-axis values taken from: $TIME_IN" >&2
+fi
+
+gnuplot -e "DATA1='${PLOT_DATA1}';
+            DATA_VMD='${PLOT_VMD}';
             OUTBASE='${OUTBASE}';
             XLABEL='\$t\$ (fs)';
             Y1LABEL='C1--C6 bond (\\AA)';
