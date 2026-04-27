@@ -171,7 +171,11 @@ fi
 
 if [[ -n "$TIME_IN" ]]; then
   if [[ ! -s "$TIME_IN" ]]; then echo "ERROR: time file not found or empty: $TIME_IN" >&2; exit 1; fi
-  tr -d '\r' < "$TIME_IN" | awk 'NF { print $1 }' > "$TMP_TIME_NORM"
+  # Normalize time column:
+  # - drop CRLF (\r)
+  # - drop blank / whitespace-only lines
+  # - take first field per line
+  tr -d '\r' < "$TIME_IN" | awk '!/^[[:space:]]*$/ { print $1 }' > "$TMP_TIME_NORM"
   if [[ ! -s "$TMP_TIME_NORM" ]]; then echo "ERROR: no time values in: $TIME_IN" >&2; exit 1; fi
   nt=$(wc -l < "$TMP_TIME_NORM" | tr -d ' ')
   ns=$(wc -l < "$TMP_WS" | tr -d ' ')
