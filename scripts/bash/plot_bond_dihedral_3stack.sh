@@ -3,14 +3,16 @@
 # Run from repo root, or use absolute paths.
 #
 # Usage:
-#   ./scripts/bash/plot_bond_dihedral_3stack.sh <bond_stats.csv> <vmd_bond.dat|-> <dihedral1.csv> <dihedral2.csv> [output.pdf] [time.dat]
+#   ./scripts/bash/plot_bond_dihedral_3stack.sh <bond_stats.csv> <vmd_bond.dat|-> <dihedral1.csv> <dihedral2.csv> \
+#       [dihedral1_expected.csv] [dihedral2_expected.csv] [output.pdf] [time.dat]
 #
 # bond_stats.csv: comma-separated header, then time_fs, mean, std (first three columns used).
 # vmd_bond.dat:   two whitespace columns (time, bond). Use "-" or "none" to omit VMD on panel 1.
 # dihedral*.csv:  comma CSV with header; same transforms as plot_csv_stddev_2stack_tex.gp (see that script).
 #
-# Optional second curves on dihedral panels (env, absolute or repo-relative):
-#   BOND_DIH_DATA2B=/path/to/ref2.csv  BOND_DIH_DATA3B=/path/to/ref3.csv
+# Optional second curves on dihedral panels (expected/reference):
+# - positional: dihedral1_expected.csv dihedral2_expected.csv
+# - or env (absolute or repo-relative): BOND_DIH_DATA2B=/path/to/ref2.csv  BOND_DIH_DATA3B=/path/to/ref3.csv
 #
 # Optional external time column for ALL panels:
 #   6th argument, or TIME_PLOT_FILE=/path/to/time.dat
@@ -35,8 +37,37 @@ CSV_IN="${1:?bond stats CSV required}"
 VMD_IN="${2:?VMD bond .dat or - required}"
 D2_IN="${3:?dihedral CSV 1 required}"
 D3_IN="${4:?dihedral CSV 2 required}"
-OUT_PDF="${5:-bond_dihedral_3stack.pdf}"
-TIME_IN="${6:-${TIME_PLOT_FILE:-}}"
+shift 4
+
+# Remaining args are optional and order-dependent:
+#   [D2B] [D3B] [OUT_PDF] [TIME_IN]
+OUT_PDF="bond_dihedral_3stack.pdf"
+TIME_IN="${TIME_PLOT_FILE:-}"
+D2B_POS=""
+D3B_POS=""
+
+is_pdf() { [[ "${1:-}" == *.pdf ]]; }
+
+if [[ -n "${1:-}" && -f "$1" ]] && ! is_pdf "$1"; then
+  D2B_POS="$1"
+  shift
+fi
+if [[ -n "${1:-}" && -f "$1" ]] && ! is_pdf "$1"; then
+  D3B_POS="$1"
+  shift
+fi
+if [[ -n "${1:-}" ]]; then
+  OUT_PDF="$1"
+  shift
+fi
+if [[ -n "${1:-}" ]]; then
+  TIME_IN="$1"
+  shift
+fi
+if [[ -n "${1:-}" ]]; then
+  echo "ERROR: too many arguments. See header usage." >&2
+  exit 1
+fi
 
 TMP_WS="${ROOT}/scripts/gnuplot/_tmp_bond3stack_mean_std_ws.dat"
 TMP_RETIME_STATS="${ROOT}/scripts/gnuplot/_tmp_bond3stack_retime_stats.dat"
@@ -69,6 +100,18 @@ if [[ -n "${BOND_DIH_DATA3B:-}" ]]; then
   [[ "$_d3b" == /* ]] || _d3b="${ROOT}/${_d3b}"
   DATA3B_FILE="$_d3b"
   DATA3B_ARG="DATA3B='${_d3b}';"
+fi
+
+# Positional dihedral expected files override env if provided.
+if [[ -n "$D2B_POS" ]]; then
+  [[ "$D2B_POS" == /* ]] || D2B_POS="${ROOT}/${D2B_POS}"
+  DATA2B_FILE="$D2B_POS"
+  DATA2B_ARG="DATA2B='${DATA2B_FILE}';"
+fi
+if [[ -n "$D3B_POS" ]]; then
+  [[ "$D3B_POS" == /* ]] || D3B_POS="${ROOT}/${D3B_POS}"
+  DATA3B_FILE="$D3B_POS"
+  DATA3B_ARG="DATA3B='${DATA3B_FILE}';"
 fi
 
 if [[ ! -s "$CSV_IN" ]]; then echo "ERROR: bond CSV not found or empty: $CSV_IN" >&2; exit 1; fi
