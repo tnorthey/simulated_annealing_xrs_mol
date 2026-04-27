@@ -135,6 +135,49 @@ looks_like_stats_csv() {
   [[ ${nf:-0} -ge 3 ]]
 }
 
+csv_first_field_is_number() {
+  # Returns 0 if first CSV field on first non-empty line is numeric.
+  # Accepts integers / decimals / scientific notation.
+  local f=$1
+  tr -d "\r" < "$f" | awk -F',' '
+    /^[[:space:]]*$/ { next }
+    {
+      x=$1
+      gsub(/^[[:space:]]+|[[:space:]]+$/,"",x)
+      if (x ~ /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/) found=1
+      exit
+    }
+    END { exit (found ? 0 : 1) }
+  '
+}
+
+count_csv_rows_maybe_header() {
+  # Count data rows in a CSV; skip header iff first field is non-numeric.
+  local f=$1
+  if csv_first_field_is_number "$f"; then
+    tr -d '\r' < "$f" | awk 'NF{n++} END{print n+0}'
+  else
+    tail -n +2 "$f" | tr -d '\r' | awk 'NF{n++} END{print n+0}'
+  fi
+}
+
+retime_csv_with_time() {
+  # Rewrite CSV with time column replaced by TMP_TIME_NORM (1 col).
+  # Preserves header if present; otherwise writes no header.
+  local in_csv=$1
+  local out_csv=$2
+  local header body
+  if csv_first_field_is_number "$in_csv"; then
+    paste -d',' "$TMP_TIME_NORM" <(tr -d '\r' < "$in_csv" | cut -d',' -f2-) > "$out_csv"
+  else
+    header=$(head -n 1 "$in_csv" | tr -d '\r')
+    {
+      echo "$header" | awk -F, 'BEGIN{OFS=","} { $1="time"; print }'
+      paste -d',' "$TMP_TIME_NORM" <(tail -n +2 "$in_csv" | tr -d '\r' | cut -d',' -f2-)
+    } > "$out_csv"
+  fi
+}
+
 if [[ "$VMD_IN" != "-" && "$VMD_IN" != "none" ]]; then
   if looks_like_vmd "$CSV_IN" && looks_like_stats_csv "$VMD_IN"; then
     echo "NOTE: treating first file as VMD and second as bond stats CSV (swapped). Correct order: bond_stats.csv vmd.dat ..." >&2
@@ -177,30 +220,30 @@ if [[ -n "$TIME_IN" ]]; then
   # - take first field per line
   tr -d '\r' < "$TIME_IN" | awk '!/^[[:space:]]*$/ { print $1 }' > "$TMP_TIME_NORM"
   if [[ ! -s "$TMP_TIME_NORM" ]]; then echo "ERROR: no time values in: $TIME_IN" >&2; exit 1; fi
-  nt=$(wc -l < "$TMP_TIME_NORM" | tr -d ' ')
-  ns=$(wc -l < "$TMP_WS" | tr -d ' ')
-  nd2=$(tail -n +2 "$D2_IN" | tr -d '\r' | awk 'NF' | wc -l | tr -d ' ')
-  nd3=$(tail -n +2 "$D3_IN" | tr -d '\r' | awk 'NF' | wc -l | tr -d ' ')
+  nt=$(awk 'NF{n++} END{print n+0}' "$TMP_TIME_NORM")
+  ns=$(awk 'NF{n++} END{print n+0}' "$TMP_WS")
+  nd2=$(count_csv_rows_maybe_header "$D2_IN")
+  nd3=$(count_csv_rows_maybe_header "$D3_IN")
   if [[ "$nt" -ne "$ns" || "$nt" -ne "$nd2" || "$nt" -ne "$nd3" ]]; then
     echo "ERROR: time file line count ($nt) must match bond stats ($ns) and dihedral CSV rows (d2=$nd2 d3=$nd3)." >&2
     exit 1
   fi
   if [[ -n "$PLOT_D2B" ]]; then
-    nd2b=$(tail -n +2 "$PLOT_D2B" | tr -d '\r' | awk 'NF' | wc -l | tr -d ' ')
+    nd2b=$(count_csv_rows_maybe_header "$PLOT_D2B")
     if [[ "$nt" -ne "$nd2b" ]]; then
       echo "ERROR: time file line count ($nt) must match DATA2B rows ($nd2b)." >&2
       exit 1
     fi
   fi
   if [[ -n "$PLOT_D3B" ]]; then
-    nd3b=$(tail -n +2 "$PLOT_D3B" | tr -d '\r' | awk 'NF' | wc -l | tr -d ' ')
+    nd3b=$(count_csv_rows_maybe_header "$PLOT_D3B")
     if [[ "$nt" -ne "$nd3b" ]]; then
       echo "ERROR: time file line count ($nt) must match DATA3B rows ($nd3b)." >&2
       exit 1
     fi
   fi
   if [[ -n "$PLOT_VMD" ]]; then
-    nv=$(wc -l < "$PLOT_VMD" | tr -d ' ')
+    nv=$(awk 'NF{n++} END{print n+0}' "$PLOT_VMD")
     if [[ "$nt" -ne "$ns" || "$nt" -ne "$nv" ]]; then
       echo "ERROR: time file line count ($nt) must match bond stats ($ns) and VMD ($nv)." >&2
       exit 1
@@ -218,21 +261,17 @@ if [[ -n "$TIME_IN" ]]; then
     PLOT_DATA1="$TMP_RETIME_STATS"
   fi
 
-  # Retimed dihedral CSVs: keep header, replace col1 in the body by TIME_IN.
-  hdr2=$(head -n 1 "$D2_IN" | tr -d '\r')
-  hdr3=$(head -n 1 "$D3_IN" | tr -d '\r')
-  { echo "$hdr2" | awk -F, 'BEGIN{OFS=","} { $1="time"; print }'; paste -d',' "$TMP_TIME_NORM" <(tail -n +2 "$D2_IN" | tr -d '\r' | cut -d',' -f2-) ; } > "$TMP_RETIME_D2"
-  { echo "$hdr3" | awk -F, 'BEGIN{OFS=","} { $1="time"; print }'; paste -d',' "$TMP_TIME_NORM" <(tail -n +2 "$D3_IN" | tr -d '\r' | cut -d',' -f2-) ; } > "$TMP_RETIME_D3"
+  # Retimed dihedral CSVs: replace column 1 by TIME_IN; preserve header if present.
+  retime_csv_with_time "$D2_IN" "$TMP_RETIME_D2"
+  retime_csv_with_time "$D3_IN" "$TMP_RETIME_D3"
   PLOT_D2="$TMP_RETIME_D2"
   PLOT_D3="$TMP_RETIME_D3"
   if [[ -n "$PLOT_D2B" ]]; then
-    hdr2b=$(head -n 1 "$PLOT_D2B" | tr -d '\r')
-    { echo "$hdr2b" | awk -F, 'BEGIN{OFS=","} { $1="time"; print }'; paste -d',' "$TMP_TIME_NORM" <(tail -n +2 "$PLOT_D2B" | tr -d '\r' | cut -d',' -f2-) ; } > "$TMP_RETIME_D2B"
+    retime_csv_with_time "$PLOT_D2B" "$TMP_RETIME_D2B"
     PLOT_D2B="$TMP_RETIME_D2B"
   fi
   if [[ -n "$PLOT_D3B" ]]; then
-    hdr3b=$(head -n 1 "$PLOT_D3B" | tr -d '\r')
-    { echo "$hdr3b" | awk -F, 'BEGIN{OFS=","} { $1="time"; print }'; paste -d',' "$TMP_TIME_NORM" <(tail -n +2 "$PLOT_D3B" | tr -d '\r' | cut -d',' -f2-) ; } > "$TMP_RETIME_D3B"
+    retime_csv_with_time "$PLOT_D3B" "$TMP_RETIME_D3B"
     PLOT_D3B="$TMP_RETIME_D3B"
   fi
 
