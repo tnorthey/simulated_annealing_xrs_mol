@@ -178,6 +178,42 @@ retime_csv_with_time() {
   fi
 }
 
+vmd_first_row_is_numeric_2col() {
+  # Returns 0 if first non-empty line looks like: <num> <num>
+  local f=$1
+  tr -d "\r" < "$f" | awk '
+    /^[[:space:]]*$/ { next }
+    {
+      x=$1; y=$2
+      if (x ~ /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/ && y ~ /^[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?$/) ok=1
+      exit
+    }
+    END { exit (ok ? 0 : 1) }
+  '
+}
+
+count_vmd_rows_maybe_header() {
+  # Count data rows in whitespace 2-col file; skip header if first row non-numeric.
+  local f=$1
+  if vmd_first_row_is_numeric_2col "$f"; then
+    tr -d "\r" < "$f" | awk 'NF{n++} END{print n+0}'
+  else
+    tail -n +2 "$f" | tr -d "\r" | awk 'NF{n++} END{print n+0}'
+  fi
+}
+
+retime_vmd_with_time() {
+  # Replace column 1 in whitespace 2-col file by TMP_TIME_NORM, preserving column 2.
+  # If file has a non-numeric first row, skip it (header).
+  local in_dat=$1
+  local out_dat=$2
+  if vmd_first_row_is_numeric_2col "$in_dat"; then
+    paste -d' ' "$TMP_TIME_NORM" <(tr -d "\r" < "$in_dat" | awk 'NF { print $2 }') > "$out_dat"
+  else
+    paste -d' ' "$TMP_TIME_NORM" <(tail -n +2 "$in_dat" | tr -d "\r" | awk 'NF { print $2 }') > "$out_dat"
+  fi
+}
+
 if [[ "$VMD_IN" != "-" && "$VMD_IN" != "none" ]]; then
   if looks_like_vmd "$CSV_IN" && looks_like_stats_csv "$VMD_IN"; then
     echo "NOTE: treating first file as VMD and second as bond stats CSV (swapped). Correct order: bond_stats.csv vmd.dat ..." >&2
@@ -243,13 +279,13 @@ if [[ -n "$TIME_IN" ]]; then
     fi
   fi
   if [[ -n "$PLOT_VMD" ]]; then
-    nv=$(awk 'NF{n++} END{print n+0}' "$PLOT_VMD")
+    nv=$(count_vmd_rows_maybe_header "$PLOT_VMD")
     if [[ "$nt" -ne "$ns" || "$nt" -ne "$nv" ]]; then
       echo "ERROR: time file line count ($nt) must match bond stats ($ns) and VMD ($nv)." >&2
       exit 1
     fi
     paste -d' ' "$TMP_TIME_NORM" <(awk '{ print $2, $3 }' "$TMP_WS") > "$TMP_RETIME_STATS"
-    paste -d' ' "$TMP_TIME_NORM" <(awk '{ print $2 }' "$PLOT_VMD") > "$TMP_RETIME_VMD"
+    retime_vmd_with_time "$PLOT_VMD" "$TMP_RETIME_VMD"
     PLOT_DATA1="$TMP_RETIME_STATS"
     PLOT_VMD="$TMP_RETIME_VMD"
   else
