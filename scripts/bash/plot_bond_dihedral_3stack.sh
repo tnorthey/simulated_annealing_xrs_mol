@@ -79,6 +79,10 @@ TMP_RETIME_D2="${ROOT}/scripts/gnuplot/_tmp_bond3stack_retime_d2.csv"
 TMP_RETIME_D3="${ROOT}/scripts/gnuplot/_tmp_bond3stack_retime_d3.csv"
 TMP_RETIME_D2B="${ROOT}/scripts/gnuplot/_tmp_bond3stack_retime_d2b.csv"
 TMP_RETIME_D3B="${ROOT}/scripts/gnuplot/_tmp_bond3stack_retime_d3b.csv"
+TMP_NORM_D2="${ROOT}/scripts/gnuplot/_tmp_bond3stack_norm_d2.csv"
+TMP_NORM_D3="${ROOT}/scripts/gnuplot/_tmp_bond3stack_norm_d3.csv"
+TMP_NORM_D2B="${ROOT}/scripts/gnuplot/_tmp_bond3stack_norm_d2b.csv"
+TMP_NORM_D3B="${ROOT}/scripts/gnuplot/_tmp_bond3stack_norm_d3b.csv"
 
 if [[ "$CSV_IN" != /* ]]; then CSV_IN="${ROOT}/${CSV_IN}"; fi
 if [[ "$VMD_IN" != /* && "$VMD_IN" != "-" && "$VMD_IN" != "none" ]]; then VMD_IN="${ROOT}/${VMD_IN}"; fi
@@ -180,6 +184,38 @@ retime_csv_with_time() {
   fi
 }
 
+file_has_comma_csv() {
+  # 0 if first non-empty line contains a comma.
+  local f=$1
+  tr -d "\r" < "$f" | awk '
+    /^[[:space:]]*$/ { next }
+    { if (index($0, ",")>0) ok=1; exit }
+    END { exit (ok ? 0 : 1) }
+  '
+}
+
+normalize_dihedral_to_csv3() {
+  # Convert whitespace .dat or comma CSV into a comma CSV with header and 3 cols: time,mean,std.
+  # - If input is comma CSV, it is copied as-is.
+  # - If input is whitespace:
+  #     - 2 cols => std set to 0
+  #     - 3+ cols => take first 3
+  local in_f=$1
+  local out_f=$2
+  if file_has_comma_csv "$in_f"; then
+    cp -f "$in_f" "$out_f"
+    return 0
+  fi
+  {
+    echo "time,mean,std"
+    tr -d "\r" < "$in_f" | awk '
+      /^[[:space:]]*$/ { next }
+      NF>=3 { print $1 "," $2 "," $3; next }
+      NF==2 { print $1 "," $2 ",0"; next }
+    '
+  } > "$out_f"
+}
+
 vmd_first_row_is_numeric_2col() {
   # Returns 0 if first non-empty line looks like: <num> <num>
   local f=$1
@@ -193,6 +229,23 @@ vmd_first_row_is_numeric_2col() {
     END { exit (ok ? 0 : 1) }
   '
 }
+
+# Normalize dihedral inputs to comma CSV with 3 columns so gnuplot panel 2/3 parsing is consistent
+# even when you pass whitespace .dat files.
+normalize_dihedral_to_csv3 "$D2_IN" "$TMP_NORM_D2"
+normalize_dihedral_to_csv3 "$D3_IN" "$TMP_NORM_D3"
+D2_IN="$TMP_NORM_D2"
+D3_IN="$TMP_NORM_D3"
+if [[ -n "$DATA2B_FILE" ]]; then
+  normalize_dihedral_to_csv3 "$DATA2B_FILE" "$TMP_NORM_D2B"
+  DATA2B_FILE="$TMP_NORM_D2B"
+  DATA2B_ARG="DATA2B='${DATA2B_FILE}';"
+fi
+if [[ -n "$DATA3B_FILE" ]]; then
+  normalize_dihedral_to_csv3 "$DATA3B_FILE" "$TMP_NORM_D3B"
+  DATA3B_FILE="$TMP_NORM_D3B"
+  DATA3B_ARG="DATA3B='${DATA3B_FILE}';"
+fi
 
 count_vmd_rows_maybe_header() {
   # Count data rows in whitespace 2-col file; skip header if first row non-numeric.
@@ -321,6 +374,13 @@ fi
 
 VMD_GP="''"
 if [[ -n "$PLOT_VMD" ]]; then VMD_GP="'${PLOT_VMD}'"; fi
+
+# Auto-enable mhchem if labels use \ce{...} and LATEX_HEADER wasn't provided.
+if [[ ! ${LATEX_HEADER+x} ]]; then
+  if [[ "${XLABEL-}${Y1LABEL-}${Y2LABEL-}${Y3LABEL-}" == *"\\ce"* ]]; then
+    LATEX_HEADER="\\usepackage[version=4]{mhchem}"
+  fi
+fi
 
 gp_quote() {
   # Quote a string for gnuplot single-quoted assignment.
