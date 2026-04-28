@@ -31,7 +31,9 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 GP="${ROOT}/scripts/gnuplot/plot_bond_vmd_dihedral_dihedral_3stack_tex.gp"
-OUTBASE="figure_bond_dihedral_3stack"
+# You can override OUTBASE/figure size/labels/etc by setting env vars inline:
+#   OUTBASE=myfig W=3 H=4 RELH1=0.25 RELH2=0.4 RELH3=0.35 ./scripts/bash/plot_bond_dihedral_3stack.sh ...
+OUTBASE="${OUTBASE:-figure_bond_dihedral_3stack}"
 
 CSV_IN="${1:?bond stats CSV required}"
 VMD_IN="${2:?VMD bond .dat or - required}"
@@ -320,29 +322,87 @@ fi
 VMD_GP="''"
 if [[ -n "$PLOT_VMD" ]]; then VMD_GP="'${PLOT_VMD}'"; fi
 
-gnuplot -e "DATA1='${PLOT_DATA1}';
-            DATA_VMD=${VMD_GP};
-            DATA2='${PLOT_D2}';
-            DATA3='${PLOT_D3}';
-            ${DATA2B_ARG}
-            ${DATA3B_ARG}
-            OUTBASE='${OUTBASE}';
-            XLABEL='\$t\$ (fs)';
-            Y1LABEL='Bond (\\AA)';
-            PLOTMODE='LINES';
-            PLOTMODE2='LINES';
-            SHADEDERRORS1=1;
-            SHADEDERRORS2=1;
-            SHADEDERRORS3=1;
-            SHADE_ALPHA=0.25;
-            SHOW_KEY=1;
-            NAME2='VMD';
-            RELH1=0.28;
-            RELH2=0.36;
-            RELH3=0.36;
-            NAME2A='Panel 2';
-            NAME3A='Panel 3';
-            " "$GP"
+gp_quote() {
+  # Quote a string for gnuplot single-quoted assignment.
+  # Replaces ' with '\'' (close quote, escaped quote, reopen).
+  local s=${1-}
+  s=${s//\'/\'\\\'\'}
+  printf "'%s'" "$s"
+}
+
+gp_add_num() {
+  # Add numeric var if set (supports 0).
+  local k=$1
+  if [[ ${!k+x} ]]; then
+    GP_VARS+="${k}=${!k};"
+  fi
+}
+
+gp_add_str() {
+  # Add string var if set (supports empty by presence).
+  local k=$1
+  if [[ ${!k+x} ]]; then
+    GP_VARS+="${k}=$(gp_quote "${!k}");"
+  fi
+}
+
+GP_VARS=""
+# Required inputs (always set)
+GP_VARS+="DATA1=$(gp_quote "${PLOT_DATA1}");"
+GP_VARS+="DATA_VMD=${VMD_GP};"
+GP_VARS+="DATA2=$(gp_quote "${PLOT_D2}");"
+GP_VARS+="DATA3=$(gp_quote "${PLOT_D3}");"
+GP_VARS+="${DATA2B_ARG}"
+GP_VARS+="${DATA3B_ARG}"
+GP_VARS+="OUTBASE=$(gp_quote "${OUTBASE}");"
+
+# Pass-through overrides (set these inline before the command, e.g. W=3 H=4 XLABEL='...').
+# Figure/layout
+gp_add_num W; gp_add_num H
+gp_add_num RELH1; gp_add_num RELH2; gp_add_num RELH3
+gp_add_num MLEFT; gp_add_num MRIGHT; gp_add_num MBOTTOM; gp_add_num MTOP
+gp_add_str FONT
+gp_add_str LATEX_HEADER
+gp_add_num MIRROR_TICS
+
+# Labels/ticks/ranges
+gp_add_str XLABEL
+gp_add_str Y1LABEL; gp_add_str Y2LABEL; gp_add_str Y3LABEL
+gp_add_num YLABEL_OFFSETX; gp_add_num Y1LABEL_OFFSET; gp_add_num Y2LABEL_OFFSET; gp_add_num Y3LABEL_OFFSET
+gp_add_num XTIC_STEP; gp_add_num YTIC_STEP; gp_add_num YTIC_STEP1; gp_add_num YTIC_STEP2; gp_add_num YTIC_STEP3
+gp_add_num XMIN; gp_add_num XMAX
+gp_add_num Y1MIN; gp_add_num Y1MAX
+gp_add_num Y2MIN; gp_add_num Y2MAX
+gp_add_num Y3MIN; gp_add_num Y3MAX
+
+# Styles/legend
+gp_add_num SHOW_KEY
+gp_add_num SHADEDERRORS1; gp_add_num SHADEDERRORS2; gp_add_num SHADEDERRORS2B; gp_add_num SHADEDERRORS3; gp_add_num SHADEDERRORS3B
+gp_add_num SHADE_ALPHA
+gp_add_str PLOTMODE; gp_add_str PLOTMODE2
+gp_add_str PLOTMODE_DIH; gp_add_str PLOTMODEB_DIH
+gp_add_str NAME1; gp_add_str NAME2
+gp_add_str NAME2A; gp_add_str NAME2B
+gp_add_str NAME3A; gp_add_str NAME3B
+
+gp_add_str COL1; gp_add_str COL2; gp_add_str COL2B; gp_add_str COL3; gp_add_str COL3B
+gp_add_num LW1; gp_add_num LW2; gp_add_num PS1; gp_add_num PS2; gp_add_num PT1; gp_add_num PT2
+gp_add_num LW; gp_add_num LWB; gp_add_num PS; gp_add_num PSB; gp_add_num PT; gp_add_num PTB
+gp_add_num LWD2; gp_add_num LWD2B; gp_add_num LWD3; gp_add_num LWD3B
+gp_add_num PSD2; gp_add_num PSD2B; gp_add_num PSD3; gp_add_num PSD3B
+gp_add_num PTD2; gp_add_num PTD2B; gp_add_num PTD3; gp_add_num PTD3B
+
+# Dihedral transforms
+gp_add_num DIHEDRAL_DATA_SKIP
+gp_add_num DIHEDRAL_OFFSET2; gp_add_num DIHEDRAL_OFFSET2B; gp_add_num DIHEDRAL_OFFSET3; gp_add_num DIHEDRAL_OFFSET3B
+gp_add_num DIHEDRAL_NEGATE2; gp_add_num DIHEDRAL_NEGATE2B; gp_add_num DIHEDRAL_NEGATE3; gp_add_num DIHEDRAL_NEGATE3B
+gp_add_num DIHEDRAL_TO3602; gp_add_num DIHEDRAL_TO3602B; gp_add_num DIHEDRAL_TO3603; gp_add_num DIHEDRAL_TO3603B
+
+# Bond/VMD time scaling
+gp_add_num CSV_TSCALE; gp_add_num CSV_TOFF; gp_add_num VMD_TSCALE; gp_add_num VMD_TOFF
+gp_add_num VMD_XCOL; gp_add_num VMD_YCOL
+
+gnuplot -e "$GP_VARS" "$GP"
 
 if ! pdflatex -interaction=nonstopmode -halt-on-error "${OUTBASE}.tex" >"pdflatex_${OUTBASE}.log" 2>&1; then
   echo "ERROR: pdflatex failed. See ${ROOT}/pdflatex_${OUTBASE}.log" >&2
