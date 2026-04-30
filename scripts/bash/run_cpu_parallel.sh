@@ -96,6 +96,7 @@ elif [[ "${START_FROM_PREV_MEAN:-0}" == "1" ]]; then
         fi
     fi
     mean_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
+    mean_out_sdf="${RESULTS_DIR}/${prev_step}_mean.sdf"
     mkdir -p "$RESULTS_DIR"
 
     echo "  START_FROM_PREV_MEAN: pooling TOP_N=$TOP_N from step $prev_step"
@@ -164,6 +165,18 @@ PY
     "${AVG_CMD[@]}"
 
     effective_start="$mean_out"
+    effective_start_sdf="$mean_out_sdf"
+    echo "  creating mean SDF -> $mean_out_sdf"
+    if command -v obabel >/dev/null 2>&1; then
+        # OpenBabel CLI is the most portable option (no Python deps needed).
+        # -xk: attempt to perceive/assign bond orders where possible.
+        obabel -ixyz "$mean_out" -osdf -O "$mean_out_sdf" -xk >/dev/null
+        echo "  mean SDF created via obabel"
+    else
+        echo "ERROR: obabel not found; cannot create mean SDF from $mean_out" >&2
+        echo "  Hint: install OpenBabel (obabel) or provide Python openbabel/rdkit deps." >&2
+        exit 1
+    fi
     echo "  workers=$N_WORKERS | excitation=$excitation_factor | tuning=$tuning_ratio_target"
 
 # ── Mode 3: random pick from XYZ_SOURCE_STEP pool ───────────────────────────
@@ -195,14 +208,21 @@ for (( worker=0; worker<N_WORKERS; worker++ )); do
     else
         target_file="${TARGET_FILE_TEMPLATE//{time_step}/$time_step}"
     fi
-    "$PYTHON" run.py \
-        --run-id "$time_step" \
-        --results-dir "$RESULTS_DIR" \
-        --start-xyz-file "$starting_xyz" \
-        --target-file "$target_file" \
-        --excitation-factor "$excitation_factor" \
-        --tuning-ratio-target "$tuning_ratio_target" \
-        ${EXTRA_RUN_PY_ARGS} &
+    RUN_CMD=(
+        "$PYTHON" run.py
+        --run-id "$time_step"
+        --results-dir "$RESULTS_DIR"
+        --start-xyz-file "$starting_xyz"
+        --target-file "$target_file"
+        --excitation-factor "$excitation_factor"
+        --tuning-ratio-target "$tuning_ratio_target"
+    )
+    if [[ -n "${effective_start_sdf:-}" ]]; then
+        RUN_CMD+=(--start-sdf-file "$effective_start_sdf")
+    fi
+    # shellcheck disable=SC2206
+    RUN_CMD+=( ${EXTRA_RUN_PY_ARGS} )
+    "${RUN_CMD[@]}" &
 done
 
 wait
