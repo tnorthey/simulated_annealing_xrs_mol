@@ -4,11 +4,12 @@ topM_geometry_statistics.py
 
 For each timestep, select the topM best-fitting xyz files, compute the
 requested geometry (bond / angle / dihedral), and plot the per-timestep
-mean and closest-to-mean frame.
+mean and representative frame.
 
-The closest-to-mean frame can be selected either by:
+The representative frame per timestep can be selected by:
   - RMSD to the per-timestep mean structure, or
-  - distance in requested geometry space to the per-timestep geometry mean.
+  - distance in requested geometry space to the per-timestep geometry mean, or
+  - RMSD to the per-timestep target structure ``<run_id>_target.xyz`` (see --closest-selection target_rmsd).
 
 No optimal-path solving is performed; this script directly examines
 the raw candidates at each timestep.
@@ -47,6 +48,9 @@ Target vs closest candidate scattering (optional):
 
     python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --plot-target-comparison
     # Optional: --target-results-dir path/to/results
+
+Closest to target geometry (requires ``<run_id>_target.xyz`` next to TARGET_FUNCTION, same padding):
+    python3 topM_geometry_statistics.py results/ --dihedral 2 3 4 5 --closest-selection target_rmsd
 """
 
 import argparse
@@ -214,6 +218,31 @@ def _plain_rmsd(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None = No
     return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
 
+def select_closest_by_rmsd_to_reference(
+    coords: Sequence[np.ndarray],
+    reference: np.ndarray,
+    *,
+    use_kabsch: bool = True,
+    rmsd_indices: Sequence[int] | None = None,
+) -> int:
+    """Return index of candidate with minimal RMSD to ``reference`` (same shape as each candidate)."""
+    K = len(coords)
+    if K <= 1:
+        return 0
+    nref = int(reference.shape[0])
+    for i, c in enumerate(coords):
+        if int(c.shape[0]) != nref:
+            raise SystemExit(
+                f"Atom count mismatch for RMSD-to-reference: candidate index {i} has "
+                f"{c.shape[0]} atoms, reference has {nref}."
+            )
+    rmsd_fn = _kabsch_rmsd if use_kabsch else _plain_rmsd
+    dists = np.array(
+        [rmsd_fn(c, reference, indices=rmsd_indices) for c in coords], dtype=np.float64
+    )
+    return int(np.argmin(dists))
+
+
 def select_closest_to_mean(
     layer: Sequence[dict],
     *,
@@ -224,14 +253,11 @@ def select_closest_to_mean(
     K = len(layer)
     if K <= 1:
         return 0
-
-    rmsd_fn = _kabsch_rmsd if use_kabsch else _plain_rmsd
     coords = [read_xyz_coords(c["xyz"]) for c in layer]
     mean_coords = np.mean(np.stack(coords, axis=0), axis=0)
-    dists = np.array(
-        [rmsd_fn(c, mean_coords, indices=rmsd_indices) for c in coords], dtype=np.float64
+    return select_closest_by_rmsd_to_reference(
+        coords, mean_coords, use_kabsch=use_kabsch, rmsd_indices=rmsd_indices
     )
-    return int(np.argmin(dists))
 
 
 def select_closest_by_geometry(
@@ -550,7 +576,7 @@ def plot_target_vs_closest_dat_files(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Compute and plot per-timestep mean and closest-to-mean geometry "
+            "Compute and plot per-timestep mean and representative-frame geometry "
             "for the topM best-fitting xyz files."
         ),
     )
@@ -651,7 +677,8 @@ def main():
         "--no-kabsch",
         action="store_true",
         help=(
-            "Use plain centroid-aligned RMSD (no Kabsch rotation) for closest-to-mean selection. "
+            "Use plain centroid-aligned RMSD (no Kabsch rotation) for RMSD-based closest selection "
+            "(--closest-selection rmsd or target_rmsd). "
             "Much faster but assumes structures share a consistent orientation."
         ),
     )
@@ -660,19 +687,21 @@ def main():
         type=str,
         default=None,
         help=(
-            "Comma-separated atom indices (0-based) for RMSD in closest-to-mean selection "
-            "(used when --closest-selection=rmsd). "
+            "Comma-separated atom indices (0-based) for RMSD in closest selection when "
+            "--closest-selection is rmsd or target_rmsd. "
             "Example: '0,1,2,3,4,5'. Default: all atoms."
         ),
     )
     parser.add_argument(
         "--closest-selection",
-        choices=["rmsd", "geometry"],
+        choices=["rmsd", "geometry", "target_rmsd"],
         default="rmsd",
         help=(
-            "How to choose the per-timestep closest-to-mean representative frame: "
-            "'rmsd' uses RMSD to the mean structure, "
-            "'geometry' uses distance to mean of requested geometry values."
+            "How to choose the per-timestep representative frame among candidates: "
+            "'rmsd' = RMSD to the mean structure of candidates; "
+            "'geometry' = distance in requested geometry space to the mean geometry; "
+            "'target_rmsd' = RMSD to <run_id>_target.xyz in --target-results-dir (or the xyz directory), "
+            "with run_id zero-padding from --target-run-id-pad (same as TARGET_FUNCTION_*.dat)."
         ),
     )
     parser.add_argument(
@@ -793,7 +822,7 @@ def main():
             "(e.g. 18_000.12.xyz -> 18_000.12.dat), plus all_timesteps_target_overlay.png "
             "(all TARGET solid + all candidates dashed, color by run id). Requires "
             f"a sidecar file <plot_stem>_closest_dat_paths.txt (written when the "
-            "closest-to-mean trajectory is built; use --recompute if missing)."
+            "representative-frame trajectory is built; use --recompute if missing)."
         ),
     )
     parser.add_argument(
@@ -801,8 +830,8 @@ def main():
         type=str,
         default=None,
         help=(
-            "Directory containing TARGET_FUNCTION_*.dat (default: same as the xyz "
-            "directory positional argument)."
+            "Directory containing TARGET_FUNCTION_*.dat and, for --closest-selection target_rmsd, "
+            "<run_id>_target.xyz files (default: same as the xyz directory positional argument)."
         ),
     )
     parser.add_argument(
@@ -866,12 +895,15 @@ def main():
     plot_stem = os.path.splitext(args.output_plot)[0]
     csv_path = plot_stem + ".csv"
     using_geometry_closest = args.closest_selection == "geometry"
+    using_target_rmsd_closest = args.closest_selection == "target_rmsd"
     include_closest = not bool(args.skip_closest)
-    closest_xyz_path = (
-        plot_stem + "_closest_geometry_to_mean.xyz"
-        if using_geometry_closest
-        else plot_stem + "_closest_to_mean.xyz"
-    )
+    target_dir = args.target_results_dir or args.directory
+    if using_geometry_closest:
+        closest_xyz_path = plot_stem + "_closest_geometry_to_mean.xyz"
+    elif using_target_rmsd_closest:
+        closest_xyz_path = plot_stem + "_closest_to_target.xyz"
+    else:
+        closest_xyz_path = plot_stem + "_closest_to_mean.xyz"
     mean_xyz_path = plot_stem + "_mean.xyz"
     closest_dat_paths_txt = plot_stem + "_closest_dat_paths.txt"
     closest_dat_paths: list[str] = []
@@ -907,7 +939,12 @@ def main():
                         means[:, ci] = raw[:, base]
                         stds[:, ci] = raw[:, base + 1]
                 n_timesteps = raw.shape[0]
-                closest_header_tag = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
+                if using_geometry_closest:
+                    closest_header_tag = "closest_geom_"
+                elif using_target_rmsd_closest:
+                    closest_header_tag = "closest_target_rmsd_"
+                else:
+                    closest_header_tag = "closest_rmsd_"
                 try:
                     with open(csv_path, "r") as f:
                         header_line = f.readline().strip()
@@ -957,6 +994,8 @@ def main():
         if include_closest:
             if using_geometry_closest:
                 print("Computing geometry and selecting geometry-closest-to-mean frames...")
+            elif using_target_rmsd_closest:
+                print("Computing geometry and selecting RMSD-closest-to-target frames...")
             else:
                 print("Computing geometry and selecting RMSD-closest-to-mean frames...")
         else:
@@ -1015,6 +1054,28 @@ def main():
                     closest_idx = select_closest_by_geometry(
                         geom, means[ti, :], dihedral_cols=dihedral_cols
                     )
+                elif using_target_rmsd_closest:
+                    t_id = timesteps[ti]
+                    run_id = _timestep_to_target_run_id(t_id, pad=args.target_run_id_pad)
+                    target_path = os.path.join(target_dir, f"{run_id}_target.xyz")
+                    if not os.path.isfile(target_path):
+                        raise SystemExit(
+                            f"Missing target xyz for timestep id {t_id}: expected file {target_path!r} "
+                            "(required for --closest-selection target_rmsd)."
+                        )
+                    target_xyz = read_xyz_coords(target_path)
+                    coords = [read_xyz_coords(c["xyz"]) for c in layer]
+                    if int(coords[0].shape[0]) != int(target_xyz.shape[0]):
+                        raise SystemExit(
+                            f"Atom count mismatch: {target_path!r} has {target_xyz.shape[0]} atoms, "
+                            f"candidate {layer[0]['xyz']!r} has {coords[0].shape[0]} atoms."
+                        )
+                    closest_idx = select_closest_by_rmsd_to_reference(
+                        coords,
+                        target_xyz,
+                        use_kabsch=not args.no_kabsch,
+                        rmsd_indices=rmsd_indices,
+                    )
                 else:
                     closest_idx = select_closest_to_mean(
                         layer, use_kabsch=not args.no_kabsch, rmsd_indices=rmsd_indices
@@ -1063,7 +1124,12 @@ def main():
         # Write CSV
         time_col = f"time_{args.time_units}"
         header_parts = [time_col]
-        closest_prefix = "closest_geom_" if using_geometry_closest else "closest_rmsd_"
+        if using_geometry_closest:
+            closest_prefix = "closest_geom_"
+        elif using_target_rmsd_closest:
+            closest_prefix = "closest_target_rmsd_"
+        else:
+            closest_prefix = "closest_rmsd_"
         for label in col_labels:
             short = label.split(" (")[0].replace(" ", "_")
             if include_closest:
@@ -1089,9 +1155,12 @@ def main():
         )
         print(f"CSV written to: {csv_path}")
 
-        # Write closest-to-mean and mean xyz trajectories
+        # Write representative and mean xyz trajectories
         if include_closest:
-            print("Writing closest-to-mean trajectory...")
+            if using_target_rmsd_closest:
+                print("Writing closest-to-target trajectory...")
+            else:
+                print("Writing closest-to-mean trajectory...")
             closest_frames = []
             for ti, layer_i in enumerate(layers):
                 mi = closest_indices[ti]
@@ -1100,11 +1169,19 @@ def main():
                     os.path.abspath(os.path.splitext(xyz_path)[0] + ".dat")
                 )
                 n, comment, atoms, coords = read_xyz_frame(xyz_path)
-                sel_tag = "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
+                if using_geometry_closest:
+                    sel_tag = "closest-geometry-to-mean"
+                elif using_target_rmsd_closest:
+                    sel_tag = "closest-rmsd-to-target"
+                else:
+                    sel_tag = "closest-rmsd-to-mean"
                 comment = f"{comment} | {sel_tag} | timestep={timesteps[ti]}"
                 closest_frames.append((n, comment, atoms, coords))
             write_xyz_trajectory(closest_frames, closest_xyz_path)
-            print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
+            if using_target_rmsd_closest:
+                print(f"Closest-to-target trajectory written to: {closest_xyz_path}")
+            else:
+                print(f"Closest-to-mean trajectory written to: {closest_xyz_path}")
             with open(closest_dat_paths_txt, "w", encoding="utf-8") as f:
                 for dp in closest_dat_paths:
                     f.write(dp + "\n")
@@ -1200,7 +1277,13 @@ def main():
             axes = [axes]
 
     closest_plot_label = (
-        "closest-geometry-to-mean" if using_geometry_closest else "closest-rmsd-to-mean"
+        "closest-geometry-to-mean"
+        if using_geometry_closest
+        else (
+            "closest-rmsd-to-target"
+            if using_target_rmsd_closest
+            else "closest-rmsd-to-mean"
+        )
     )
 
     if args.overlay and n_cols > 1:
@@ -1304,7 +1387,10 @@ def main():
 
     if args.plot_target_comparison:
         if not include_closest:
-            raise SystemExit("--plot-target-comparison requires closest-to-mean selection (omit --skip-closest).")
+            raise SystemExit(
+                "--plot-target-comparison requires a per-timestep representative frame "
+                "(omit --skip-closest)."
+            )
         if not closest_dat_paths:
             if os.path.isfile(closest_dat_paths_txt):
                 with open(closest_dat_paths_txt, encoding="utf-8") as f:
@@ -1314,7 +1400,7 @@ def main():
                 f"--plot-target-comparison needs {closest_dat_paths_txt} with exactly "
                 f"{n_timesteps} lines (paths to candidate .dat files). "
                 "Re-run without a stale CSV cache or pass --recompute to rebuild the "
-                "closest-to-mean trajectory and sidecar."
+                "representative-frame trajectory and sidecar."
             )
         plot_target_vs_closest_dat_files(
             args=args,
