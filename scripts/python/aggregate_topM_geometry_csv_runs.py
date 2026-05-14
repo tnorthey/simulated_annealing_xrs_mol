@@ -30,6 +30,12 @@ unless you override with ``DATA_CLOSEST`` / ``DATA_TARGET``)::
     gnuplot -e "DATA='combined.csv';OUTBASE='fig_dihedral';XLABEL='time (fs)';YLABEL='deg';KEY_POS='bottom right'" \\
         scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
 
+Overlay each original run (``DATA1`` … ``DATA12``; per-run CSV must have time in
+column 1 and the per-run mean in column ``RUN_YCOL``, default 2 for single-geometry topM output)::
+
+    gnuplot -e "DATA='combined.csv';DATA1='run1/topM_geometry_dihedral-0-1-2-3.csv';DATA2='run2/topM_geometry_dihedral-0-1-2-3.csv';OUTBASE='fig_overlay'" \\
+        scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
+
 Use explicit timestep ids (one integer per line, same row count as CSVs)::
 
     python3 scripts/python/aggregate_topM_geometry_csv_runs.py \\

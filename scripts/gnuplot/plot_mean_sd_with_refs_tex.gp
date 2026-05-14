@@ -31,6 +31,13 @@
 #
 #   gnuplot -e "KEY_POS='bottom right';DATA='combined.csv';OUTBASE='fig'" \
 #       scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
+#
+# Per-run overlays (drawn under combined mean; single-geometry topM CSV: RUN_YCOL=2 = first mean_*):
+#
+#   gnuplot -e "DATA='combined.csv';DATA1='run1/topM_geometry_....csv';DATA2='run2/topM_geometry_....csv';OUTBASE='fig'" \
+#       scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
+#
+# Multi-geometry topM CSV: set RUN_YCOL to the mean column index, or pre-slice to two columns (time,y).
 # ------------------------------------------------------------------------------
 
 if (!exists("DATA")) DATA = "combined.csv"
@@ -38,6 +45,40 @@ if (!exists("OUTBASE")) OUTBASE = "figure_mean_sd_refs"
 
 if (!exists("DATA_CLOSEST")) DATA_CLOSEST = ""
 if (!exists("DATA_TARGET")) DATA_TARGET = ""
+
+# Optional per-run CSV overlays (same comma format; col 1 = time, col RUN_YCOL = y, skip 1 header).
+if (!exists("DATA1")) DATA1 = ""
+if (!exists("DATA2")) DATA2 = ""
+if (!exists("DATA3")) DATA3 = ""
+if (!exists("DATA4")) DATA4 = ""
+if (!exists("DATA5")) DATA5 = ""
+if (!exists("DATA6")) DATA6 = ""
+if (!exists("DATA7")) DATA7 = ""
+if (!exists("DATA8")) DATA8 = ""
+if (!exists("DATA9")) DATA9 = ""
+if (!exists("DATA10")) DATA10 = ""
+if (!exists("DATA11")) DATA11 = ""
+if (!exists("DATA12")) DATA12 = ""
+
+if (!exists("RUN_YCOL")) RUN_YCOL = 2
+RUN_YCOL = int(RUN_YCOL) + 0
+if (RUN_YCOL < 1) print "ERROR: RUN_YCOL must be >= 1"; exit
+
+if (!exists("LW_RUN")) LW_RUN = 1.4
+LW_RUN = LW_RUN + 0
+
+if (!exists("NAME_RUN1")) NAME_RUN1 = 'run 1'
+if (!exists("NAME_RUN2")) NAME_RUN2 = 'run 2'
+if (!exists("NAME_RUN3")) NAME_RUN3 = 'run 3'
+if (!exists("NAME_RUN4")) NAME_RUN4 = 'run 4'
+if (!exists("NAME_RUN5")) NAME_RUN5 = 'run 5'
+if (!exists("NAME_RUN6")) NAME_RUN6 = 'run 6'
+if (!exists("NAME_RUN7")) NAME_RUN7 = 'run 7'
+if (!exists("NAME_RUN8")) NAME_RUN8 = 'run 8'
+if (!exists("NAME_RUN9")) NAME_RUN9 = 'run 9'
+if (!exists("NAME_RUN10")) NAME_RUN10 = 'run 10'
+if (!exists("NAME_RUN11")) NAME_RUN11 = 'run 11'
+if (!exists("NAME_RUN12")) NAME_RUN12 = 'run 12'
 
 if (!exists("SHADEDERRORS")) SHADEDERRORS = 0
 if (!exists("SHADE_ALPHA")) SHADE_ALPHA = 0.20
@@ -148,19 +189,68 @@ if (exists("YMAX")) YMAX = YMAX + 0
 if (exists("YMIN") && exists("YMAX")) set yrange [YMIN:YMAX]
 if (!(exists("YMIN") && exists("YMAX"))) unset yrange
 
-# ---- Build plot command ----
-# Primary: DATA columns 1:2:3 = time, mean, sd (row 1 = header; skip 1)
-PLOT_CMD = ""
-if (SHADEDERRORS != 0) PLOT_CMD = PLOT_CMD . "'".DATA."' using 1:(".YLO."):(".YHI.") skip 1 with filledcurves lc rgb COL_SD fs transparent solid SHADE_ALPHA noborder notitle, "
-if (SHADEDERRORS == 0) PLOT_CMD = PLOT_CMD . "'".DATA."' using 1:(".YMEAN."):3 skip 1 with yerrorbars lw eblw lc rgb COL_SD pt -1 notitle, "
-if (SHOW_KEY) PLOT_CMD = PLOT_CMD . "'".DATA."' using 1:(".YMEAN.") skip 1 with lines lw LW lc rgb COL_MEAN title '".NAME_MEAN."'"
-if (!SHOW_KEY) PLOT_CMD = PLOT_CMD . "'".DATA."' using 1:(".YMEAN.") skip 1 with lines lw LW lc rgb COL_MEAN notitle"
+# Per-run y column (gnuplot column() index) and palette for DATA1..DATA12.
+RUN_COL_STR = sprintf("%d", RUN_YCOL)
+YEXPR_RUN = "(YTR(column(".RUN_COL_STR.")))"
+COLPAL = "#e41a1c #377eb8 #4daf4a #984ea3 #ff7f00 #ffff33 #a65628 #f781bf"
 
-if (HAS_CLOSEST) PLOT_CMD = PLOT_CMD . ", '".DATA_CLOSEST."' using 1:(YTR($2)) skip 1 with lines lw LW_REF dt 2 lc rgb COL_CLOSEST title '".NAME_CLOSEST."'"
-if (!HAS_CLOSEST && USE_INTERNAL_CLOSEST) PLOT_CMD = PLOT_CMD . ", '".DATA."' using 1:(($4)==($4) ? YTR($4) : 1/0) skip 1 with lines lw LW_REF dt 2 lc rgb COL_CLOSEST title '".NAME_CLOSEST."'"
+TITLE_RUN1 = (SHOW_KEY != 0) ? " title '".NAME_RUN1."'" : " notitle"
+TITLE_RUN2 = (SHOW_KEY != 0) ? " title '".NAME_RUN2."'" : " notitle"
+TITLE_RUN3 = (SHOW_KEY != 0) ? " title '".NAME_RUN3."'" : " notitle"
+TITLE_RUN4 = (SHOW_KEY != 0) ? " title '".NAME_RUN4."'" : " notitle"
+TITLE_RUN5 = (SHOW_KEY != 0) ? " title '".NAME_RUN5."'" : " notitle"
+TITLE_RUN6 = (SHOW_KEY != 0) ? " title '".NAME_RUN6."'" : " notitle"
+TITLE_RUN7 = (SHOW_KEY != 0) ? " title '".NAME_RUN7."'" : " notitle"
+TITLE_RUN8 = (SHOW_KEY != 0) ? " title '".NAME_RUN8."'" : " notitle"
+TITLE_RUN9 = (SHOW_KEY != 0) ? " title '".NAME_RUN9."'" : " notitle"
+TITLE_RUN10 = (SHOW_KEY != 0) ? " title '".NAME_RUN10."'" : " notitle"
+TITLE_RUN11 = (SHOW_KEY != 0) ? " title '".NAME_RUN11."'" : " notitle"
+TITLE_RUN12 = (SHOW_KEY != 0) ? " title '".NAME_RUN12."'" : " notitle"
 
-if (HAS_TARGET) PLOT_CMD = PLOT_CMD . ", '".DATA_TARGET."' using 1:(YTR($2)) skip 1 with lines lw LW_REF dt 4 lc rgb COL_TARGET title '".NAME_TARGET."'"
-if (!HAS_TARGET && USE_INTERNAL_TARGET) PLOT_CMD = PLOT_CMD . ", '".DATA."' using 1:(($5)==($5) ? YTR($5) : 1/0) skip 1 with lines lw LW_REF dt 4 lc rgb COL_TARGET title '".NAME_TARGET."'"
+TITLE_CLOSEST = (SHOW_KEY != 0) ? " title '".NAME_CLOSEST."'" : " notitle"
+TITLE_TARGET = (SHOW_KEY != 0) ? " title '".NAME_TARGET."'" : " notitle"
+
+# ---- Build plot command: per-run lines first (underneath), then combined + refs ----
+RUN_PLOT = ""
+if (DATA1 ne "" && !is_nonempty_file(DATA1)) print sprintf("WARNING: DATA1 missing or empty: %s", DATA1)
+if (DATA1 ne "" && is_nonempty_file(DATA1)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA1."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,1) ".TITLE_RUN1
+if (DATA2 ne "" && !is_nonempty_file(DATA2)) print sprintf("WARNING: DATA2 missing or empty: %s", DATA2)
+if (DATA2 ne "" && is_nonempty_file(DATA2)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA2."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,2) ".TITLE_RUN2
+if (DATA3 ne "" && !is_nonempty_file(DATA3)) print sprintf("WARNING: DATA3 missing or empty: %s", DATA3)
+if (DATA3 ne "" && is_nonempty_file(DATA3)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA3."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,3) ".TITLE_RUN3
+if (DATA4 ne "" && !is_nonempty_file(DATA4)) print sprintf("WARNING: DATA4 missing or empty: %s", DATA4)
+if (DATA4 ne "" && is_nonempty_file(DATA4)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA4."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,4) ".TITLE_RUN4
+if (DATA5 ne "" && !is_nonempty_file(DATA5)) print sprintf("WARNING: DATA5 missing or empty: %s", DATA5)
+if (DATA5 ne "" && is_nonempty_file(DATA5)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA5."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,5) ".TITLE_RUN5
+if (DATA6 ne "" && !is_nonempty_file(DATA6)) print sprintf("WARNING: DATA6 missing or empty: %s", DATA6)
+if (DATA6 ne "" && is_nonempty_file(DATA6)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA6."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,6) ".TITLE_RUN6
+if (DATA7 ne "" && !is_nonempty_file(DATA7)) print sprintf("WARNING: DATA7 missing or empty: %s", DATA7)
+if (DATA7 ne "" && is_nonempty_file(DATA7)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA7."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,7) ".TITLE_RUN7
+if (DATA8 ne "" && !is_nonempty_file(DATA8)) print sprintf("WARNING: DATA8 missing or empty: %s", DATA8)
+if (DATA8 ne "" && is_nonempty_file(DATA8)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA8."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,8) ".TITLE_RUN8
+if (DATA9 ne "" && !is_nonempty_file(DATA9)) print sprintf("WARNING: DATA9 missing or empty: %s", DATA9)
+if (DATA9 ne "" && is_nonempty_file(DATA9)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA9."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,1) ".TITLE_RUN9
+if (DATA10 ne "" && !is_nonempty_file(DATA10)) print sprintf("WARNING: DATA10 missing or empty: %s", DATA10)
+if (DATA10 ne "" && is_nonempty_file(DATA10)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA10."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,2) ".TITLE_RUN10
+if (DATA11 ne "" && !is_nonempty_file(DATA11)) print sprintf("WARNING: DATA11 missing or empty: %s", DATA11)
+if (DATA11 ne "" && is_nonempty_file(DATA11)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA11."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,3) ".TITLE_RUN11
+if (DATA12 ne "" && !is_nonempty_file(DATA12)) print sprintf("WARNING: DATA12 missing or empty: %s", DATA12)
+if (DATA12 ne "" && is_nonempty_file(DATA12)) RUN_PLOT = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . "'".DATA12."' using 1:(".YEXPR_RUN.") skip 1 with lines lw LW_RUN lc rgb word(COLPAL,4) ".TITLE_RUN12
+
+# Combined DATA: columns 1:2:3 = time, mean_runs, sd_runs (row 1 = header; skip 1)
+COMBINED = ""
+if (SHADEDERRORS != 0) COMBINED = COMBINED . "'".DATA."' using 1:(".YLO."):(".YHI.") skip 1 with filledcurves lc rgb COL_SD fs transparent solid SHADE_ALPHA noborder notitle, "
+if (SHADEDERRORS == 0) COMBINED = COMBINED . "'".DATA."' using 1:(".YMEAN."):3 skip 1 with yerrorbars lw eblw lc rgb COL_SD pt -1 notitle, "
+if (SHOW_KEY) COMBINED = COMBINED . "'".DATA."' using 1:(".YMEAN.") skip 1 with lines lw LW lc rgb COL_MEAN title '".NAME_MEAN."'"
+if (!SHOW_KEY) COMBINED = COMBINED . "'".DATA."' using 1:(".YMEAN.") skip 1 with lines lw LW lc rgb COL_MEAN notitle"
+
+if (HAS_CLOSEST) COMBINED = COMBINED . ", '".DATA_CLOSEST."' using 1:(YTR($2)) skip 1 with lines lw LW_REF dt 2 lc rgb COL_CLOSEST ".TITLE_CLOSEST
+if (!HAS_CLOSEST && USE_INTERNAL_CLOSEST) COMBINED = COMBINED . ", '".DATA."' using 1:(($4)==($4) ? YTR($4) : 1/0) skip 1 with lines lw LW_REF dt 2 lc rgb COL_CLOSEST ".TITLE_CLOSEST
+
+if (HAS_TARGET) COMBINED = COMBINED . ", '".DATA_TARGET."' using 1:(YTR($2)) skip 1 with lines lw LW_REF dt 4 lc rgb COL_TARGET ".TITLE_TARGET
+if (!HAS_TARGET && USE_INTERNAL_TARGET) COMBINED = COMBINED . ", '".DATA."' using 1:(($5)==($5) ? YTR($5) : 1/0) skip 1 with lines lw LW_REF dt 4 lc rgb COL_TARGET ".TITLE_TARGET
+
+PLOT_CMD = (RUN_PLOT ne "" ? RUN_PLOT . ", " : "") . COMBINED
 
 set lmargin at screen MLEFT
 set rmargin at screen MRIGHT
