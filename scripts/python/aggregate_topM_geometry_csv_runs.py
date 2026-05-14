@@ -27,7 +27,7 @@ Aggregate three runs (outputs **always** five columns: ``time``, ``mean_runs``,
 Plot with gnuplot (``DATA`` = combined CSV; columns 4–5 are read automatically
 unless you override with ``DATA_CLOSEST`` / ``DATA_TARGET``)::
 
-    gnuplot -e "DATA='combined.csv';OUTBASE='fig_dihedral';XLABEL='time (fs)';YLABEL='deg'" \\
+    gnuplot -e "DATA='combined.csv';OUTBASE='fig_dihedral';XLABEL='time (fs)';YLABEL='deg';KEY_POS='bottom right'" \\
         scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
 
 Use explicit timestep ids (one integer per line, same row count as CSVs)::

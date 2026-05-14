@@ -26,6 +26,11 @@
 # Shaded mean ± SD band instead of yerrorbars:
 #
 #   gnuplot -e "SHADEDERRORS=1;SHADE_ALPHA=0.22" scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
+#
+# Legend position (gnuplot `set key` location string; default top right):
+#
+#   gnuplot -e "KEY_POS='bottom right';DATA='combined.csv';OUTBASE='fig'" \
+#       scripts/gnuplot/plot_mean_sd_with_refs_tex.gp
 # ------------------------------------------------------------------------------
 
 if (!exists("DATA")) DATA = "combined.csv"
@@ -82,6 +87,9 @@ LW_REF = LW_REF + 0
 if (!exists("SHOW_KEY")) SHOW_KEY = 1
 SHOW_KEY = SHOW_KEY + 0
 
+# gnuplot key placement (e.g. top right, bottom right, left top); see `help set key`.
+if (!exists("KEY_POS")) KEY_POS = "top right"
+
 if (!exists("XLABEL")) XLABEL = 'time'
 if (!exists("YLABEL")) YLABEL = 'value'
 
@@ -119,7 +127,7 @@ set mytics 2
 set grid back xtics ytics lw 0.6 lc rgb "#D0D0D0"
 
 unset title
-if (SHOW_KEY) set key top right opaque box lw 0.6
+if (SHOW_KEY) eval "set key ".KEY_POS." opaque box lw 0.6"
 if (!SHOW_KEY) unset key
 
 eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
