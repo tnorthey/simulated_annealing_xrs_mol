@@ -13,6 +13,7 @@ CONFIG="${CONFIG:-input.toml}"
 GPU_CHAINS="${GPU_CHAINS:-1024}"
 EXCITATION_FACTOR="${EXCITATION_FACTOR:-0.628}"
 TUNING_RATIO="${TUNING_RATIO:-0.5}"
+EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 # Override previous source step (default: current - 1, two-digit)
 PREV_STEP="${PREV_STEP:-}"
 # If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to <prev>_mean.xyz)
@@ -43,6 +44,7 @@ Environment (defaults):
   STARTING_XYZ      If set, use this file instead of pooling (e.g. first timestep)
   PYTHON=${PYTHON}
   ALIGN_INDICES       Space-separated atom indices for average_xyz.py --align-indices
+  EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
 EOF
     exit 0
 }
@@ -159,12 +161,18 @@ PY
 fi
 
 echo "  launching: $PYTHON run.py --gpu-backend cuda --gpu-chains $GPU_CHAINS ..."
-"$PYTHON" run.py \
-    --config "$CONFIG" \
-    --run-id "$ts_padded" \
-    --start-xyz-file "$mean_out" \
-    --target-file "$TARGET_FILE" \
-    --excitation-factor "$excitation_factor" \
-    --tuning-ratio-target "$tuning_ratio_target" \
-    --gpu-backend cuda \
+RUN_CMD=(
+    "$PYTHON" run.py
+    --config "$CONFIG"
+    --run-id "$ts_padded"
+    --results-dir "$RESULTS_DIR"
+    --start-xyz-file "$mean_out"
+    --target-file "$TARGET_FILE"
+    --excitation-factor "$excitation_factor"
+    --tuning-ratio-target "$tuning_ratio_target"
+    --gpu-backend cuda
     --gpu-chains "$GPU_CHAINS"
+)
+# shellcheck disable=SC2206
+RUN_CMD+=( ${EXTRA_RUN_PY_ARGS} )
+"${RUN_CMD[@]}"

@@ -12,6 +12,7 @@ CONFIG="${CONFIG:-input.toml}"
 GPU_CHAINS="${GPU_CHAINS:-1024}"
 EXCITATION_FACTOR="${EXCITATION_FACTOR:-1.0}"
 TUNING_RATIO="${TUNING_RATIO:-0.5}"
+EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 STARTING_XYZ="${STARTING_XYZ:-}"
 
 usage() {
@@ -39,6 +40,7 @@ Environment (defaults):
   GPU_CHAINS=${GPU_CHAINS}
   EXCITATION_FACTOR=${EXCITATION_FACTOR}
   TUNING_RATIO=${TUNING_RATIO}
+  EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
   PYTHON=${PYTHON}
 EOF
     exit 0
@@ -85,12 +87,18 @@ echo "  mean copy: $mean_out"
 cp -f "$start_xyz" "$mean_out"
 
 echo "  launching: $PYTHON run.py --gpu-backend cuda --gpu-chains $GPU_CHAINS ..."
-"$PYTHON" run.py \
-    --config "$CONFIG" \
-    --run-id "$ts_padded" \
-    --start-xyz-file "$mean_out" \
-    --target-file "$TARGET_FILE" \
-    --excitation-factor "$excitation_factor" \
-    --tuning-ratio-target "$tuning_ratio_target" \
-    --gpu-backend cuda \
+RUN_CMD=(
+    "$PYTHON" run.py
+    --config "$CONFIG"
+    --run-id "$ts_padded"
+    --results-dir "$RESULTS_DIR"
+    --start-xyz-file "$mean_out"
+    --target-file "$TARGET_FILE"
+    --excitation-factor "$excitation_factor"
+    --tuning-ratio-target "$tuning_ratio_target"
+    --gpu-backend cuda
     --gpu-chains "$GPU_CHAINS"
+)
+# shellcheck disable=SC2206
+RUN_CMD+=( ${EXTRA_RUN_PY_ARGS} )
+"${RUN_CMD[@]}"
