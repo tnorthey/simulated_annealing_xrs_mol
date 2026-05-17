@@ -6,6 +6,9 @@ Traj=094
 Phi=0.4
 Excitation=1.0
 Qmax=8
+Qlen=$(awk -v q="$Qmax" 'BEGIN { print int(10 * q + 1) }')
+export EXTRA_RUN_PY_ARGS="--qmax ${Qmax} --qlen ${Qlen}"
+
 Top_N=200
 Description=""$number_flag""
 Results_dir="results_chd_traj_"$Traj"_phi"$Phi"_qmax"$Qmax"_"$Description""
