@@ -165,6 +165,7 @@ RUN_CMD=(
     "$PYTHON" run.py
     --config "$CONFIG"
     --run-id "$ts_padded"
+    --results-dir "$RESULTS_DIR"
     --start-xyz-file "$mean_out"
     --target-file "$TARGET_FILE"
     --excitation-factor "$excitation_factor"
