@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build a Kabsch mean of the best-fitting N structures from the previous timestep,
-# save as ${RESULTS_DIR}/<prev>_mean.xyz (timestep ts-1), then run one CUDA job with many GPU chains.
+# Starting geometry for run-id N from timestep N-1 (default: Kabsch mean of top TOP_N),
+# or optional random pick from top TOP_N at t-1 / t+1. Then one CUDA run.py job.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -16,18 +16,29 @@ TUNING_RATIO="${TUNING_RATIO:-0.5}"
 EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 # Override previous source step (default: current - 1, two-digit)
 PREV_STEP="${PREV_STEP:-}"
-# If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to <prev>_mean.xyz)
+# Override next source step (default: current + 1, two-digit; START_FROM_NEXT_RANDOM only)
+NEXT_STEP="${NEXT_STEP:-}"
+# If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to staging)
 STARTING_XYZ="${STARTING_XYZ:-}"
+# Random pick from top TOP_N at t-1 (mutually exclusive with START_FROM_NEXT_RANDOM)
+START_FROM_PREVIOUS_RANDOM="${START_FROM_PREVIOUS_RANDOM:-}"
+# Random pick from top TOP_N at t+1 (requires results for step t+1)
+START_FROM_NEXT_RANDOM="${START_FROM_NEXT_RANDOM:-}"
 
 usage() {
     cat <<EOF
 Usage: $0 <time_step> [excitation_factor] [tuning_ratio_target]
 
-Kabsch-average the TOP_N lowest-f(xray) structures from the previous timestep in
-RESULTS_DIR (files named like NN_<padded f>.xyz from wrap.py), write
-  \${RESULTS_DIR}/<time_step - 1>_mean.xyz
-then run a single:
-  $PYTHON run.py --gpu-backend cuda --gpu-chains ${GPU_CHAINS} ...
+Starting geometry (first match wins):
+  1. STARTING_XYZ set                    - copy fixed file to staging
+  2. START_FROM_PREVIOUS_RANDOM=1        - random pick from top TOP_N at t-1
+  3. START_FROM_NEXT_RANDOM=1            - random pick from top TOP_N at t+1
+  4. (default)                           - Kabsch mean of top TOP_N at t-1
+
+Default writes \${RESULTS_DIR}/<t-1>_mean.xyz; next-random writes
+  \${RESULTS_DIR}/<t>_start_from_<t+1>_random.xyz
+
+Then runs: $PYTHON run.py --gpu-backend cuda --gpu-chains ${GPU_CHAINS} ...
 
 Positional:
   time_step           Passed as --run-id (e.g. 02)
@@ -37,11 +48,14 @@ Positional:
 Environment (defaults):
   RESULTS_DIR=${RESULTS_DIR}
   TOP_N=${TOP_N}
-  TARGET_FILE         If unset, nmm_data/target_<time_step>.dat
+  TARGET_FILE         If unset, chd+_data/eirik_data_<time_step>.dat
   CONFIG=${CONFIG}
   GPU_CHAINS=${GPU_CHAINS}
   PREV_STEP           If unset, use (time_step - 1) padded to 2 digits
-  STARTING_XYZ      If set, use this file instead of pooling (e.g. first timestep)
+  NEXT_STEP           If unset, use (time_step + 1) padded (next-random mode)
+  STARTING_XYZ        Fixed starting xyz (e.g. first timestep)
+  START_FROM_PREVIOUS_RANDOM  If 1, random from top TOP_N at t-1
+  START_FROM_NEXT_RANDOM      If 1, random from top TOP_N at t+1
   PYTHON=${PYTHON}
   ALIGN_INDICES       Space-separated atom indices for average_xyz.py --align-indices
   EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
@@ -54,6 +68,11 @@ EOF
 if [[ $# -lt 1 ]]; then
     echo "ERROR: time_step is required" >&2
     usage
+fi
+
+if [[ "${START_FROM_PREVIOUS_RANDOM:-0}" == "1" && "${START_FROM_NEXT_RANDOM:-0}" == "1" ]]; then
+    echo "ERROR: START_FROM_PREVIOUS_RANDOM and START_FROM_NEXT_RANDOM cannot both be 1" >&2
+    exit 1
 fi
 
 time_step="$1"
@@ -79,25 +98,25 @@ else
     fi
 fi
 
+if [[ -n "$NEXT_STEP" ]]; then
+    next_step=$(printf '%02d' "$((10#$NEXT_STEP))")
+else
+    if [[ "$time_step" =~ ^[0-9]+$ ]]; then
+        next=$((10#$time_step + 1))
+        next_step=$(printf '%02d' "$next")
+    else
+        next_step=""
+    fi
+fi
+
 TARGET_FILE="${TARGET_FILE:-chd+_data/eirik_data_${ts_padded}.dat}"
-mean_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
 
 mkdir -p "$RESULTS_DIR"
 
-echo "=== GPU run from previous timestep ==="
-echo "  time_step (run-id)=$ts_padded  previous pool=$prev_step  TOP_N=$TOP_N"
-echo "  mean output: $mean_out"
-
-if [[ -n "$STARTING_XYZ" ]]; then
-    if [[ ! -f "$STARTING_XYZ" ]]; then
-        echo "ERROR: STARTING_XYZ='$STARTING_XYZ' not found" >&2
-        exit 1
-    fi
-    echo "  using STARTING_XYZ=$STARTING_XYZ (skip pool / average)"
-    cp -f "$STARTING_XYZ" "$mean_out"
-else
-    # List best TOP_N paths (lowest f in filename), exclude *_mean.xyz
-    mapfile -t TOP_FILES < <("$PYTHON" - "$RESULTS_DIR" "$prev_step" "$TOP_N" <<'PY'
+# List best TOP_N paths (lowest f in filename) for pool_step; exclude *_mean.xyz
+collect_top_pool() {
+    local pool_step="$1"
+    mapfile -t TOP_FILES < <("$PYTHON" - "$RESULTS_DIR" "$pool_step" "$TOP_N" <<'PY'
 import glob, os, re, sys
 
 def parse(path):
@@ -142,21 +161,70 @@ if __name__ == "__main__":
     main()
 PY
     )
+}
 
+random_pick_from_pool() {
+    local pool_step="$1"
+    local dest="$2"
+    local hint="$3"
+    collect_top_pool "$pool_step"
+    if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
+        echo "ERROR: no pool files for step '$pool_step' under ${RESULTS_DIR}/" >&2
+        echo "  Expected glob: ${RESULTS_DIR}/${pool_step}_*.xyz (excluding *_mean.xyz)" >&2
+        echo "  $hint" >&2
+        exit 1
+    fi
+    idx=$(( RANDOM % ${#TOP_FILES[@]} ))
+    picked="${TOP_FILES[$idx]}"
+    cp -f "$picked" "$dest"
+    echo "  random pick [$idx/${#TOP_FILES[@]}] from step $pool_step: $picked -> $dest"
+}
+
+echo "=== GPU run from previous timestep ==="
+echo "  time_step (run-id)=$ts_padded  prev=$prev_step  TOP_N=$TOP_N"
+
+if [[ -n "$STARTING_XYZ" ]]; then
+    start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
+    echo "  mode: STARTING_XYZ -> $start_out"
+    if [[ ! -f "$STARTING_XYZ" ]]; then
+        echo "ERROR: STARTING_XYZ='$STARTING_XYZ' not found" >&2
+        exit 1
+    fi
+    cp -f "$STARTING_XYZ" "$start_out"
+
+elif [[ "${START_FROM_PREVIOUS_RANDOM:-0}" == "1" ]]; then
+    start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
+    echo "  mode: random from previous step $prev_step -> $start_out"
+    random_pick_from_pool "$prev_step" "$start_out" \
+        "For the first timestep, set STARTING_XYZ to an initial structure."
+
+elif [[ "${START_FROM_NEXT_RANDOM:-0}" == "1" ]]; then
+    if [[ -z "$next_step" ]]; then
+        echo "ERROR: non-numeric time_step requires NEXT_STEP for START_FROM_NEXT_RANDOM" >&2
+        exit 1
+    fi
+    start_out="${RESULTS_DIR}/${ts_padded}_start_from_${next_step}_random.xyz"
+    echo "  mode: random from next step $next_step -> $start_out"
+    random_pick_from_pool "$next_step" "$start_out" \
+        "Run step $next_step first so ${RESULTS_DIR}/${next_step}_*.xyz exist."
+
+else
+    start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
+    echo "  mode: Kabsch mean from step $prev_step -> $start_out"
+    collect_top_pool "$prev_step"
     if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
         echo "ERROR: no pool files for previous step '$prev_step' under ${RESULTS_DIR}/" >&2
         echo "  Expected glob: ${RESULTS_DIR}/${prev_step}_*.xyz (excluding *_mean.xyz)" >&2
         echo "  For the first timestep, set STARTING_XYZ to an initial structure." >&2
         exit 1
     fi
-
-    AVG_CMD=("$PYTHON" "$REPO_ROOT/scripts/python/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$mean_out")
+    AVG_CMD=("$PYTHON" "$REPO_ROOT/scripts/python/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$start_out")
     if [[ -n "${ALIGN_INDICES:-}" ]]; then
         # shellcheck disable=SC2206
         AI=($ALIGN_INDICES)
         AVG_CMD+=(--align-indices "${AI[@]}")
     fi
-    echo "  averaging ${#TOP_FILES[@]} structures -> $mean_out"
+    echo "  averaging ${#TOP_FILES[@]} structures -> $start_out"
     "${AVG_CMD[@]}"
 fi
 
@@ -166,7 +234,7 @@ RUN_CMD=(
     --config "$CONFIG"
     --run-id "$ts_padded"
     --results-dir "$RESULTS_DIR"
-    --start-xyz-file "$mean_out"
+    --start-xyz-file "$start_out"
     --target-file "$TARGET_FILE"
     --excitation-factor "$excitation_factor"
     --tuning-ratio-target "$tuning_ratio_target"
