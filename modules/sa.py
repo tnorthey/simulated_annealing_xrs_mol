@@ -57,6 +57,7 @@ class Annealing:
         keep_on_device: bool = False,
         correction_factor_q: NDArray | None = None,
         elastic_ab_initio_correction: bool = False,
+        gpu_starting_xyz_batch: NDArray | None = None,
     ):
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
@@ -605,11 +606,18 @@ class Annealing:
             prep_start = default_timer()
             c_tuning_local = c_tuning_initial
             # Backend arrays with chain dimension
-            xyz = xp.repeat(
-                xp.asarray(starting_xyz, dtype=xp.float64)[xp.newaxis, :, :],
-                n_chains,
-                axis=0,
-            )
+            if (
+                gpu_starting_xyz_batch is not None
+                and gpu_starting_xyz_batch.ndim == 3
+                and gpu_starting_xyz_batch.shape[0] == n_chains
+            ):
+                xyz = xp.asarray(gpu_starting_xyz_batch, dtype=xp.float64)
+            else:
+                xyz = xp.repeat(
+                    xp.asarray(starting_xyz, dtype=xp.float64)[xp.newaxis, :, :],
+                    n_chains,
+                    axis=0,
+                )
             xyz_trial = xp.empty_like(xyz)
             xyz_best = xyz.copy()
 

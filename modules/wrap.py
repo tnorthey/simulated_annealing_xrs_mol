@@ -1,4 +1,5 @@
 import os
+import random
 import sys
 import json
 import time
@@ -153,6 +154,50 @@ def _angle_rad(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
         return 0.0
     c = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
     return float(np.arccos(c))
+
+
+def build_gpu_per_chain_start_batch(
+    pool_file: str,
+    n_chains: int,
+    mol_reader,
+    seed: int | None = None,
+) -> tuple[np.ndarray, list[str]]:
+    """
+    Sample n_chains starting geometries from a manifest (one XYZ path per line).
+
+    Returns (batch, picks) where batch has shape (n_chains, natoms, 3).
+    """
+    with open(pool_file, encoding="utf-8") as f:
+        paths = [
+            line.strip()
+            for line in f
+            if line.strip() and not line.strip().startswith("#")
+        ]
+    if not paths:
+        raise ValueError(f"GPU per-chain pool file is empty: {pool_file}")
+    for path in paths:
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"GPU per-chain pool entry not found: {path} (from {pool_file})"
+            )
+    if seed is not None:
+        random.seed(int(seed))
+    picks = random.choices(paths, k=int(n_chains))
+    frames = []
+    natoms = None
+    for path in picks:
+        _, _, _, coords = mol_reader.read_xyz(path)
+        coords = np.asarray(coords, dtype=np.float64)
+        if natoms is None:
+            natoms = coords.shape[0]
+        elif coords.shape[0] != natoms:
+            raise ValueError(
+                f"Inconsistent atom count in pool: {path} has {coords.shape[0]}, "
+                f"expected {natoms}"
+            )
+        frames.append(coords)
+    batch = np.stack(frames, axis=0)
+    return batch, picks
 
 
 def _extract_params_from_geometry_light(atomlist, xyz: np.ndarray):
@@ -1088,6 +1133,33 @@ class Wrapper:
         )
         if use_gpu_persistent:
             print("GPU persistent mode enabled: keeping SA/GA state on device across restarts.")
+        gpu_start_batch = None
+        pool_file = getattr(p, "gpu_per_chain_random_pool_file", None)
+        n_gpu_chains = int(getattr(p, "gpu_chains", 1))
+        if pool_file and n_gpu_chains > 1:
+            if not os.path.isfile(pool_file):
+                raise FileNotFoundError(
+                    f"gpu_per_chain_random_pool_file not found: {pool_file}"
+                )
+            gpu_start_batch, pool_picks = build_gpu_per_chain_start_batch(
+                pool_file,
+                n_gpu_chains,
+                m,
+                seed=getattr(p, "gpu_per_chain_random_seed", None),
+            )
+            with open(pool_file, encoding="utf-8") as _pf:
+                n_pool = sum(
+                    1
+                    for ln in _pf
+                    if ln.strip() and not ln.strip().startswith("#")
+                )
+            print(
+                f"[GPU] Per-chain random starts: {n_gpu_chains} chains sampled "
+                f"(with replacement) from pool of {n_pool} structures in {pool_file}"
+            )
+            print(f"  chain 0: {pool_picks[0]}")
+            if n_gpu_chains > 1:
+                print(f"  chain 1: {pool_picks[1]}")
         print("tuning_ratio_target = %3.2f" % p.tuning_ratio_target)
         for k in range(p.ntotalruns):
             #################################
@@ -1199,6 +1271,9 @@ class Wrapper:
                     correction_factor_q=correction_factor_q,
                     elastic_ab_initio_correction=(
                         bool(abi_file) and abi_corr_mode == "elastic"
+                    ),
+                    gpu_starting_xyz_batch=(
+                        gpu_start_batch if i == 0 else None
                     ),
                 )
                 print("f_best (SA): %9.8f" % f_best)

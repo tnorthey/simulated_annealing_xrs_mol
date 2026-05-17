@@ -184,6 +184,21 @@ class Input_to_params:
             print(f"{'='*60}\n")
             sys.exit(1)
         self.target_file = str(data["files"]["target_file"])
+        if "gpu_per_chain_random_pool_file" in data["files"]:
+            self.gpu_per_chain_random_pool_file = str(
+                data["files"]["gpu_per_chain_random_pool_file"]
+            )
+            if self.gpu_per_chain_random_pool_file == "":
+                self.gpu_per_chain_random_pool_file = None
+        else:
+            self.gpu_per_chain_random_pool_file = None
+        if "gpu_per_chain_random_seed" in data["files"]:
+            _seed = data["files"]["gpu_per_chain_random_seed"]
+            self.gpu_per_chain_random_seed = (
+                None if _seed is None or _seed == "" else int(_seed)
+            )
+        else:
+            self.gpu_per_chain_random_seed = None
         # scattering_params params
         self.inelastic = bool(data["scattering_params"]["inelastic_bool"])
         # Optional; when True, use ion-corrected atomic scattering factors

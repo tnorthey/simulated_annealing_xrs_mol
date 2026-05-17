@@ -62,6 +62,18 @@ def create_parser():
     )
     files_group.add_argument('--target-file', type=str, dest='files.target_file',
                             help='Target file')
+    files_group.add_argument(
+        '--gpu-per-chain-random-pool-file',
+        type=str,
+        dest='files.gpu_per_chain_random_pool_file',
+        help='Manifest (one XYZ path per line): each GPU chain starts from a random pool member',
+    )
+    files_group.add_argument(
+        '--gpu-per-chain-random-seed',
+        type=int,
+        dest='files.gpu_per_chain_random_seed',
+        help='RNG seed for per-chain random pool sampling (optional)',
+    )
     
     # Options
     options_group = parser.add_argument_group('options', 'Options')

@@ -31,12 +31,17 @@ Usage: $0 <time_step> [excitation_factor] [tuning_ratio_target]
 
 Starting geometry (first match wins):
   1. STARTING_XYZ set                    - copy fixed file to staging
-  2. START_FROM_PREVIOUS_RANDOM=1        - random pick from top TOP_N at t-1
-  3. START_FROM_NEXT_RANDOM=1            - random pick from top TOP_N at t+1
+  2. START_FROM_PREVIOUS_RANDOM=1        - random from top TOP_N at t-1
+  3. START_FROM_NEXT_RANDOM=1            - random from top TOP_N at t+1
   4. (default)                           - Kabsch mean of top TOP_N at t-1
 
+With GPU_CHAINS>1, random modes write a pool manifest and each CUDA chain
+gets its own random start from that pool (--gpu-per-chain-random-pool-file).
+\`--start-xyz-file\` uses the best pool member (lowest f) for MM parameters only.
+
 Default writes \${RESULTS_DIR}/<t-1>_mean.xyz; next-random writes
-  \${RESULTS_DIR}/<t>_start_from_<t+1>_random.xyz
+  \${RESULTS_DIR}/<t>_start_from_<t+1>_random.xyz (single-chain random)
+  or \${RESULTS_DIR}/<t>_pool_<step>.lst (multi-chain random).
 
 Then runs: $PYTHON run.py --gpu-backend cuda --gpu-chains ${GPU_CHAINS} ...
 
@@ -56,6 +61,7 @@ Environment (defaults):
   STARTING_XYZ        Fixed starting xyz (e.g. first timestep)
   START_FROM_PREVIOUS_RANDOM  If 1, random from top TOP_N at t-1
   START_FROM_NEXT_RANDOM      If 1, random from top TOP_N at t+1
+  GPU_CHAINS                  With random modes, >1 gives per-chain random starts
   PYTHON=${PYTHON}
   ALIGN_INDICES       Space-separated atom indices for average_xyz.py --align-indices
   EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
@@ -174,14 +180,25 @@ random_pick_from_pool() {
         echo "  $hint" >&2
         exit 1
     fi
-    idx=$(( RANDOM % ${#TOP_FILES[@]} ))
-    picked="${TOP_FILES[$idx]}"
-    cp -f "$picked" "$dest"
-    echo "  random pick [$idx/${#TOP_FILES[@]}] from step $pool_step: $picked -> $dest"
+    if [[ "$GPU_CHAINS" -gt 1 ]]; then
+        GPU_POOL_FILE="${RESULTS_DIR}/${ts_padded}_pool_${pool_step}.lst"
+        printf '%s\n' "${TOP_FILES[@]}" >"$GPU_POOL_FILE"
+        cp -f "${TOP_FILES[0]}" "$dest"
+        echo "  multi-chain (${GPU_CHAINS}): pool manifest -> $GPU_POOL_FILE"
+        echo "  MM / --start-xyz-file (best in pool): ${TOP_FILES[0]} -> $dest"
+        echo "  per-chain SA starts: random sample from pool via run.py"
+    else
+        idx=$(( RANDOM % ${#TOP_FILES[@]} ))
+        picked="${TOP_FILES[$idx]}"
+        cp -f "$picked" "$dest"
+        echo "  random pick [$idx/${#TOP_FILES[@]}] from step $pool_step: $picked -> $dest"
+    fi
 }
 
+GPU_POOL_FILE=""
+
 echo "=== GPU run from previous timestep ==="
-echo "  time_step (run-id)=$ts_padded  prev=$prev_step  TOP_N=$TOP_N"
+echo "  time_step (run-id)=$ts_padded  prev=$prev_step  TOP_N=$TOP_N  GPU_CHAINS=$GPU_CHAINS"
 
 if [[ -n "$STARTING_XYZ" ]]; then
     start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
@@ -241,6 +258,9 @@ RUN_CMD=(
     --gpu-backend cuda
     --gpu-chains "$GPU_CHAINS"
 )
+if [[ -n "${GPU_POOL_FILE:-}" ]]; then
+    RUN_CMD+=(--gpu-per-chain-random-pool-file "$GPU_POOL_FILE")
+fi
 # shellcheck disable=SC2206
 RUN_CMD+=( ${EXTRA_RUN_PY_ARGS} )
 "${RUN_CMD[@]}"
