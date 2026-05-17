@@ -1160,7 +1160,7 @@ class Wrapper:
             print(f"  chain 0: {pool_picks[0]}")
             if n_gpu_chains > 1:
                 print(f"  chain 1: {pool_picks[1]}")
-        print("tuning_ratio_target = %3.2f" % p.tuning_ratio_target)
+        print("tuning_ratio_target = %3.2f" % p.tuning_ratio_target_input)
         for k in range(p.ntotalruns):
             #################################
             ### End Initialise some stuff ###
