@@ -7,7 +7,10 @@ import numpy as np
 import pytest
 
 import modules.mol as mol
-from modules.wrap import build_gpu_per_chain_start_batch
+from modules.wrap import (
+    build_gpu_per_chain_start_batch,
+    log_gpu_per_chain_random_starts,
+)
 
 
 def _write_xyz(path: str, coords: np.ndarray) -> None:
@@ -62,6 +65,20 @@ def test_build_gpu_per_chain_start_batch_replacement_when_pool_smaller_than_chai
         assert batch.shape == (5, 1, 3)
         assert len(picks) == 5
         assert all(p == path for p in picks)
+
+
+def test_log_gpu_per_chain_random_starts_prints_all_chains(capsys):
+    picks = ["/a/01_0.1.xyz", "/b/02_0.2.xyz", "/a/01_0.1.xyz"]
+    log_gpu_per_chain_random_starts(
+        picks, pool_file="/tmp/pool.lst", n_pool=2
+    )
+    out = capsys.readouterr().out
+    assert "top-2 pool" in out
+    assert "chain    0:" in out
+    assert "chain    1:" in out
+    assert "chain    2:" in out
+    assert "01_0.1.xyz" in out
+    assert "2 unique structure" in out
 
 
 def test_build_gpu_per_chain_start_batch_empty_manifest_raises():

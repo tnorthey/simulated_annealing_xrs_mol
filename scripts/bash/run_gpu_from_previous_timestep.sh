@@ -184,9 +184,10 @@ random_pick_from_pool() {
         GPU_POOL_FILE="${RESULTS_DIR}/${ts_padded}_pool_${pool_step}.lst"
         printf '%s\n' "${TOP_FILES[@]}" >"$GPU_POOL_FILE"
         cp -f "${TOP_FILES[0]}" "$dest"
-        echo "  multi-chain (${GPU_CHAINS}): pool manifest -> $GPU_POOL_FILE"
+        echo "  multi-chain (${GPU_CHAINS} CUDA chains): top-M pool size=${#TOP_FILES[@]} (TOP_N=$TOP_N)"
+        echo "  pool manifest -> $GPU_POOL_FILE"
         echo "  MM / --start-xyz-file (best in pool): ${TOP_FILES[0]} -> $dest"
-        echo "  per-chain SA starts: random sample from pool via run.py"
+        echo "  run.py will print one line per chain: random XYZ from this top-M pool"
     else
         idx=$(( RANDOM % ${#TOP_FILES[@]} ))
         picked="${TOP_FILES[$idx]}"

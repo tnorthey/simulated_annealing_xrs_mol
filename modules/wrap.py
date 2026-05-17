@@ -200,6 +200,27 @@ def build_gpu_per_chain_start_batch(
     return batch, picks
 
 
+def log_gpu_per_chain_random_starts(
+    picks: list[str],
+    *,
+    pool_file: str,
+    n_pool: int,
+) -> None:
+    """Print one line per CUDA chain confirming its random starting XYZ from the pool."""
+    n_chains = len(picks)
+    print(
+        f"[GPU] Each of {n_chains} CUDA chains will start SA from a random XYZ "
+        f"in the top-{n_pool} pool ({pool_file}):"
+    )
+    for chain_idx, path in enumerate(picks):
+        print(f"[GPU]   chain {chain_idx:4d}: {path}")
+    n_unique = len(set(picks))
+    print(
+        f"[GPU] Pool assignment summary: {n_unique} unique structure(s) used across "
+        f"{n_chains} chains (random sampling with replacement)."
+    )
+
+
 def _extract_params_from_geometry_light(atomlist, xyz: np.ndarray):
     """
     OpenFF-free parameter extraction from geometry.
@@ -1134,6 +1155,7 @@ class Wrapper:
         if use_gpu_persistent:
             print("GPU persistent mode enabled: keeping SA/GA state on device across restarts.")
         gpu_start_batch = None
+        pool_picks = None
         pool_file = getattr(p, "gpu_per_chain_random_pool_file", None)
         n_gpu_chains = int(getattr(p, "gpu_chains", 1))
         if pool_file and n_gpu_chains > 1:
@@ -1153,13 +1175,9 @@ class Wrapper:
                     for ln in _pf
                     if ln.strip() and not ln.strip().startswith("#")
                 )
-            print(
-                f"[GPU] Per-chain random starts: {n_gpu_chains} chains sampled "
-                f"(with replacement) from pool of {n_pool} structures in {pool_file}"
+            log_gpu_per_chain_random_starts(
+                pool_picks, pool_file=pool_file, n_pool=n_pool
             )
-            print(f"  chain 0: {pool_picks[0]}")
-            if n_gpu_chains > 1:
-                print(f"  chain 1: {pool_picks[1]}")
         print("tuning_ratio_target = %3.2f" % p.tuning_ratio_target_input)
         for k in range(p.ntotalruns):
             #################################
@@ -1274,6 +1292,9 @@ class Wrapper:
                     ),
                     gpu_starting_xyz_batch=(
                         gpu_start_batch if i == 0 else None
+                    ),
+                    gpu_per_chain_pool_picks=(
+                        pool_picks if i == 0 and gpu_start_batch is not None else None
                     ),
                 )
                 print("f_best (SA): %9.8f" % f_best)

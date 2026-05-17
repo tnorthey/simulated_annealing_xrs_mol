@@ -1,7 +1,6 @@
 # import math
 import numpy as np
 import sys
-import pprint
 import os
 
 # Try to use tomllib (Python 3.11+) or fall back to tomli
@@ -349,12 +348,12 @@ class Input_to_params:
         self._validate_parameters(data)
 
         ### print out all attributes
-        if self.verbose_bool:
-            print("##################################################")
-            print("### Initialised with the following parameters: ###")
-            print("##################################################")
-            pprint.pprint(vars(self))
-            print("##################################################")
+        # if self.verbose_bool:
+        #     print("##################################################")
+        #     print("### Initialised with the following parameters: ###")
+        #     print("##################################################")
+        #     pprint.pprint(vars(self))
+        #     print("##################################################")
 
         ###################################
     

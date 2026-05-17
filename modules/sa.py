@@ -58,6 +58,7 @@ class Annealing:
         correction_factor_q: NDArray | None = None,
         elastic_ab_initio_correction: bool = False,
         gpu_starting_xyz_batch: NDArray | None = None,
+        gpu_per_chain_pool_picks: list[str] | None = None,
     ):
         """simulated annealing minimisation to target_function"""
         # Clear stale results from prior invocations.
@@ -611,6 +612,22 @@ class Annealing:
                 and gpu_starting_xyz_batch.ndim == 3
                 and gpu_starting_xyz_batch.shape[0] == n_chains
             ):
+                print(
+                    f"[GPU] Loading per-chain starting coordinates onto device "
+                    f"(batch shape {tuple(gpu_starting_xyz_batch.shape)}); "
+                    f"each CUDA chain uses a distinct random XYZ from the top-M pool."
+                )
+                if gpu_per_chain_pool_picks is not None:
+                    if len(gpu_per_chain_pool_picks) != n_chains:
+                        print(
+                            f"[GPU] WARNING: pool pick list length "
+                            f"{len(gpu_per_chain_pool_picks)} != n_chains {n_chains}"
+                        )
+                    else:
+                        for chain_idx, path in enumerate(gpu_per_chain_pool_picks):
+                            print(
+                                f"[GPU]   chain {chain_idx:4d} device init <= {path}"
+                            )
                 xyz = xp.asarray(gpu_starting_xyz_batch, dtype=xp.float64)
             else:
                 xyz = xp.repeat(
