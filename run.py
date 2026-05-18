@@ -212,6 +212,12 @@ def create_parser():
     sa_group.add_argument('--hydrogen-mode-damping-factor', type=float,
                          dest='simulated_annealing_params.hydrogen_mode_damping_factor',
                          help='Damping factor for hydrogen modes (multiplies step size)')
+    sa_group.add_argument(
+        '--hydrogen-reanchor',
+        action='store_true',
+        dest='simulated_annealing_params.hydrogen_reanchor_bool',
+        help='Re-anchor hydrogens along reference X->H vectors after each SA phase',
+    )
     sa_group.add_argument('--hf-energy', action='store_true',
                          dest='simulated_annealing_params.hf_energy_bool',
                          help='Run PySCF HF energy')

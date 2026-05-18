@@ -163,6 +163,8 @@ n_tuning_update_freq = 0
 non_h_modes_only_bool = false
 # Damping factor for hydrogen modes (multiplies step size for hydrogen modes, typically < 1.0)
 hydrogen_mode_damping_factor = 0.2
+# After each SA phase (not after GA), reset H along reference X->H vectors from reference_xyz_file
+hydrogen_reanchor_bool = false
 # Run PySCF Hartree-Fock energy calculation
 hf_energy_bool = false
 

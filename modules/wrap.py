@@ -156,6 +156,216 @@ def _angle_rad(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
     return float(np.arccos(c))
 
 
+def _is_hydrogen_symbol(symbol) -> bool:
+    return str(symbol).strip().upper() in ("H", "D")
+
+
+def _build_hydrogen_parent_map(atomlist, bond_param_array) -> dict:
+    """Map each hydrogen index to its bonded heavy-atom parent."""
+    h_parents = {}
+    if bond_param_array is None or len(bond_param_array) == 0:
+        return h_parents
+    for i, j in bond_param_array[:, 0:2].astype(int):
+        i_h = _is_hydrogen_symbol(atomlist[i])
+        j_h = _is_hydrogen_symbol(atomlist[j])
+        if i_h and j_h:
+            continue
+        if i_h and not j_h:
+            heavy, h_idx = int(j), int(i)
+        elif j_h and not i_h:
+            heavy, h_idx = int(i), int(j)
+        else:
+            continue
+        if h_idx in h_parents and h_parents[h_idx] != heavy:
+            raise ValueError(
+                f"H atom index {h_idx} has multiple heavy-atom parents "
+                f"({h_parents[h_idx]} and {heavy})"
+            )
+        h_parents[h_idx] = heavy
+    return h_parents
+
+
+def reanchor_hydrogens_reference_relative(
+    xyz: np.ndarray,
+    atomlist,
+    reference_xyz: np.ndarray,
+    bond_param_array: np.ndarray,
+) -> tuple[np.ndarray, float]:
+    """
+    Reset each H to parent + r0_ref * u_ref, where u_ref and r0_ref come from
+    reference_xyz and the parent position comes from the current xyz.
+    """
+    xyz_out = np.asarray(xyz, dtype=np.float64).copy()
+    ref = np.asarray(reference_xyz, dtype=np.float64)
+    h_parents = _build_hydrogen_parent_map(atomlist, bond_param_array)
+    max_disp = 0.0
+    for h_idx, parent in h_parents.items():
+        vec_ref = ref[h_idx] - ref[parent]
+        r0_ref = float(np.linalg.norm(vec_ref))
+        if r0_ref < 1e-6:
+            continue
+        u_ref = vec_ref / r0_ref
+        new_pos = xyz_out[parent] + r0_ref * u_ref
+        disp = float(np.linalg.norm(new_pos - xyz_out[h_idx]))
+        max_disp = max(max_disp, disp)
+        xyz_out[h_idx] = new_pos
+    return xyz_out, max_disp
+
+
+def _mm_harmonic_contribs(
+    xyz: np.ndarray,
+    bond_param_array: np.ndarray,
+    angle_param_array: np.ndarray,
+    torsion_param_array: np.ndarray,
+    *,
+    bonds_bool: bool,
+    angles_bool: bool,
+    torsions_bool: bool,
+) -> tuple[float, float, float]:
+    """Bond, angle, and torsion harmonic contributions (same form as SA)."""
+    HALF = 0.5
+    bonding_contrib = 0.0
+    if bonds_bool and bond_param_array is not None and len(bond_param_array) > 0:
+        for row in bond_param_array:
+            i, j, r0, k = int(row[0]), int(row[1]), row[2], row[3]
+            dx = xyz[i, 0] - xyz[j, 0]
+            dy = xyz[i, 1] - xyz[j, 1]
+            dz = xyz[i, 2] - xyz[j, 2]
+            r = np.sqrt(dx * dx + dy * dy + dz * dz)
+            bonding_contrib += k * HALF * (r - r0) ** 2
+
+    angular_contrib = 0.0
+    if angles_bool and angle_param_array is not None and len(angle_param_array) > 0:
+        for row in angle_param_array:
+            i, j, k_idx, theta0, k_theta = (
+                int(row[0]),
+                int(row[1]),
+                int(row[2]),
+                row[3],
+                row[4],
+            )
+            BA = xyz[i] - xyz[j]
+            BC = xyz[k_idx] - xyz[j]
+            norm_BA = np.linalg.norm(BA)
+            norm_BC = np.linalg.norm(BC)
+            if norm_BA == 0.0 or norm_BC == 0.0:
+                continue
+            cos_theta = np.clip(np.dot(BA, BC) / (norm_BA * norm_BC), -1.0, 1.0)
+            theta = np.arccos(cos_theta)
+            angular_contrib += k_theta * HALF * (theta - theta0) ** 2
+
+    torsion_contrib = 0.0
+    if torsions_bool and torsion_param_array is not None and len(torsion_param_array) > 0:
+        for row in torsion_param_array:
+            idx1, idx2, idx3, idx4 = int(row[0]), int(row[1]), int(row[2]), int(row[3])
+            delta0, k_delta = row[4], row[5]
+            p0, p1, p2, p3 = xyz[idx1], xyz[idx2], xyz[idx3], xyz[idx4]
+            b0 = -(p1 - p0)
+            b1 = p2 - p1
+            b2 = p3 - p2
+            b1_norm = np.linalg.norm(b1)
+            if b1_norm == 0.0:
+                continue
+            b1 = b1 / b1_norm
+            v = b0 - np.dot(b0, b1) * b1
+            w = b2 - np.dot(b2, b1) * b1
+            torsion = np.arctan2(np.dot(np.cross(b1, v), w), np.dot(v, w))
+            torsion_contrib += k_delta * (1.0 + np.cos(torsion - delta0))
+
+    return bonding_contrib, angular_contrib, torsion_contrib
+
+
+def _score_geometry_at_restart(
+    xyz: np.ndarray,
+    *,
+    sa_obj,
+    iam_eval_fn,
+    reference_iam,
+    correction_factor_q,
+    c_tuning: float,
+    bond_param_array,
+    angle_param_array,
+    torsion_param_array,
+    bonds_bool: bool,
+    angles_bool: bool,
+    torsions_bool: bool,
+    inelastic: bool,
+    pcd_mode: bool,
+    elastic_ab_initio_correction: bool,
+    qvector,
+):
+    """
+    Evaluate total objective f, x-ray term, and predicted signal for one geometry.
+    Requires a prior SA call so sa_obj has cached shifted target arrays.
+    iam_eval_fn(xyz) must return (iam, atomic, compton) for isotropic q.
+    """
+    if not hasattr(sa_obj, "_target_function_modified"):
+        raise RuntimeError(
+            "score_geometry_at_restart requires a prior SA invocation "
+            "(target cache not initialized)"
+        )
+    target_function = sa_obj._target_function_modified
+    abs_target_function = sa_obj._abs_target_function
+    qlen = len(qvector)
+    correction_factor_q = np.asarray(correction_factor_q, dtype=np.float64).reshape(-1)
+
+    iam, atomic, compton_arr = iam_eval_fn(xyz)
+    predicted = np.empty(qlen, dtype=np.float64)
+    if pcd_mode:
+        inv_qlen = 1.0 / qlen
+        sse = 0.0
+        for qi in range(qlen):
+            cq = correction_factor_q[qi]
+            if elastic_ab_initio_correction:
+                I_elastic = atomic[qi] + iam[qi]
+                I_corr = cq * I_elastic
+                pcd_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                pcd_atom = 100.0 * ((cq * atomic[qi]) / reference_iam[qi] - 1.0)
+            else:
+                offset = atomic[qi] + compton_arr[qi] if inelastic else atomic[qi]
+                I_tot = iam[qi] + offset
+                I_corr = cq * I_tot
+                pcd_full = 100.0 * (I_corr / reference_iam[qi] - 1.0)
+                pcd_atom = 100.0 * (offset / reference_iam[qi] - 1.0)
+            pred_mol = pcd_full - pcd_atom
+            diff = pred_mol - target_function[qi]
+            sse += diff * diff
+            predicted[qi] = pcd_full
+        xray_contrib = sse * inv_qlen
+    else:
+        inv_n = 1.0 / qlen
+        sse = 0.0
+        for qi in range(qlen):
+            cq = correction_factor_q[qi]
+            if elastic_ab_initio_correction:
+                pred_mol_c = cq * iam[qi]
+                diff = pred_mol_c - target_function[qi]
+                sse += (diff * diff) / abs_target_function[qi]
+                predicted[qi] = cq * (atomic[qi] + iam[qi])
+            else:
+                pred_mol_c = iam[qi] * cq
+                diff = pred_mol_c - target_function[qi]
+                sse += (diff * diff) / abs_target_function[qi]
+                if inelastic:
+                    predicted[qi] = (iam[qi] + atomic[qi] + compton_arr[qi]) * cq
+                else:
+                    predicted[qi] = (iam[qi] + atomic[qi]) * cq
+        xray_contrib = sse * inv_n
+
+    bonding, angular, torsion = _mm_harmonic_contribs(
+        xyz,
+        bond_param_array,
+        angle_param_array,
+        torsion_param_array,
+        bonds_bool=bonds_bool,
+        angles_bool=angles_bool,
+        torsions_bool=torsions_bool,
+    )
+    mm_contrib = c_tuning * (bonding + angular + torsion)
+    f_total = xray_contrib + mm_contrib
+    return f_total, xray_contrib, predicted
+
+
 def build_gpu_per_chain_start_batch(
     pool_file: str,
     n_chains: int,
@@ -1302,6 +1512,59 @@ class Wrapper:
                 print("c_tuning: %9.8f" % c_tuning)
                 c_tuning = c_tuning_adjusted
                 print("c_tuning_adjusted: %9.8f" % c_tuning_adjusted)
+
+                if (
+                    getattr(p, "hydrogen_reanchor_bool", False)
+                    and i < p.nrestarts
+                    and not signal_only_mode
+                ):
+                    if p.ewald_mode:
+                        print(
+                            "WARNING: hydrogen re-anchoring skipped "
+                            "(rescore not implemented for ewald_mode)"
+                        )
+                    else:
+                        if use_gpu_persistent and hasattr(xyz_best, "get"):
+                            xyz_best = xyz_best.get()
+                        f_before = f_best
+                        xyz_best, max_h_disp = reanchor_hydrogens_reference_relative(
+                            np.asarray(xyz_best, dtype=np.float64),
+                            atomlist,
+                            reference_xyz,
+                            bond_param_array,
+                        )
+
+                        def _iam_eval_for_rescore(xyz_in):
+                            iam_, atomic_, compton_, _pre = xyz2iam(
+                                xyz_in, atomic_numbers, compton_array, False
+                            )
+                            return iam_, atomic_, compton_
+
+                        f_best, f_xray_best, predicted_best = _score_geometry_at_restart(
+                            xyz_best,
+                            sa_obj=sa,
+                            iam_eval_fn=_iam_eval_for_rescore,
+                            reference_iam=reference_iam,
+                            correction_factor_q=correction_factor_q,
+                            c_tuning=c_tuning,
+                            bond_param_array=bond_param_array,
+                            angle_param_array=angle_param_array,
+                            torsion_param_array=torsion_param_array,
+                            bonds_bool=p.bonds_bool,
+                            angles_bool=p.angles_bool,
+                            torsions_bool=p.torsions_bool,
+                            inelastic=p.inelastic,
+                            pcd_mode=p.pcd_mode,
+                            elastic_ab_initio_correction=(
+                                bool(abi_file) and abi_corr_mode == "elastic"
+                            ),
+                            qvector=p.qvector,
+                        )
+                        print(
+                            f"Hydrogen re-anchoring after SA restart {i}: "
+                            f"max H displacement = {max_h_disp:.4f} A, "
+                            f"f_best {f_before:.8f} -> {f_best:.8f}"
+                        )
 
             if use_gpu_persistent:
                 if hasattr(xyz_best, "get"):

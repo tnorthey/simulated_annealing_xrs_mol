@@ -267,6 +267,11 @@ class Input_to_params:
         self.hydrogen_mode_damping_factor = float(
             data["simulated_annealing_params"]["hydrogen_mode_damping_factor"]
         )  # damping factor for hydrogen modes
+        self.hydrogen_reanchor_bool = bool(
+            data.get("simulated_annealing_params", {}).get(
+                "hydrogen_reanchor_bool", False
+            )
+        )  # reset H along reference X->H vectors after each SA phase
         self.hf_energy = bool(
             data["simulated_annealing_params"]["hf_energy_bool"]
         )  # run PySCF HF energy
