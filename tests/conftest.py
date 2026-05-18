@@ -125,6 +125,7 @@ tuning_ratio_target = 1.0
 c_tuning_initial = 1.0
 non_h_modes_only_bool = false
 hydrogen_mode_damping_factor = 0.2
+hydrogen_force_constant_scale = 1.0
 hf_energy_bool = false
 
 [molecule_params]

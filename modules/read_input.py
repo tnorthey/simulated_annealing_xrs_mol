@@ -267,6 +267,11 @@ class Input_to_params:
         self.hydrogen_mode_damping_factor = float(
             data["simulated_annealing_params"]["hydrogen_mode_damping_factor"]
         )  # damping factor for hydrogen modes
+        self.hydrogen_force_constant_scale = float(
+            data.get("simulated_annealing_params", {}).get(
+                "hydrogen_force_constant_scale", 1.0
+            )
+        )  # multiply k for bonds/angles/torsions involving H
         self.hf_energy = bool(
             data["simulated_annealing_params"]["hf_energy_bool"]
         )  # run PySCF HF energy
@@ -503,6 +508,11 @@ class Input_to_params:
             errors.append(
                 f'Error: hydrogen_mode_damping_factor ({self.hydrogen_mode_damping_factor}) must be non-negative\n'
                 f'  Suggestion: Set hydrogen_mode_damping_factor >= 0 (typically 0.1-0.5)'
+            )
+        if self.hydrogen_force_constant_scale <= 0:
+            errors.append(
+                f'Error: hydrogen_force_constant_scale ({self.hydrogen_force_constant_scale}) must be positive\n'
+                f'  Suggestion: Set hydrogen_force_constant_scale > 0 (1.0 = unchanged; >1 stiffens H terms)'
             )
         
         # 5. Validate sampling parameters

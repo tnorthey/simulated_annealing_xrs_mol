@@ -221,6 +221,64 @@ def log_gpu_per_chain_random_starts(
     )
 
 
+def scale_hydrogen_force_constants(
+    bond_param_array,
+    angle_param_array,
+    torsion_param_array,
+    atomic_numbers,
+    scale,
+):
+    """
+    Multiply harmonic force constants for bonds/angles/torsions involving hydrogen.
+
+    Returns (bond_param_array, angle_param_array, torsion_param_array) — copies when
+    scale != 1.0, otherwise the same arrays unchanged.
+    """
+    if scale == 1.0:
+        return bond_param_array, angle_param_array, torsion_param_array
+
+    atomic_numbers = np.asarray(atomic_numbers, dtype=np.int64)
+    is_h = atomic_numbers == 1
+
+    bond_param_array = np.array(bond_param_array, dtype=np.float64, copy=True)
+    if bond_param_array.size > 0:
+        i = bond_param_array[:, 0].astype(int)
+        j = bond_param_array[:, 1].astype(int)
+        h_mask = is_h[i] | is_h[j]
+        bond_param_array[h_mask, 3] *= scale
+        print(
+            f"  Scaled {int(np.sum(h_mask))}/{len(bond_param_array)} bond k values "
+            f"by hydrogen_force_constant_scale={scale:g}"
+        )
+
+    if angle_param_array is not None and len(angle_param_array) > 0:
+        angle_param_array = np.array(angle_param_array, dtype=np.float64, copy=True)
+        i = angle_param_array[:, 0].astype(int)
+        j = angle_param_array[:, 1].astype(int)
+        k = angle_param_array[:, 2].astype(int)
+        h_mask = is_h[i] | is_h[j] | is_h[k]
+        angle_param_array[h_mask, 4] *= scale
+        print(
+            f"  Scaled {int(np.sum(h_mask))}/{len(angle_param_array)} angle k values "
+            f"by hydrogen_force_constant_scale={scale:g}"
+        )
+
+    if torsion_param_array is not None and len(torsion_param_array) > 0:
+        torsion_param_array = np.array(torsion_param_array, dtype=np.float64, copy=True)
+        i = torsion_param_array[:, 0].astype(int)
+        j = torsion_param_array[:, 1].astype(int)
+        k = torsion_param_array[:, 2].astype(int)
+        l = torsion_param_array[:, 3].astype(int)
+        h_mask = is_h[i] | is_h[j] | is_h[k] | is_h[l]
+        torsion_param_array[h_mask, 5] *= scale
+        print(
+            f"  Scaled {int(np.sum(h_mask))}/{len(torsion_param_array)} torsion k values "
+            f"by hydrogen_force_constant_scale={scale:g}"
+        )
+
+    return bond_param_array, angle_param_array, torsion_param_array
+
+
 def _extract_params_from_geometry_light(atomlist, xyz: np.ndarray):
     """
     OpenFF-free parameter extraction from geometry.
@@ -361,7 +419,10 @@ class Wrapper:
             )
         # read from the xyz file to get atom positions
         _, _, atomlist, xyz_start = m.read_xyz(start_xyz_file)
-        
+        atomic_numbers = np.array(
+            [m.periodic_table(symbol) for symbol in atomlist], dtype=np.int64
+        )
+
         # Determine which method to use based on input parameter
         mm_method = p.mm_param_method.lower()
         topology = None
@@ -437,8 +498,18 @@ class Wrapper:
                 if len(p.torsion_ignore_array) > 0:
                     print(f"  Torsions: {n_before} -> {len(torsion_param_array)} ({n_removed} removed by ignore list)")
 
+            h_scale = getattr(p, "hydrogen_force_constant_scale", 1.0)
+            bond_param_array, angle_param_array, torsion_param_array = (
+                scale_hydrogen_force_constants(
+                    bond_param_array,
+                    angle_param_array,
+                    torsion_param_array,
+                    atomic_numbers,
+                    h_scale,
+                )
+            )
             return bond_param_array, angle_param_array, torsion_param_array
-        
+
         if mm_method == "basic":
             # Go straight to basic method (geometry extraction)
             print("Using basic method: extracting parameters directly from geometry...")
@@ -580,21 +651,6 @@ class Wrapper:
                 k_kcal_per_ang2_array,
             )
         )
-        # mask out chosen ignored bonds
-        n_before = len(bond_param_array)
-        mask = np.ones(n_before, dtype=bool)
-        for i, j in p.bond_ignore_array:
-            remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
-                (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
-            )
-            n_hit = int(np.sum(remove))
-            if n_hit == 0:
-                print(f"  WARNING: bond_ignore [{int(i)}, {int(j)}] matched 0 rows in param array")
-            mask &= ~remove
-        bond_param_array = bond_param_array[mask]
-        n_removed = n_before - len(bond_param_array)
-        if len(p.bond_ignore_array) > 0:
-            print(f"  Bonds: {n_before} -> {len(bond_param_array)} ({n_removed} removed by ignore list)")
 
         # Get the angles and params
         (
@@ -613,25 +669,6 @@ class Wrapper:
                 k_kcal_per_rad2_array,
             )
         )
-        # mask out chosen ignored angles
-        n_before = len(angle_param_array)
-        mask = np.ones(n_before, dtype=bool)
-        for i, j, k in p.angle_ignore_array:
-            remove = (
-                (angle_param_array[:, 0] == i) & (angle_param_array[:, 1] == j)
-            ) & (angle_param_array[:, 2] == k) | (
-                (angle_param_array[:, 0] == k) & (angle_param_array[:, 1] == j)
-            ) & (
-                angle_param_array[:, 2] == i
-            )
-            n_hit = int(np.sum(remove))
-            if n_hit == 0:
-                print(f"  WARNING: angle_ignore [{int(i)}, {int(j)}, {int(k)}] matched 0 rows in param array")
-            mask &= ~remove
-        angle_param_array = angle_param_array[mask]
-        n_removed = n_before - len(angle_param_array)
-        if len(p.angle_ignore_array) > 0:
-            print(f"  Angles: {n_before} -> {len(angle_param_array)} ({n_removed} removed by ignore list)")
 
         # Get the torsions and params
         (
@@ -652,34 +689,10 @@ class Wrapper:
                 k_kcal_per_rad2_array,
             )
         )
-        
-        ## Here I want to edit the torsion_rad_array to use the starting xyz delta values...
-        ## read the torsions from the starting coords...
-        # loop over torsion_param_array
-        ## alter the torsion param array with those.
-        torsion_param_array = _mm_params().update_torsion_deltas(torsion_param_array, xyz_start)
 
-        # mask out chosen ignored torsions
-        n_before = len(torsion_param_array)
-        mask = np.ones(n_before, dtype=bool)
-        for i, j, k, l in p.torsion_ignore_array:
-            remove = (
-                ((torsion_param_array[:, 0] == i) & (torsion_param_array[:, 1] == j))
-                & (torsion_param_array[:, 2] == k)
-            ) & (torsion_param_array[:, 3] == l) | (
-                ((torsion_param_array[:, 0] == l) & (torsion_param_array[:, 1] == k))
-                & (torsion_param_array[:, 2] == j)
-            ) & (
-                torsion_param_array[:, 3] == i
-            )
-            n_hit = int(np.sum(remove))
-            if n_hit == 0:
-                print(f"  WARNING: torsion_ignore [{int(i)}, {int(j)}, {int(k)}, {int(l)}] matched 0 rows in param array")
-            mask &= ~remove
-        torsion_param_array = torsion_param_array[mask]
-        n_removed = n_before - len(torsion_param_array)
-        if len(p.torsion_ignore_array) > 0:
-            print(f"  Torsions: {n_before} -> {len(torsion_param_array)} ({n_removed} removed by ignore list)")
+        bond_param_array, angle_param_array, torsion_param_array = _postprocess_param_arrays(
+            bond_param_array, angle_param_array, torsion_param_array
+        )
 
         # Print
         print(bond_param_array)

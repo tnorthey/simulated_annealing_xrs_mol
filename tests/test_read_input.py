@@ -48,6 +48,19 @@ class TestInputToParams:
         # Other parameters should remain unchanged
         assert p.mode == "test"
 
+    def test_hydrogen_force_constant_scale_default(self, sample_toml_file):
+        """hydrogen_force_constant_scale defaults to 1.0 when omitted."""
+        p = Input_to_params(sample_toml_file)
+        assert p.hydrogen_force_constant_scale == 1.0
+
+    def test_hydrogen_force_constant_scale_override(self, sample_toml_file):
+        """hydrogen_force_constant_scale can be set via overrides."""
+        p = Input_to_params(
+            sample_toml_file,
+            overrides={"simulated_annealing_params.hydrogen_force_constant_scale": 2.5},
+        )
+        assert p.hydrogen_force_constant_scale == 2.5
+
     def test_signal_only_alias_c_tuning_zero(self):
         """c_tuning_initial=0 enables signal-only mode and disables geometry terms."""
         toml_content = '''mode = "test"

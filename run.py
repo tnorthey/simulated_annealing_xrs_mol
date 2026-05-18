@@ -212,6 +212,9 @@ def create_parser():
     sa_group.add_argument('--hydrogen-mode-damping-factor', type=float,
                          dest='simulated_annealing_params.hydrogen_mode_damping_factor',
                          help='Damping factor for hydrogen modes (multiplies step size)')
+    sa_group.add_argument('--hydrogen-force-constant-scale', type=float,
+                         dest='simulated_annealing_params.hydrogen_force_constant_scale',
+                         help='Multiply k for bonds/angles/torsions involving H (1.0 = unchanged)')
     sa_group.add_argument('--hf-energy', action='store_true',
                          dest='simulated_annealing_params.hf_energy_bool',
                          help='Run PySCF HF energy')
