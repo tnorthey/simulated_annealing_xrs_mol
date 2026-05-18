@@ -161,7 +161,7 @@ def _is_hydrogen_symbol(symbol) -> bool:
 
 
 def _build_hydrogen_parent_map(atomlist, bond_param_array) -> dict:
-    """Map each hydrogen index to its bonded heavy-atom parent."""
+    """Map each hydrogen index to its bonded heavy-atom parent (from bond_param_array)."""
     h_parents = {}
     if bond_param_array is None or len(bond_param_array) == 0:
         return h_parents
@@ -177,11 +177,49 @@ def _build_hydrogen_parent_map(atomlist, bond_param_array) -> dict:
         else:
             continue
         if h_idx in h_parents and h_parents[h_idx] != heavy:
-            raise ValueError(
-                f"H atom index {h_idx} has multiple heavy-atom parents "
-                f"({h_parents[h_idx]} and {heavy})"
+            print(
+                f"WARNING: H atom index {h_idx} has multiple heavy-atom parents "
+                f"in bond_param_array ({h_parents[h_idx]} and {heavy}); "
+                f"keeping first assignment."
             )
+            continue
         h_parents[h_idx] = heavy
+    return h_parents
+
+
+def _build_hydrogen_parent_map_from_reference(
+    atomlist,
+    reference_xyz: np.ndarray,
+    scale: float = 1.15,
+) -> dict:
+    """
+    Map each hydrogen to the closest heavy atom in reference_xyz within X-H covalent cutoff.
+    """
+    ref = np.asarray(reference_xyz, dtype=np.float64)
+    heavy_indices = [
+        i for i, sym in enumerate(atomlist) if not _is_hydrogen_symbol(sym)
+    ]
+    h_parents = {}
+    for h_idx, sym in enumerate(atomlist):
+        if not _is_hydrogen_symbol(sym):
+            continue
+        r_h = _COVALENT_RADII_ANGSTROM.get(str(sym).strip().upper(), 0.31)
+        best_parent = None
+        best_dist = np.inf
+        for heavy in heavy_indices:
+            r_heavy = _COVALENT_RADII_ANGSTROM.get(str(atomlist[heavy]), 0.77)
+            cutoff = scale * (r_heavy + r_h)
+            d_ref = float(np.linalg.norm(ref[h_idx] - ref[heavy]))
+            if d_ref <= cutoff and d_ref < best_dist:
+                best_dist = d_ref
+                best_parent = heavy
+        if best_parent is None:
+            print(
+                f"WARNING: no heavy-atom parent found for H index {h_idx} "
+                f"in reference geometry (skipped)"
+            )
+            continue
+        h_parents[h_idx] = best_parent
     return h_parents
 
 
@@ -189,7 +227,6 @@ def reanchor_hydrogens_reference_relative(
     xyz: np.ndarray,
     atomlist,
     reference_xyz: np.ndarray,
-    bond_param_array: np.ndarray,
 ) -> tuple[np.ndarray, float]:
     """
     Reset each H to parent + r0_ref * u_ref, where u_ref and r0_ref come from
@@ -197,7 +234,7 @@ def reanchor_hydrogens_reference_relative(
     """
     xyz_out = np.asarray(xyz, dtype=np.float64).copy()
     ref = np.asarray(reference_xyz, dtype=np.float64)
-    h_parents = _build_hydrogen_parent_map(atomlist, bond_param_array)
+    h_parents = _build_hydrogen_parent_map_from_reference(atomlist, ref)
     max_disp = 0.0
     for h_idx, parent in h_parents.items():
         vec_ref = ref[h_idx] - ref[parent]
@@ -1531,7 +1568,6 @@ class Wrapper:
                             np.asarray(xyz_best, dtype=np.float64),
                             atomlist,
                             reference_xyz,
-                            bond_param_array,
                         )
 
                         def _iam_eval_for_rescore(xyz_in):
