@@ -232,7 +232,7 @@ def main():
     skipped_steps = []
     for k in range(1, radius + 1):
         for step_num in (t - k, t + k):
-            if step_num < 1:
+            if step_num < 0:
                 continue
             step = f"{step_num:02d}"
             paths = pool_one_step(rd, step, top_n)
