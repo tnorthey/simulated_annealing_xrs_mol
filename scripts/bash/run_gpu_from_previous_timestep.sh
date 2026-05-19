@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starting geometry for run-id N from timestep N-1 (default: Kabsch mean of top TOP_N),
-# or optional random pick from top TOP_N at t-1 / t+1. Then one CUDA run.py job.
+# or optional random pick from top TOP_N at t-1, t+1, or tradius union t±1..t±N.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -18,12 +18,16 @@ EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 PREV_STEP="${PREV_STEP:-}"
 # Override next source step (default: current + 1, two-digit; START_FROM_NEXT_RANDOM only)
 NEXT_STEP="${NEXT_STEP:-}"
+# Radius N for START_FROM_TRADIUS_RANDOM: pools from t±1 .. t±N
+TRADIUS_N="${TRADIUS_N:-1}"
 # If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to staging)
 STARTING_XYZ="${STARTING_XYZ:-}"
-# Random pick from top TOP_N at t-1 (mutually exclusive with START_FROM_NEXT_RANDOM)
+# Random pick from top TOP_N at t-1 (mutually exclusive with other START_FROM_*_RANDOM)
 START_FROM_PREVIOUS_RANDOM="${START_FROM_PREVIOUS_RANDOM:-}"
 # Random pick from top TOP_N at t+1 (requires results for step t+1)
 START_FROM_NEXT_RANDOM="${START_FROM_NEXT_RANDOM:-}"
+# Random pick uniformly from union of top TOP_N at t±1..t±N (no global f sort)
+START_FROM_TRADIUS_RANDOM="${START_FROM_TRADIUS_RANDOM:-}"
 
 usage() {
     cat <<EOF
@@ -33,15 +37,13 @@ Starting geometry (first match wins):
   1. STARTING_XYZ set                    - copy fixed file to staging
   2. START_FROM_PREVIOUS_RANDOM=1        - random from top TOP_N at t-1
   3. START_FROM_NEXT_RANDOM=1            - random from top TOP_N at t+1
-  4. (default)                           - Kabsch mean of top TOP_N at t-1
+  4. START_FROM_TRADIUS_RANDOM=1         - random from union of top TOP_N at t+/-1..t+/-N
+  5. (default)                           - Kabsch mean of top TOP_N at t-1
 
-With GPU_CHAINS>1, random modes write a pool manifest and each CUDA chain
-gets its own random start from that pool (--gpu-per-chain-random-pool-file).
-\`--start-xyz-file\` uses the best pool member (lowest f) for MM parameters only.
-
-Default writes \${RESULTS_DIR}/<t-1>_mean.xyz; next-random writes
-  \${RESULTS_DIR}/<t>_start_from_<t+1>_random.xyz (single-chain random)
-  or \${RESULTS_DIR}/<t>_pool_<step>.lst (multi-chain random).
+With GPU_CHAINS>1, random modes write a pool manifest; each CUDA chain gets its own
+random draw (--gpu-per-chain-random-pool-file). Prev/next multi-chain use the best
+(lowest f) pool member for --start-xyz-file (MM only). Tradius uses a random union
+member for MM. No global sort across timesteps in tradius mode.
 
 Then runs: $PYTHON run.py --gpu-backend cuda --gpu-chains ${GPU_CHAINS} ...
 
@@ -53,6 +55,7 @@ Positional:
 Environment (defaults):
   RESULTS_DIR=${RESULTS_DIR}
   TOP_N=${TOP_N}
+  TRADIUS_N=${TRADIUS_N}      For tradius mode: include t+/-1..t+/-N
   TARGET_FILE         If unset, chd+_data/eirik_data_<time_step>.dat
   CONFIG=${CONFIG}
   GPU_CHAINS=${GPU_CHAINS}
@@ -61,7 +64,7 @@ Environment (defaults):
   STARTING_XYZ        Fixed starting xyz (e.g. first timestep)
   START_FROM_PREVIOUS_RANDOM  If 1, random from top TOP_N at t-1
   START_FROM_NEXT_RANDOM      If 1, random from top TOP_N at t+1
-  GPU_CHAINS                  With random modes, >1 gives per-chain random starts
+  START_FROM_TRADIUS_RANDOM   If 1, uniform random from union top TOP_N at t+/-1..t+/-N
   PYTHON=${PYTHON}
   ALIGN_INDICES       Space-separated atom indices for average_xyz.py --align-indices
   EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
@@ -76,8 +79,13 @@ if [[ $# -lt 1 ]]; then
     usage
 fi
 
-if [[ "${START_FROM_PREVIOUS_RANDOM:-0}" == "1" && "${START_FROM_NEXT_RANDOM:-0}" == "1" ]]; then
-    echo "ERROR: START_FROM_PREVIOUS_RANDOM and START_FROM_NEXT_RANDOM cannot both be 1" >&2
+_random_mode_count=0
+[[ "${START_FROM_PREVIOUS_RANDOM:-0}" == "1" ]] && _random_mode_count=$((_random_mode_count + 1))
+[[ "${START_FROM_NEXT_RANDOM:-0}" == "1" ]] && _random_mode_count=$((_random_mode_count + 1))
+[[ "${START_FROM_TRADIUS_RANDOM:-0}" == "1" ]] && _random_mode_count=$((_random_mode_count + 1))
+if [[ "$_random_mode_count" -gt 1 ]]; then
+    echo "ERROR: only one of START_FROM_PREVIOUS_RANDOM, START_FROM_NEXT_RANDOM," >&2
+    echo "       START_FROM_TRADIUS_RANDOM may be set to 1" >&2
     exit 1
 fi
 
@@ -88,8 +96,10 @@ tuning_ratio_target="${3:-$TUNING_RATIO}"
 # Two-digit time_step for filenames / run-id
 if [[ "$time_step" =~ ^[0-9]+$ ]]; then
     ts_padded=$(printf '%02d' "$((10#$time_step))")
+    ts_int=$((10#$time_step))
 else
     ts_padded="$time_step"
+    ts_int=""
 fi
 
 if [[ -n "$PREV_STEP" ]]; then
@@ -119,8 +129,8 @@ TARGET_FILE="${TARGET_FILE:-chd+_data/eirik_data_${ts_padded}.dat}"
 
 mkdir -p "$RESULTS_DIR"
 
-# List best TOP_N paths (lowest f in filename) for pool_step; exclude *_mean.xyz
-collect_top_pool() {
+# Populate TOP_FILES with up to TOP_N lowest-f(xray) paths for one timestep.
+collect_top_pool_for_step() {
     local pool_step="$1"
     mapfile -t TOP_FILES < <("$PYTHON" - "$RESULTS_DIR" "$pool_step" "$TOP_N" <<'PY'
 import glob, os, re, sys
@@ -169,31 +179,146 @@ PY
     )
 }
 
-random_pick_from_pool() {
-    local pool_step="$1"
-    local dest="$2"
-    local hint="$3"
-    collect_top_pool "$pool_step"
+# Union of top TOP_N per step at t±1..t±N (concatenated; no global f sort). Dedupe by path.
+collect_tradius_pool() {
+    if [[ -z "$ts_int" ]]; then
+        echo "ERROR: START_FROM_TRADIUS_RANDOM requires numeric time_step" >&2
+        exit 1
+    fi
+    mapfile -t TOP_FILES < <("$PYTHON" - "$RESULTS_DIR" "$ts_padded" "$TRADIUS_N" "$TOP_N" <<'PY'
+import glob, os, re, sys
+
+def parse(path):
+    base = os.path.basename(path)
+    if base.endswith("_mean.xyz"):
+        return None
+    m = re.match(r"^(\d+)_(.+)\.xyz$", base)
+    if not m:
+        return None
+    ts, mid = m.group(1), m.group(2)
+    mid = re.sub(r"_dup\d+$", "", mid)
+    m2 = re.search(r"\d+\.\d+", mid)
+    if not m2:
+        return None
+    return float(m2.group(0)), path, ts
+
+def pool_one_step(rd, step, top_n):
+    pat = os.path.join(rd, f"{step}_*.xyz")
+    rows = []
+    for p in sorted(glob.glob(pat)):
+        if not os.path.isfile(p):
+            continue
+        r = parse(p)
+        if r is None:
+            continue
+        f, path, ts = r
+        if ts != step:
+            continue
+        rows.append((f, path))
+    rows.sort(key=lambda x: x[0])
+    take = min(top_n, len(rows))
+    if take:
+        sys.stderr.write(
+            f"  pooled {take} / {len(rows)} from step {step} ({pat})\n"
+        )
+    return [path for _, path in rows[:take]]
+
+def main():
+    rd, ts_str, radius, top_n = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+    t = int(ts_str)
+    union = []
+    seen = set()
+    used_steps = []
+    skipped_steps = []
+    for k in range(1, radius + 1):
+        for step_num in (t - k, t + k):
+            if step_num < 1:
+                continue
+            step = f"{step_num:02d}"
+            paths = pool_one_step(rd, step, top_n)
+            if not paths:
+                skipped_steps.append(step)
+                sys.stderr.write(
+                    f"  WARNING: no pool for step {step} (t{'+' if step_num > t else '-'}{k}), skipping\n"
+                )
+                continue
+            used_steps.append(step)
+            for path in paths:
+                if path in seen:
+                    continue
+                seen.add(path)
+                union.append(path)
+    if not union:
+        return
+    skipped_msg = f" (skipped: {', '.join(skipped_steps)})" if skipped_steps else ""
+    sys.stderr.write(
+        f"  tradius N={radius}: {len(union)} unique structures in union from "
+        f"steps {', '.join(used_steps)}{skipped_msg}\n"
+    )
+    for path in union:
+        print(path)
+
+if __name__ == "__main__":
+    main()
+PY
+    )
+}
+
+apply_random_start_from_top_files() {
+    local dest="$1"
+    local hint="$2"
+    local pool_label="$3"
     if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
-        echo "ERROR: no pool files for step '$pool_step' under ${RESULTS_DIR}/" >&2
-        echo "  Expected glob: ${RESULTS_DIR}/${pool_step}_*.xyz (excluding *_mean.xyz)" >&2
+        echo "ERROR: pool is empty under ${RESULTS_DIR}/" >&2
         echo "  $hint" >&2
         exit 1
     fi
     if [[ "$GPU_CHAINS" -gt 1 ]]; then
-        GPU_POOL_FILE="${RESULTS_DIR}/${ts_padded}_pool_${pool_step}.lst"
+        GPU_POOL_FILE="${RESULTS_DIR}/${ts_padded}_pool_${pool_label}.lst"
         printf '%s\n' "${TOP_FILES[@]}" >"$GPU_POOL_FILE"
         cp -f "${TOP_FILES[0]}" "$dest"
-        echo "  multi-chain (${GPU_CHAINS} CUDA chains): top-M pool size=${#TOP_FILES[@]} (TOP_N=$TOP_N)"
+        echo "  multi-chain (${GPU_CHAINS} CUDA chains): pool size=${#TOP_FILES[@]} (TOP_N=$TOP_N)"
         echo "  pool manifest -> $GPU_POOL_FILE"
         echo "  MM / --start-xyz-file (best in pool): ${TOP_FILES[0]} -> $dest"
-        echo "  run.py will print one line per chain: random XYZ from this top-M pool"
+        echo "  run.py will print one line per chain: random XYZ from this pool"
     else
         idx=$(( RANDOM % ${#TOP_FILES[@]} ))
         picked="${TOP_FILES[$idx]}"
         cp -f "$picked" "$dest"
-        echo "  random pick [$idx/${#TOP_FILES[@]}] from step $pool_step: $picked -> $dest"
+        echo "  random pick [$idx/${#TOP_FILES[@]}]: $picked -> $dest"
     fi
+}
+
+apply_tradius_random_start() {
+    local dest="$1"
+    local hint="$2"
+    if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
+        echo "ERROR: tradius union pool is empty under ${RESULTS_DIR}/" >&2
+        echo "  $hint" >&2
+        exit 1
+    fi
+    idx=$(( RANDOM % ${#TOP_FILES[@]} ))
+    picked="${TOP_FILES[$idx]}"
+    if [[ "$GPU_CHAINS" -gt 1 ]]; then
+        GPU_POOL_FILE="${RESULTS_DIR}/${ts_padded}_pool_tradius_N${TRADIUS_N}.lst"
+        printf '%s\n' "${TOP_FILES[@]}" >"$GPU_POOL_FILE"
+        cp -f "$picked" "$dest"
+        echo "  multi-chain (${GPU_CHAINS} CUDA chains): tradius union size=${#TOP_FILES[@]} (TOP_N/step=$TOP_N, N=$TRADIUS_N)"
+        echo "  pool manifest -> $GPU_POOL_FILE"
+        echo "  MM / --start-xyz-file (random from union [$idx/${#TOP_FILES[@]}]): $picked -> $dest"
+        echo "  run.py will print one line per chain: uniform random XYZ from union pool"
+    else
+        cp -f "$picked" "$dest"
+        echo "  tradius random pick [$idx/${#TOP_FILES[@]}] from union: $picked -> $dest"
+    fi
+}
+
+random_pick_from_pool() {
+    local pool_step="$1"
+    local dest="$2"
+    local hint="$3"
+    collect_top_pool_for_step "$pool_step"
+    apply_random_start_from_top_files "$dest" "$hint" "$pool_step"
 }
 
 GPU_POOL_FILE=""
@@ -226,10 +351,17 @@ elif [[ "${START_FROM_NEXT_RANDOM:-0}" == "1" ]]; then
     random_pick_from_pool "$next_step" "$start_out" \
         "Run step $next_step first so ${RESULTS_DIR}/${next_step}_*.xyz exist."
 
+elif [[ "${START_FROM_TRADIUS_RANDOM:-0}" == "1" ]]; then
+    start_out="${RESULTS_DIR}/${ts_padded}_start_tradius_N${TRADIUS_N}.xyz"
+    echo "  mode: tradius random N=$TRADIUS_N (union top TOP_N at t+/-1..t+/-N) -> $start_out"
+    collect_tradius_pool
+    apply_tradius_random_start "$start_out" \
+        "Need results for at least one timestep in t+/-1..t+/-${TRADIUS_N} under ${RESULTS_DIR}/."
+
 else
     start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
     echo "  mode: Kabsch mean from step $prev_step -> $start_out"
-    collect_top_pool "$prev_step"
+    collect_top_pool_for_step "$prev_step"
     if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
         echo "ERROR: no pool files for previous step '$prev_step' under ${RESULTS_DIR}/" >&2
         echo "  Expected glob: ${RESULTS_DIR}/${prev_step}_*.xyz (excluding *_mean.xyz)" >&2
