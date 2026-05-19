@@ -532,9 +532,9 @@ class Wrapper:
                 )
                 
                 # Print and assign
-                print(bond_param_array)
-                print(angle_param_array)
-                print(torsion_param_array)
+                #print(bond_param_array)
+                #print(angle_param_array)
+                #print(torsion_param_array)
                 p.bond_param_array = bond_param_array
                 p.angle_param_array = angle_param_array
                 p.torsion_param_array = torsion_param_array
