@@ -41,7 +41,10 @@ Starting geometry (first match wins):
   3. START_FROM_NEXT_RANDOM=1            - random from top TOP_N at t+1
   4. START_FROM_TRADIUS_RANDOM=1         - random from union of top TOP_N at t+/-1..t+/-N
   5. START_FROM_TRADIUS_MEAN=1          - random from {step}_mean.xyz at t+/-1..t+/-N
+     (missing means auto-built from each step's top TOP_N pool)
   6. (default)                           - Kabsch mean of top TOP_N at t-1
+
+Before each run, ${prev}_mean.xyz is created if missing and ${prev}_*.xyz exist.
 
 With GPU_CHAINS>1, random/tradius modes write a pool manifest; each CUDA chain gets
 its own random draw (--gpu-per-chain-random-pool-file). Prev/next multi-chain use the
@@ -69,6 +72,7 @@ Environment (defaults):
   START_FROM_NEXT_RANDOM      If 1, random from top TOP_N at t+1
   START_FROM_TRADIUS_RANDOM   If 1, uniform random from union top TOP_N at t+/-1..t+/-N
   START_FROM_TRADIUS_MEAN     If 1, uniform random from {step}_mean.xyz at t+/-1..t+/-N
+                              (missing {step}_mean.xyz built from top TOP_N pool automatically)
   PYTHON=${PYTHON}
   ALIGN_INDICES       Space-separated atom indices for average_xyz.py --align-indices
   EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
@@ -182,6 +186,43 @@ if __name__ == "__main__":
     main()
 PY
     )
+}
+
+# Kabsch-average TOP_FILES into dest (uses ALIGN_INDICES when set).
+average_top_files_to_mean() {
+    local dest="$1"
+    if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
+        echo "ERROR: average_top_files_to_mean: TOP_FILES is empty" >&2
+        return 1
+    fi
+    local AVG_CMD=(
+        "$PYTHON" "$REPO_ROOT/scripts/python/average_xyz.py"
+        "${TOP_FILES[@]}"
+        --align kabsch
+        -o "$dest"
+    )
+    if [[ -n "${ALIGN_INDICES:-}" ]]; then
+        # shellcheck disable=SC2206
+        local AI=($ALIGN_INDICES)
+        AVG_CMD+=(--align-indices "${AI[@]}")
+    fi
+    "${AVG_CMD[@]}"
+}
+
+# Create ${RESULTS_DIR}/${step}_mean.xyz from top TOP_N pool if missing (no-op if exists).
+ensure_step_mean_xyz() {
+    local step="$1"
+    local mean_path="${RESULTS_DIR}/${step}_mean.xyz"
+    if [[ -f "$mean_path" ]]; then
+        return 0
+    fi
+    collect_top_pool_for_step "$step"
+    if [[ ${#TOP_FILES[@]} -eq 0 ]]; then
+        echo "  WARNING: cannot create ${mean_path}: no ${step}_*.xyz pool under ${RESULTS_DIR}/" >&2
+        return 1
+    fi
+    echo "  creating ${step}_mean.xyz from ${#TOP_FILES[@]} structures (TOP_N=$TOP_N)" >&2
+    average_top_files_to_mean "$mean_path"
 }
 
 # Union of top TOP_N per step at t±1..t±N (concatenated; no global f sort). Dedupe by path.
@@ -341,11 +382,9 @@ collect_tradius_means() {
             fi
             step=$(printf '%02d' "$step_num")
             mean_path="${RESULTS_DIR}/${step}_mean.xyz"
-            if [[ -f "$mean_path" ]]; then
+            if ensure_step_mean_xyz "$step"; then
                 MEAN_FILES+=("$mean_path")
-                echo "  found mean for step $step: $mean_path" >&2
-            else
-                echo "  WARNING: no mean for step $step (${mean_path}), skipping" >&2
+                echo "  using mean for step $step: $mean_path" >&2
             fi
         done
     done
@@ -382,6 +421,11 @@ GPU_POOL_FILE=""
 
 echo "=== GPU run from previous timestep ==="
 echo "  time_step (run-id)=$ts_padded  prev=$prev_step  TOP_N=$TOP_N  GPU_CHAINS=$GPU_CHAINS"
+
+# Ensure previous-step mean exists when pool is available (for tradius-mean and reuse).
+if [[ -n "$ts_int" ]]; then
+    ensure_step_mean_xyz "$prev_step" || true
+fi
 
 if [[ -n "$STARTING_XYZ" ]]; then
     start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
@@ -432,14 +476,8 @@ else
         echo "  For the first timestep, set STARTING_XYZ to an initial structure." >&2
         exit 1
     fi
-    AVG_CMD=("$PYTHON" "$REPO_ROOT/scripts/python/average_xyz.py" "${TOP_FILES[@]}" --align kabsch -o "$start_out")
-    if [[ -n "${ALIGN_INDICES:-}" ]]; then
-        # shellcheck disable=SC2206
-        AI=($ALIGN_INDICES)
-        AVG_CMD+=(--align-indices "${AI[@]}")
-    fi
     echo "  averaging ${#TOP_FILES[@]} structures -> $start_out"
-    "${AVG_CMD[@]}"
+    average_top_files_to_mean "$start_out"
 fi
 
 echo "  launching: $PYTHON run.py --gpu-backend cuda --gpu-chains $GPU_CHAINS ..."
