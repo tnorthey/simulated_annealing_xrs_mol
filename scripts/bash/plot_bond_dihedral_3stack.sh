@@ -449,6 +449,7 @@ gp_add_str COL1; gp_add_str COL2; gp_add_str COL2B; gp_add_str COL3; gp_add_str 
 gp_add_num LW1; gp_add_num LW2; gp_add_num PS1; gp_add_num PS2; gp_add_num PT1; gp_add_num PT2
 gp_add_num LW; gp_add_num LWB; gp_add_num PS; gp_add_num PSB; gp_add_num PT; gp_add_num PTB
 gp_add_num LWD2; gp_add_num LWD2B; gp_add_num LWD3; gp_add_num LWD3B
+gp_add_num EBLW1; gp_add_num EBLW2; gp_add_num EBLW2B; gp_add_num EBLW3; gp_add_num EBLW3B
 gp_add_num PSD2; gp_add_num PSD2B; gp_add_num PSD3; gp_add_num PSD3B
 gp_add_num PTD2; gp_add_num PTD2B; gp_add_num PTD3; gp_add_num PTD3B
 

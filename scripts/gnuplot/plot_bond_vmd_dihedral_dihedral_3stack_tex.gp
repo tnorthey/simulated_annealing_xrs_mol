@@ -266,11 +266,27 @@ YHI3  = "(".YEXPR3 ." + $".SDCOL.")"
 YLO3B = "(".YEXPR3B." - $".SDCOL.")"
 YHI3B = "(".YEXPR3B." + $".SDCOL.")"
 
-eblw1 = (LW1 < 1.0 ? 1.0 : 0.5*LW1)
-eblw2  = (LWD2  < 1.0 ? 1.0 : 0.5*LWD2)
-eblw2B = (LWD2B < 1.0 ? 1.0 : 0.5*LWD2B)
-eblw3  = (LWD3  < 1.0 ? 1.0 : 0.5*LWD3)
-eblw3B = (LWD3B < 1.0 ? 1.0 : 0.5*LWD3B)
+# Error-bar linewidth (override via -e "EBLW1=3;EBLW2=3;EBLW3=3" — independent of curve LW).
+if (!exists("EBLW1"))  EBLW1  = 0
+if (!exists("EBLW2"))  EBLW2  = 0
+if (!exists("EBLW2B")) EBLW2B = 0
+if (!exists("EBLW3"))  EBLW3  = 0
+if (!exists("EBLW3B")) EBLW3B = 0
+EBLW1  = EBLW1  + 0
+EBLW2  = EBLW2  + 0
+EBLW2B = EBLW2B + 0
+EBLW3  = EBLW3  + 0
+EBLW3B = EBLW3B + 0
+if (EBLW1  <= 0) eblw1  = (LW1  < 1.0 ? 1.0 : 0.5*LW1)
+if (EBLW1  >  0) eblw1  = EBLW1
+if (EBLW2  <= 0) eblw2  = (LWD2  < 1.0 ? 1.0 : 0.5*LWD2)
+if (EBLW2  >  0) eblw2  = EBLW2
+if (EBLW2B <= 0) eblw2B = (LWD2B < 1.0 ? 1.0 : 0.5*LWD2B)
+if (EBLW2B >  0) eblw2B = EBLW2B
+if (EBLW3  <= 0) eblw3  = (LWD3  < 1.0 ? 1.0 : 0.5*LWD3)
+if (EBLW3  >  0) eblw3  = EBLW3
+if (EBLW3B <= 0) eblw3B = (LWD3B < 1.0 ? 1.0 : 0.5*LWD3B)
+if (EBLW3B >  0) eblw3B = EBLW3B
 
 E2  = "'".DATA2 ."'".SKD."using xcol:(".YEXPR2 ."):sdAcol with yerrorbars lw eblw2  lc rgb COL2  pt -1 notitle"
 E2B = "'".DATA2B."'".SKD."using xcol:(".YEXPR2B."):sdAcol with yerrorbars lw eblw2B lc rgb COL2B pt -1 notitle"
