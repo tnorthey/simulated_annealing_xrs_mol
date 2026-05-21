@@ -34,6 +34,7 @@ PLOTMODE='POINTS' PLOTMODE2='LINES' \
 PLOTMODE_DIH='POINTS' PLOTMODEB_DIH='LINES' \
 LW1=3 LW2=3 LWD2=3 LWD2B=3 LWD3=3 LWD3B=3 \
 EBLW1=3 EBLW2=3 EBLW3=3 \
+COL2='#000000' COL2B='#2166ac' \
 SHOW_KEY=0 \
 XLABEL='$t$ (fs)' Y1LABEL='\ce{C1-C6} (\AA)' Y2LABEL='$\phi_{\ce{C1C2C5C6}}\\ (^\circ)$' Y3LABEL='$\phi_{\ce{C2C3C4C5}}\\ (^\circ)$' \
 ./scripts/bash/plot_bond_dihedral_3stack.sh \
