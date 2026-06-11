@@ -14,10 +14,14 @@ GPU_CHAINS="${GPU_CHAINS:-1024}"
 EXCITATION_FACTOR="${EXCITATION_FACTOR:-0.628}"
 TUNING_RATIO="${TUNING_RATIO:-0.5}"
 EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
-# Override previous source step (default: current - 1, two-digit)
+# Override previous source step (default: current - PREV_DISTANCE, two-digit)
 PREV_STEP="${PREV_STEP:-}"
-# Override next source step (default: current + 1, two-digit; START_FROM_NEXT_RANDOM only)
+# Offset for START_FROM_PREVIOUS_RANDOM when PREV_STEP is unset (default: 1 => t-1)
+PREV_DISTANCE="${PREV_DISTANCE:-1}"
+# Override next source step (default: current + NEXT_DISTANCE, two-digit)
 NEXT_STEP="${NEXT_STEP:-}"
+# Offset for START_FROM_NEXT_RANDOM when NEXT_STEP is unset (default: 1 => t+1)
+NEXT_DISTANCE="${NEXT_DISTANCE:-1}"
 # Radius N for tradius modes: neighbors t+/-1 .. t+/-N
 TRADIUS_N="${TRADIUS_N:-1}"
 # If set, skip pooling/averaging and use this XYZ as the starting geometry (still copied to staging)
@@ -37,14 +41,14 @@ Usage: $0 <time_step> [excitation_factor] [tuning_ratio_target]
 
 Starting geometry (first match wins):
   1. STARTING_XYZ set                    - copy fixed file to staging
-  2. START_FROM_PREVIOUS_RANDOM=1        - random from top TOP_N at t-1
-  3. START_FROM_NEXT_RANDOM=1            - random from top TOP_N at t+1
+  2. START_FROM_PREVIOUS_RANDOM=1        - random from top TOP_N at t-PREV_DISTANCE
+  3. START_FROM_NEXT_RANDOM=1            - random from top TOP_N at t+NEXT_DISTANCE
   4. START_FROM_TRADIUS_RANDOM=1         - random from union of top TOP_N at t+/-1..t+/-N
   5. START_FROM_TRADIUS_MEAN=1          - random from {step}_mean.xyz at t+/-1..t+/-N
      (missing means auto-built from each step's top TOP_N pool)
   6. (default)                           - Kabsch mean of top TOP_N at t-1
 
-Before each run, ${prev}_mean.xyz is created if missing and ${prev}_*.xyz exist.
+Before each run, {prev}_mean.xyz is created if missing and {prev}_*.xyz exist.
 
 With GPU_CHAINS>1, random/tradius modes write a pool manifest; each CUDA chain gets
 its own random draw (--gpu-per-chain-random-pool-file). Prev/next multi-chain use the
@@ -65,11 +69,13 @@ Environment (defaults):
   TARGET_FILE         If unset, chd+_data/eirik_data_<time_step>.dat
   CONFIG=${CONFIG}
   GPU_CHAINS=${GPU_CHAINS}
-  PREV_STEP           If unset, use (time_step - 1) padded to 2 digits
-  NEXT_STEP           If unset, use (time_step + 1) padded (next-random mode)
+  PREV_STEP           Override pool step for prev-random / default mean (default: t-1)
+  PREV_DISTANCE       If PREV_STEP unset, prev-random pools from t-PREV_DISTANCE (default: 1)
+  NEXT_STEP           Override pool step for next-random (default: t+NEXT_DISTANCE)
+  NEXT_DISTANCE       If NEXT_STEP unset, next-random pools from t+NEXT_DISTANCE (default: 1)
   STARTING_XYZ        Fixed starting xyz (e.g. first timestep)
-  START_FROM_PREVIOUS_RANDOM  If 1, random from top TOP_N at t-1
-  START_FROM_NEXT_RANDOM      If 1, random from top TOP_N at t+1
+  START_FROM_PREVIOUS_RANDOM  If 1, random from top TOP_N at t-PREV_DISTANCE
+  START_FROM_NEXT_RANDOM      If 1, random from top TOP_N at t+NEXT_DISTANCE
   START_FROM_TRADIUS_RANDOM   If 1, uniform random from union top TOP_N at t+/-1..t+/-N
   START_FROM_TRADIUS_MEAN     If 1, uniform random from {step}_mean.xyz at t+/-1..t+/-N
                               (missing {step}_mean.xyz built from top TOP_N pool automatically)
@@ -123,18 +129,47 @@ else
     fi
 fi
 
-if [[ -n "$NEXT_STEP" ]]; then
-    next_step=$(printf '%02d' "$((10#$NEXT_STEP))")
-else
-    if [[ "$time_step" =~ ^[0-9]+$ ]]; then
-        next=$((10#$time_step + 1))
-        next_step=$(printf '%02d' "$next")
-    else
-        next_step=""
-    fi
-fi
-
 TARGET_FILE="${TARGET_FILE:-chd+_data/eirik_data_${ts_padded}.dat}"
+
+# Pool step for prev/next random modes (PREV_STEP / NEXT_STEP override distance).
+resolve_previous_random_pool_step() {
+    if [[ -n "$PREV_STEP" ]]; then
+        printf '%02d' "$((10#$PREV_STEP))"
+        return
+    fi
+    if [[ -z "$ts_int" ]]; then
+        echo "ERROR: non-numeric time_step requires PREV_STEP for START_FROM_PREVIOUS_RANDOM" >&2
+        exit 1
+    fi
+    local dist=$((10#${PREV_DISTANCE:-1}))
+    if [[ "$dist" -lt 1 ]]; then
+        echo "ERROR: PREV_DISTANCE must be >= 1 (got $PREV_DISTANCE)" >&2
+        exit 1
+    fi
+    local step_num=$((ts_int - dist))
+    if [[ "$step_num" -lt 0 ]]; then
+        echo "ERROR: PREV_DISTANCE=$dist yields step $step_num < 0 for time_step $ts_padded" >&2
+        exit 1
+    fi
+    printf '%02d' "$step_num"
+}
+
+resolve_next_random_pool_step() {
+    if [[ -n "$NEXT_STEP" ]]; then
+        printf '%02d' "$((10#$NEXT_STEP))"
+        return
+    fi
+    if [[ -z "$ts_int" ]]; then
+        echo "ERROR: non-numeric time_step requires NEXT_STEP for START_FROM_NEXT_RANDOM" >&2
+        exit 1
+    fi
+    local dist=$((10#${NEXT_DISTANCE:-1}))
+    if [[ "$dist" -lt 1 ]]; then
+        echo "ERROR: NEXT_DISTANCE must be >= 1 (got $NEXT_DISTANCE)" >&2
+        exit 1
+    fi
+    printf '%02d' "$((ts_int + dist))"
+}
 
 mkdir -p "$RESULTS_DIR"
 
@@ -437,20 +472,30 @@ if [[ -n "$STARTING_XYZ" ]]; then
     cp -f "$STARTING_XYZ" "$start_out"
 
 elif [[ "${START_FROM_PREVIOUS_RANDOM:-0}" == "1" ]]; then
-    start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
-    echo "  mode: random from previous step $prev_step -> $start_out"
-    random_pick_from_pool "$prev_step" "$start_out" \
-        "For the first timestep, set STARTING_XYZ to an initial structure."
+    pool_step=$(resolve_previous_random_pool_step)
+    if [[ "$pool_step" == "$prev_step" ]]; then
+        start_out="${RESULTS_DIR}/${prev_step}_mean.xyz"
+    else
+        start_out="${RESULTS_DIR}/${ts_padded}_start_from_${pool_step}_random.xyz"
+    fi
+    if [[ -n "$PREV_STEP" ]]; then
+        echo "  mode: random from step $pool_step (PREV_STEP) -> $start_out"
+    else
+        echo "  mode: random from step $pool_step (t-$PREV_DISTANCE) -> $start_out"
+    fi
+    random_pick_from_pool "$pool_step" "$start_out" \
+        "Run step $pool_step first so ${RESULTS_DIR}/${pool_step}_*.xyz exist, or set STARTING_XYZ for the first timestep."
 
 elif [[ "${START_FROM_NEXT_RANDOM:-0}" == "1" ]]; then
-    if [[ -z "$next_step" ]]; then
-        echo "ERROR: non-numeric time_step requires NEXT_STEP for START_FROM_NEXT_RANDOM" >&2
-        exit 1
+    pool_step=$(resolve_next_random_pool_step)
+    start_out="${RESULTS_DIR}/${ts_padded}_start_from_${pool_step}_random.xyz"
+    if [[ -n "$NEXT_STEP" ]]; then
+        echo "  mode: random from step $pool_step (NEXT_STEP) -> $start_out"
+    else
+        echo "  mode: random from step $pool_step (t+$NEXT_DISTANCE) -> $start_out"
     fi
-    start_out="${RESULTS_DIR}/${ts_padded}_start_from_${next_step}_random.xyz"
-    echo "  mode: random from next step $next_step -> $start_out"
-    random_pick_from_pool "$next_step" "$start_out" \
-        "Run step $next_step first so ${RESULTS_DIR}/${next_step}_*.xyz exist."
+    random_pick_from_pool "$pool_step" "$start_out" \
+        "Run step $pool_step first so ${RESULTS_DIR}/${pool_step}_*.xyz exist."
 
 elif [[ "${START_FROM_TRADIUS_RANDOM:-0}" == "1" ]]; then
     start_out="${RESULTS_DIR}/${ts_padded}_start_tradius_N${TRADIUS_N}.xyz"
