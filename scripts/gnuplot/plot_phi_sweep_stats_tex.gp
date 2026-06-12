@@ -18,8 +18,10 @@
 #   gnuplot -e "RESULTS_DIR='results_phi_sweep';OUTBASE='fig_phi_sweep'" \
 #       scripts/gnuplot/plot_phi_sweep_stats_tex.gp
 #
-# Optional ranges:
-#   gnuplot -e "XMIN=0;XMAX=1;Y1MIN=0;Y1MAX=5" scripts/gnuplot/plot_phi_sweep_stats_tex.gp
+# Optional ranges (Y1MIN/Y1MAX apply on log scale when Y1LOG=1):
+#   gnuplot -e "XMIN=0;XMAX=1;Y1MIN=0.1;Y1MAX=10" scripts/gnuplot/plot_phi_sweep_stats_tex.gp
+#
+# Chi2 panel uses log y-axis by default; disable with Y1LOG=0.
 # ------------------------------------------------------------------------------
 
 if (!exists("RESULTS_DIR")) RESULTS_DIR = "results_phi_sweep"
@@ -47,6 +49,9 @@ eblw = (LW < 1.0 ? 1.0 : 0.5*LW)
 
 if (!exists("SHOW_KEY")) SHOW_KEY = 1
 SHOW_KEY = SHOW_KEY + 0
+
+if (!exists("Y1LOG")) Y1LOG = 1
+Y1LOG = Y1LOG + 0
 
 if (!exists("W")) W = 3.35
 if (!exists("H")) H = 4.5
@@ -129,17 +134,20 @@ AVAILH = MTOP - MBOTTOM
 H2 = AVAILH * (RELH2 / RELHSUM)
 YSPLIT = MBOTTOM + H2
 
-# ---- Panel 1: chi2 ----
+# ---- Panel 1: chi2 (log y by default) ----
 set tmargin at screen MTOP
 set bmargin at screen YSPLIT
 set ylabel Y1LABEL
 unset xlabel
 set format x ""
+if (Y1LOG) set logscale y
+if (!Y1LOG) unset logscale y
 if (exists("Y1MIN") && exists("Y1MAX")) set yrange [Y1MIN:Y1MAX]
 if (!(exists("Y1MIN") && exists("Y1MAX"))) unset yrange
 eval P1_CMD
 
 # ---- Panel 2: RMSD ----
+unset logscale y
 set tmargin at screen YSPLIT
 set bmargin at screen MBOTTOM
 set ylabel Y2LABEL
