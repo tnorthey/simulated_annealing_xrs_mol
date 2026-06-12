@@ -1426,7 +1426,7 @@ class Wrapper:
                 else:
                     e_mol = 0
             # encode the analysis values into the xyz header
-            header_str = "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f" % (
+            header_str = "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f" % (
                 f_xray_best,
                 rmsd,
                 bond_distance,
@@ -1434,6 +1434,7 @@ class Wrapper:
                 dihedral,
                 e_mol,
                 mapd,
+                p.tuning_ratio_target_input,
             )
             chain_results = getattr(sa, "last_chain_results", None)
             multi_chain_mode = (
@@ -1516,7 +1517,7 @@ class Wrapper:
                     e_mol_chain = 0.0  # per-chain HF not computed here
 
                     header_str_chain = (
-                        "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f"
+                        "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f"
                         % (
                             f_xray_chain,
                             rmsd_chain,
@@ -1525,6 +1526,7 @@ class Wrapper:
                             dihedral_chain,
                             e_mol_chain,
                             mapd_chain,
+                            p.tuning_ratio_target_input,
                         )
                     )
                     f_chain_str = ("%10.8f" % f_xray_chain).zfill(12)
