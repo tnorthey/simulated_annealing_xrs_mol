@@ -9,6 +9,7 @@ header line (line 2), and writes per-Phi mean/std CSVs:
 
 Example:
   python3 scripts/python/aggregate_phi_sweep_stats.py results_phi_sweep
+  gnuplot scripts/gnuplot/plot_phi_sweep_stats_tex.gp
 """
 from __future__ import annotations
 
