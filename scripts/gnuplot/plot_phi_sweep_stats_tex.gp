@@ -29,7 +29,7 @@ if (!exists("OUTBASE")) OUTBASE = "figure_phi_sweep"
 
 if (!exists("XLABEL")) XLABEL = '$\Phi$'
 if (!exists("Y1LABEL")) Y1LABEL = '$\chi^2$'
-if (!exists("Y2LABEL")) Y2LABEL = 'RMSD (\AA)'
+if (!exists("Y2LABEL")) Y2LABEL = 'RMSD (\\AA)'
 
 if (!exists("NAME_CHI2")) NAME_CHI2 = '$\chi^2$'
 if (!exists("NAME_RMSD")) NAME_RMSD = 'RMSD'
@@ -111,7 +111,7 @@ if (Y1LOG) set logscale y
 if (!Y1LOG) unset logscale y
 unset logscale y2
 
-if (Y1LOG) set format y "10^{%L}"
+if (Y1LOG) set format y "$10^{%L}$"
 if (!Y1LOG) set format y "%g"
 set format y2 "%.2f"
 set format x "%g"
