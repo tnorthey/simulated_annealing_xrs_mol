@@ -38,6 +38,7 @@ Environment (defaults):
   TARGET_FILE         If unset, nmm_data/target_<time_step>.dat (two-digit padded when numeric)
   CONFIG=${CONFIG}
   GPU_CHAINS=${GPU_CHAINS}
+  BOLTZMANN_SAMPLING=${BOLTZMANN_SAMPLING:-1}  # 0 disables --sampling when GPU_CHAINS > 1
   EXCITATION_FACTOR=${EXCITATION_FACTOR}
   TUNING_RATIO=${TUNING_RATIO}
   EXTRA_RUN_PY_ARGS   Extra args appended to run.py (e.g. --qmax 8 --qlen 81)
@@ -99,6 +100,18 @@ RUN_CMD=(
     --gpu-backend cuda
     --gpu-chains "$GPU_CHAINS"
 )
+# Per-chain Boltzmann requires sampling_bool; enable for multi-chain unless opted out.
+if [[ "$GPU_CHAINS" -gt 1 ]]; then
+    case "${BOLTZMANN_SAMPLING:-1}" in
+        0|false|FALSE|no|NO)
+            echo "  boltzmann sampling: disabled (BOLTZMANN_SAMPLING=$BOLTZMANN_SAMPLING)"
+            ;;
+        *)
+            RUN_CMD+=(--sampling)
+            echo "  boltzmann sampling: enabled (independent displacement per CUDA chain)"
+            ;;
+    esac
+fi
 # shellcheck disable=SC2206
 RUN_CMD+=( ${EXTRA_RUN_PY_ARGS} )
 "${RUN_CMD[@]}"

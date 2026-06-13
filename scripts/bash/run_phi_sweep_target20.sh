@@ -20,6 +20,7 @@
 #   BACKEND            cpu     cpu or gpu (overridden by --cpu / --gpu)
 #   N_WORKERS          4       CPU only: parallel workers per Phi
 #   GPU_CHAINS         1024    GPU only: chains per Phi run
+#   BOLTZMANN_SAMPLING 1       GPU only: pass --sampling for per-chain Boltzmann (0 to disable)
 #   RESULTS_DIR        results_phi_sweep   parent dir; each Phi -> phi_<value>/
 #   STARTING_XYZ       xyz/start.xyz   fixed start geometry
 #   EXTRA_RUN_PY_ARGS  (unset) extra args appended to run.py
@@ -112,6 +113,7 @@ if [[ "$BACKEND" == "cpu" ]]; then
     echo "  workers        = $N_WORKERS"
 else
     echo "  gpu_chains     = $GPU_CHAINS"
+    echo "  boltzmann      = ${BOLTZMANN_SAMPLING:-1} (per-chain when GPU_CHAINS > 1)"
 fi
 
 if [[ ! -f "$STARTING_XYZ" ]]; then
