@@ -200,6 +200,34 @@ def build_gpu_per_chain_start_batch(
     return batch, picks
 
 
+def apply_per_chain_boltzmann_displacement(
+    batch: np.ndarray,
+    displacements: np.ndarray,
+    freqs_cm1: np.ndarray,
+    temperature: float,
+    *,
+    atomic_numbers: np.ndarray | None = None,
+    reduced_mass_amu: np.ndarray | None = None,
+) -> np.ndarray:
+    """
+    Add an independent Boltzmann displacement to each chain in batch.
+
+    Returns a new array with shape (n_chains, natoms, 3).
+    """
+    out = np.asarray(batch, dtype=np.float64).copy()
+    sampler = _sample()
+    for chain_idx in range(out.shape[0]):
+        disp = sampler.generate_boltzmann_displacement(
+            displacements,
+            freqs_cm1,
+            temperature,
+            atomic_numbers=atomic_numbers,
+            reduced_mass_amu=reduced_mass_amu,
+        )
+        out[chain_idx] += disp
+    return out
+
+
 def log_gpu_per_chain_random_starts(
     picks: list[str],
     *,
@@ -1168,15 +1196,20 @@ class Wrapper:
         if use_gpu_persistent:
             print("GPU persistent mode enabled: keeping SA/GA state on device across restarts.")
         gpu_start_batch = None
+        gpu_start_batch_base = None
         pool_picks = None
         pool_file = getattr(p, "gpu_per_chain_random_pool_file", None)
         n_gpu_chains = int(getattr(p, "gpu_chains", 1))
+        use_gpu_multi_chain = (
+            n_gpu_chains > 1
+            and str(getattr(p, "gpu_backend", "cpu")).lower().strip() != "cpu"
+        )
         if pool_file and n_gpu_chains > 1:
             if not os.path.isfile(pool_file):
                 raise FileNotFoundError(
                     f"gpu_per_chain_random_pool_file not found: {pool_file}"
                 )
-            gpu_start_batch, pool_picks = build_gpu_per_chain_start_batch(
+            gpu_start_batch_base, pool_picks = build_gpu_per_chain_start_batch(
                 pool_file,
                 n_gpu_chains,
                 m,
@@ -1214,21 +1247,49 @@ class Wrapper:
                 predicted_start = predicted_best
                 ###
                 if i == 0:
+                    gpu_start_batch = None
                     bond_param_array = p.bond_param_array
                     angle_param_array = p.angle_param_array
                     torsion_param_array = p.torsion_param_array
                     if p.sampling_bool:
                         # Boltzmann sample only in first restart
                         print("Boltzmann distribution sampling...")
-                        sampling_displacements = _sample().generate_boltzmann_displacement(
-                            displacements,
-                            freqs_cm1,
-                            p.boltzmann_temperature,
-                            atomic_numbers=atomic_numbers,
-                            reduced_mass_amu=reduced_mass,
-                        )
-                        # add sampled displacements to xyz
-                        xyz_start += sampling_displacements
+                        if use_gpu_multi_chain:
+                            if gpu_start_batch_base is not None:
+                                gpu_start_batch = gpu_start_batch_base.copy()
+                            else:
+                                gpu_start_batch = np.repeat(
+                                    np.asarray(xyz_start, dtype=np.float64)[
+                                        np.newaxis, :, :
+                                    ],
+                                    n_gpu_chains,
+                                    axis=0,
+                                )
+                            print(
+                                f"[GPU] Applying independent Boltzmann displacements "
+                                f"to each of {n_gpu_chains} chains "
+                                f"(T={p.boltzmann_temperature} K)."
+                            )
+                            gpu_start_batch = apply_per_chain_boltzmann_displacement(
+                                gpu_start_batch,
+                                displacements,
+                                freqs_cm1,
+                                p.boltzmann_temperature,
+                                atomic_numbers=atomic_numbers,
+                                reduced_mass_amu=reduced_mass,
+                            )
+                            xyz_start = gpu_start_batch[0].copy()
+                        else:
+                            sampling_displacements = (
+                                _sample().generate_boltzmann_displacement(
+                                    displacements,
+                                    freqs_cm1,
+                                    p.boltzmann_temperature,
+                                    atomic_numbers=atomic_numbers,
+                                    reduced_mass_amu=reduced_mass,
+                                )
+                            )
+                            xyz_start += sampling_displacements
                         if False:
                             # save xyz with boltzmann sampling
                             m.write_xyz(
@@ -1237,6 +1298,8 @@ class Wrapper:
                                 atomlist,
                                 xyz_start,
                             )
+                elif use_gpu_multi_chain and gpu_start_batch_base is not None:
+                    gpu_start_batch = gpu_start_batch_base
                 # else:
                 # redefine angles and bond-distances based on xyz_best
 
