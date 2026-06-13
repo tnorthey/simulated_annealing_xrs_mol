@@ -2,8 +2,9 @@
 # ============================================================================
 # Phi sweep: tuning_ratio_target on xyz/target_20.xyz in test mode.
 #
-# Temporarily patches input.toml (mode=test, target_file, tuning_ratio_target),
-# runs SA for Phi = 0, 0.05, 0.1, ..., 1.0, then restores input.toml.
+# Reads input.toml unchanged and passes sweep overrides via run.py CLI flags
+# (--mode test, --target-file, --tuning-ratio-target). Does not modify
+# input.toml or input.toml.bak.
 #
 # Usage:
 #   ./scripts/bash/run_phi_sweep_target20.sh              # CPU (default)
@@ -25,9 +26,6 @@
 #   STARTING_XYZ       xyz/start.xyz   fixed start geometry
 #   EXTRA_RUN_PY_ARGS  (unset) extra args appended to run.py
 #
-# Patches only three fields in input.toml; all other settings are unchanged.
-# Original input.toml is backed up to input.toml.bak and restored on exit.
-#
 # Expected outputs (per Phi under RESULTS_DIR/phi_<value>/):
 #   CPU: <run_id>_<fxray>.xyz per worker
 #   GPU: <run_id>_<fxray>.xyz per chain (multi-chain mode)
@@ -37,8 +35,6 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-INPUT_TOML="input.toml"
-INPUT_BACKUP="${INPUT_TOML}.bak"
 TARGET_XYZ="xyz/target_20.xyz"
 
 BACKEND="${BACKEND:-cpu}"
@@ -48,7 +44,7 @@ RESULTS_PARENT="${RESULTS_DIR:-results_phi_sweep}"
 STARTING_XYZ="${STARTING_XYZ:-xyz/start.xyz}"
 
 usage() {
-    sed -n '3,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -81,31 +77,9 @@ case "$BACKEND" in
         ;;
 esac
 
-restore_input_toml() {
-    if [[ -f "$INPUT_BACKUP" ]]; then
-        cp "$INPUT_BACKUP" "$INPUT_TOML"
-        echo "Restored $INPUT_TOML from $INPUT_BACKUP"
-    fi
-}
-
-patch_input_toml() {
-    local phi="$1"
-    sed -i \
-        -e 's/^mode = .*/mode = "test"/' \
-        -e "s|^target_file = .*|target_file = \"${TARGET_XYZ}\"|" \
-        -e "s/^tuning_ratio_target = .*/tuning_ratio_target = ${phi}/" \
-        "$INPUT_TOML"
-}
-
-if [[ ! -f "$INPUT_BACKUP" ]]; then
-    cp "$INPUT_TOML" "$INPUT_BACKUP"
-    echo "Backed up $INPUT_TOML -> $INPUT_BACKUP"
-fi
-
-trap restore_input_toml EXIT
-
 echo "=== Phi sweep on ${TARGET_XYZ} ==="
 echo "  backend        = $BACKEND"
+echo "  config         = input.toml (read-only)"
 echo "  results_parent = $RESULTS_PARENT"
 echo "  starting_xyz   = $STARTING_XYZ"
 echo "  phi grid       = 0.00 .. 1.00 step 0.05 (21 values)"
@@ -128,7 +102,9 @@ for phi in $(python3 -c 'print(" ".join(f"{i/20:.2f}" for i in range(21)))'); do
 
     echo ""
     echo "--- Phi (tuning_ratio_target) = ${phi} ---"
-    patch_input_toml "$phi"
+
+    # Sweep overrides via CLI; input.toml is not modified.
+    sweep_run_py_args="--mode test ${EXTRA_RUN_PY_ARGS:-}"
 
     if [[ "$BACKEND" == "cpu" ]]; then
         TARGET_FILE="$TARGET_XYZ" \
@@ -136,16 +112,16 @@ for phi in $(python3 -c 'print(" ".join(f"{i/20:.2f}" for i in range(21)))'); do
         RESULTS_DIR="$results_subdir" \
         N_WORKERS="$N_WORKERS" \
         STARTING_XYZ="$STARTING_XYZ" \
-        EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}" \
+        EXTRA_RUN_PY_ARGS="$sweep_run_py_args" \
         "$REPO_ROOT/scripts/bash/run_cpu_parallel.sh" "$run_id"
     else
-        CONFIG="$INPUT_TOML" \
+        CONFIG="input.toml" \
         TARGET_FILE="$TARGET_XYZ" \
         TUNING_RATIO="$phi" \
         RESULTS_DIR="$results_subdir" \
         GPU_CHAINS="$GPU_CHAINS" \
         STARTING_XYZ="$STARTING_XYZ" \
-        EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}" \
+        EXTRA_RUN_PY_ARGS="$sweep_run_py_args" \
         "$REPO_ROOT/scripts/bash/run_gpu_start.sh" "$run_id"
     fi
 done
