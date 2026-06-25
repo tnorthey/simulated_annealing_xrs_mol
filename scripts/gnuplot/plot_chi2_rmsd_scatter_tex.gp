@@ -28,14 +28,8 @@ if (!exists("RESULTS_DIR")) RESULTS_DIR = "."
 if (!exists("RESULTS_DIR2")) RESULTS_DIR2 = ""
 if (!exists("DATA")) DATA = RESULTS_DIR . "/chi2_rmsd.dat"
 if (!exists("DATA2")) DATA2 = (RESULTS_DIR2 ne "") ? RESULTS_DIR2 . "/chi2_rmsd.dat" : ""
-if (!exists("OUTBASE")) {
-    if ((RESULTS_DIR eq ".") || (RESULTS_DIR eq "./")) {
-        OUTBASE = "figure_chi2_rmsd"
-    } else {
-        DIR_N = words(RESULTS_DIR, "/")
-        OUTBASE = "figure_" . word(RESULTS_DIR, DIR_N, "/")
-    }
-}
+if (!exists("OUTBASE") && ((RESULTS_DIR eq ".") || (RESULTS_DIR eq "./"))) OUTBASE = "figure_chi2_rmsd"
+if (!exists("OUTBASE")) OUTBASE = "figure_" . system(sprintf("bash -lc \"printf '%%s' $(basename '%s')\"", RESULTS_DIR))
 if (!exists("NAME1")) NAME1 = "C1-C6 open"
 if (!exists("NAME2")) NAME2 = "C1-C6 closed"
 if (!exists("COL1")) COL1 = "#a2142f"
@@ -110,16 +104,8 @@ if (!SHOW_KEY) unset key
 
 # Fixed ranges only when passed via -e (e.g. XMIN=0;XMAX=0.44;YMIN=5e-5;YMAX=5).
 # Omit them to autoscale from data so both series stay visible.
-if (exists("XMIN") && exists("XMAX")) {
-    XMIN = XMIN + 0
-    XMAX = XMAX + 0
-    set xrange [XMIN : XMAX]
-}
-if (exists("YMIN") && exists("YMAX")) {
-    YMIN = YMIN + 0
-    YMAX = YMAX + 0
-    set yrange [YMIN : YMAX]
-}
+if (exists("XMIN") && exists("XMAX")) set xrange [XMIN+0.0 : XMAX+0.0]
+if (exists("YMIN") && exists("YMAX")) set yrange [YMIN+0.0 : YMAX+0.0]
 
 #set label 1 'q_{max} = 4 Å^{-1}' @POS
 #set logscale x 10
@@ -133,10 +119,8 @@ if (HAS_DATA2) PLOT_CMD = PLOT_CMD . ", '".DATA2."' u ".USING." ".STYLE2." t '".
 
 stats DATA using RMSD_COL nooutput
 print sprintf("Series 1: %s (%d points)", DATA, STATS_records)
-if (HAS_DATA2) {
-    stats DATA2 using RMSD_COL nooutput
-    print sprintf("Series 2: %s (%d points)", DATA2, STATS_records)
-}
+if (HAS_DATA2) stats DATA2 using RMSD_COL nooutput
+if (HAS_DATA2) print sprintf("Series 2: %s (%d points)", DATA2, STATS_records)
 eval "plot ".PLOT_CMD
 
 print sprintf("Wrote %s.tex (compile: pdflatex %s.tex).", OUTBASE, OUTBASE)
