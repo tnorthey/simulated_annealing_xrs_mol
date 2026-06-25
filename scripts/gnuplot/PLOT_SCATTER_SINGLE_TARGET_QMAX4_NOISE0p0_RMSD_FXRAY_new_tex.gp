@@ -16,6 +16,10 @@
 # Legacy multi-column analysis files (chi2 in col 4, RMSD in col 5):
 #   gnuplot -e "CHI2_COL=4;RMSD_COL=5;DATA='analysis_qmax4_no_constraints.dat'" \
 #       scripts/gnuplot/PLOT_SCATTER_SINGLE_TARGET_QMAX4_NOISE0p0_RMSD_FXRAY_new_tex.gp
+#
+# Restore fixed publication axis ranges:
+#   gnuplot -e "XMIN=0;XMAX=0.44;YMIN=5e-5;YMAX=5;RESULTS_DIR='...';RESULTS_DIR2='...'" \
+#       scripts/gnuplot/PLOT_SCATTER_SINGLE_TARGET_QMAX4_NOISE0p0_RMSD_FXRAY_new_tex.gp
 # ------------------------------------------------------------------------------
 
 if (!exists("RESULTS_DIR")) RESULTS_DIR = "."
@@ -25,6 +29,16 @@ if (!exists("DATA2")) DATA2 = (RESULTS_DIR2 ne "") ? RESULTS_DIR2 . "/chi2_rmsd.
 if (!exists("OUTBASE")) OUTBASE = "PLOT_SCATTER_SINGLE_TARGET_QMAX4"
 if (!exists("NAME1")) NAME1 = "C1-C6 open"
 if (!exists("NAME2")) NAME2 = "C1-C6 closed"
+if (!exists("COL1")) COL1 = "#a2142f"
+if (!exists("COL2")) COL2 = "#0072bd"
+if (!exists("PT1")) PT1 = 7
+if (!exists("PT2")) PT2 = 5
+if (!exists("PS1")) PS1 = 1.2
+if (!exists("PS2")) PS2 = 1.0
+PT1 = PT1 + 0
+PT2 = PT2 + 0
+PS1 = PS1 + 0
+PS2 = PS2 + 0
 
 # extract_chi2_rmsd.sh: col1 = chi^2, col2 = RMSD
 if (!exists("CHI2_COL")) CHI2_COL = 1
@@ -39,6 +53,9 @@ if (!HAS_DATA) print sprintf("ERROR: DATA missing or empty: %s", DATA)
 if (!HAS_DATA) exit
 if (DATA2 ne "" && !HAS_DATA2) print sprintf("ERROR: DATA2 missing or empty: %s", DATA2)
 if (DATA2 ne "" && !HAS_DATA2) exit
+
+if (!exists("SHOW_KEY")) SHOW_KEY = HAS_DATA2
+SHOW_KEY = SHOW_KEY + 0
 
 reset
 
@@ -79,27 +96,38 @@ set ytics ("" 10, "" 1, "" 0.1, "$10^{-2}$" 0.01, "$10^{-3}$" 0.001, "$10^{-4}$"
 set mytics 10 
 set ylabel "$\\chi^2$" offset 1.0,-3
 
-#set key bottom right
-unset key
+if (SHOW_KEY) set key bottom right opaque box lw 0.8 spacing 1.1 font ',10'
+if (!SHOW_KEY) unset key
 
-if (!exists("XMIN")) XMIN = 0.000
-if (!exists("XMAX")) XMAX = 0.44
-if (!exists("YMIN")) YMIN = 0.000050
-if (!exists("YMAX")) YMAX = 5
-XMIN = XMIN + 0
-XMAX = XMAX + 0
-YMIN = YMIN + 0
-YMAX = YMAX + 0
-set yrange [YMIN : YMAX]
-set xrange [XMIN : XMAX]
+# Fixed ranges only when passed via -e (e.g. XMIN=0;XMAX=0.44;YMIN=5e-5;YMAX=5).
+# Omit them to autoscale from data so both series stay visible.
+if (exists("XMIN") && exists("XMAX")) {
+    XMIN = XMIN + 0
+    XMAX = XMAX + 0
+    set xrange [XMIN : XMAX]
+}
+if (exists("YMIN") && exists("YMAX")) {
+    YMIN = YMIN + 0
+    YMAX = YMAX + 0
+    set yrange [YMIN : YMAX]
+}
 
 #set label 1 'q_{max} = 4 Å^{-1}' @POS
 #set logscale x 10
 set logscale y 10
 
 USING = sprintf("%d:%d", RMSD_COL, CHI2_COL)
-PLOT_CMD = "'".DATA."' u ".USING." w p ls 7 t '".NAME1."'"
-if (HAS_DATA2) PLOT_CMD = PLOT_CMD . ", '".DATA2."' u ".USING." w p ls 1 t '".NAME2."'"
+STYLE1 = sprintf("w p pt %d ps %g lc rgb '%s' lw 0", PT1, PS1, COL1)
+STYLE2 = sprintf("w p pt %d ps %g lc rgb '%s' lw 0", PT2, PS2, COL2)
+PLOT_CMD = "'".DATA."' u ".USING." ".STYLE1." t '".NAME1."'"
+if (HAS_DATA2) PLOT_CMD = PLOT_CMD . ", '".DATA2."' u ".USING." ".STYLE2." t '".NAME2."'"
+
+stats DATA using RMSD_COL nooutput
+print sprintf("Series 1: %s (%d points)", DATA, STATS_records)
+if (HAS_DATA2) {
+    stats DATA2 using RMSD_COL nooutput
+    print sprintf("Series 2: %s (%d points)", DATA2, STATS_records)
+}
 eval "plot ".PLOT_CMD
 
 print sprintf("Wrote %s.tex (compile: pdflatex %s.tex).", OUTBASE, OUTBASE)
