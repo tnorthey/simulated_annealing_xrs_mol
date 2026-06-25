@@ -24,13 +24,18 @@
 #       scripts/gnuplot/plot_chi2_rmsd_scatter_tex.gp
 # ------------------------------------------------------------------------------
 
-dir_base(d) = ((d eq ".") || (d eq "./")) ? "chi2_rmsd" : word(d, words(d, "/"), "/")
-
 if (!exists("RESULTS_DIR")) RESULTS_DIR = "."
 if (!exists("RESULTS_DIR2")) RESULTS_DIR2 = ""
 if (!exists("DATA")) DATA = RESULTS_DIR . "/chi2_rmsd.dat"
 if (!exists("DATA2")) DATA2 = (RESULTS_DIR2 ne "") ? RESULTS_DIR2 . "/chi2_rmsd.dat" : ""
-if (!exists("OUTBASE")) OUTBASE = "figure_" . dir_base(RESULTS_DIR)
+if (!exists("OUTBASE")) {
+    if ((RESULTS_DIR eq ".") || (RESULTS_DIR eq "./")) {
+        OUTBASE = "figure_chi2_rmsd"
+    } else {
+        DIR_N = words(RESULTS_DIR, "/")
+        OUTBASE = "figure_" . word(RESULTS_DIR, DIR_N, "/")
+    }
+}
 if (!exists("NAME1")) NAME1 = "C1-C6 open"
 if (!exists("NAME2")) NAME2 = "C1-C6 closed"
 if (!exists("COL1")) COL1 = "#a2142f"
