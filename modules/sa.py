@@ -615,7 +615,7 @@ class Annealing:
                 print(
                     f"[GPU] Loading per-chain starting coordinates onto device "
                     f"(batch shape {tuple(gpu_starting_xyz_batch.shape)}); "
-                    f"each CUDA chain uses a distinct random XYZ from the top-M pool."
+                    f"each chain continues from its own start geometry."
                 )
                 if gpu_per_chain_pool_picks is not None:
                     if len(gpu_per_chain_pool_picks) != n_chains:
@@ -650,8 +650,21 @@ class Annealing:
                     predicted_start_xp.reshape(1, -1), n_chains, axis=0
                 )
 
-            f_best = xp.full(n_chains, float(f_start), dtype=xp.float64)
-            f_xray_best = xp.full(n_chains, float(f_xray_start), dtype=xp.float64)
+            def _broadcast_chain_values(value, name: str):
+                """Scalar or length-n_chains vector -> shape (n_chains,) on backend."""
+                arr = xp.asarray(value, dtype=xp.float64)
+                if arr.ndim == 0:
+                    return xp.full(n_chains, float(to_numpy(arr, xp)), dtype=xp.float64)
+                arr = arr.reshape(-1)
+                if int(arr.shape[0]) != n_chains:
+                    raise ValueError(
+                        f"{name} must be scalar or length {n_chains}, "
+                        f"got shape {tuple(xp.asarray(value).shape)}"
+                    )
+                return arr.copy()
+
+            f_best = _broadcast_chain_values(f_start, "f_start")
+            f_xray_best = _broadcast_chain_values(f_xray_start, "f_xray_start")
             f = xp.full(n_chains, 1e9, dtype=xp.float64)
             c = 0
 

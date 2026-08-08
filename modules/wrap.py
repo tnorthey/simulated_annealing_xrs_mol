@@ -249,6 +249,97 @@ def log_gpu_per_chain_random_starts(
     )
 
 
+def summarize_chain_diversity(
+    xyz_best_all: np.ndarray,
+    *,
+    rmsd_indices,
+    bond_indices=None,
+    max_pairs: int = 64,
+    rng: np.random.Generator | None = None,
+) -> dict:
+    """
+    Compute pairwise centroid-aligned RMSD and optional bond-length spread across chains.
+
+    Returns a dict with pairwise_rmsd stats and optional bond_length stats.
+    Centroid alignment only (no Kabsch SVD) so bulk diversity logs stay robust.
+    """
+    xyz_best_all = np.asarray(xyz_best_all, dtype=np.float64)
+    n_chains = int(xyz_best_all.shape[0])
+    if n_chains < 2:
+        return {
+            "n_chains": n_chains,
+            "n_pairs": 0,
+            "rmsd_min": 0.0,
+            "rmsd_median": 0.0,
+            "rmsd_max": 0.0,
+        }
+
+    idx = np.asarray(rmsd_indices, dtype=np.int64)
+    pairs = [(i, j) for i in range(n_chains) for j in range(i + 1, n_chains)]
+    if len(pairs) > int(max_pairs):
+        if rng is None:
+            rng = np.random.default_rng(0)
+        pick_idx = rng.choice(len(pairs), size=int(max_pairs), replace=False)
+        pairs = [pairs[int(k)] for k in pick_idx]
+
+    def _pair_rmsd(i: int, j: int) -> float:
+        xa = np.array(xyz_best_all[i, idx, :], dtype=np.float64, copy=True)
+        xb = np.array(xyz_best_all[j, idx, :], dtype=np.float64, copy=True)
+        xa -= xa.mean(axis=0)
+        xb -= xb.mean(axis=0)
+        diff = xa - xb
+        return float(np.sqrt(np.sum(diff * diff) / xa.shape[0]))
+
+    rmsds = [_pair_rmsd(i, j) for i, j in pairs]
+    rmsds_arr = np.asarray(rmsds, dtype=np.float64)
+
+    out = {
+        "n_chains": n_chains,
+        "n_pairs": len(pairs),
+        "rmsd_min": float(np.min(rmsds_arr)),
+        "rmsd_median": float(np.median(rmsds_arr)),
+        "rmsd_max": float(np.max(rmsds_arr)),
+    }
+
+    if bond_indices is not None and len(bond_indices) >= 2:
+        a0, a1 = int(bond_indices[0]), int(bond_indices[1])
+        bond_lens = np.linalg.norm(
+            xyz_best_all[:, a0, :] - xyz_best_all[:, a1, :], axis=1
+        )
+        out["bond_n"] = int(bond_lens.size)
+        out["bond_min"] = float(np.min(bond_lens))
+        out["bond_median"] = float(np.median(bond_lens))
+        out["bond_max"] = float(np.max(bond_lens))
+        out["bond_std"] = float(np.std(bond_lens))
+
+    return out
+
+
+def print_chain_diversity_summary(stats: dict, *, bond_label: str = "bond") -> None:
+    """Log multi-chain conformational diversity stats."""
+    if int(stats.get("n_pairs", 0)) <= 0:
+        print(
+            f"[GPU] Diversity: only {stats.get('n_chains', 0)} chain(s); "
+            "pairwise RMSD not computed."
+        )
+        return
+    print(
+        f"[GPU] Diversity (pairwise centroid-aligned RMSD over {stats['n_pairs']} pairs, "
+        f"{stats['n_chains']} chains): "
+        f"min={stats['rmsd_min']:.4f} Å  "
+        f"median={stats['rmsd_median']:.4f} Å  "
+        f"max={stats['rmsd_max']:.4f} Å"
+    )
+    if "bond_min" in stats:
+        print(
+            f"[GPU] Diversity ({bond_label} length across {stats['bond_n']} chains): "
+            f"min={stats['bond_min']:.4f} Å  "
+            f"median={stats['bond_median']:.4f} Å  "
+            f"max={stats['bond_max']:.4f} Å  "
+            f"std={stats['bond_std']:.4f} Å"
+        )
+
+
 def scale_hydrogen_force_constants(
     bond_param_array,
     angle_param_array,
@@ -1239,21 +1330,35 @@ class Wrapper:
             else:
                 psize = p.qlen
             predicted_best = np.zeros(psize)
+            multi_chain_state = None  # previous phase per-chain results
             for i in range(p.nrestarts + 1):
-                ### each restart starts at the previous xyz_best
+                ### each restart starts at the previous xyz_best (scalar / best chain)
                 xyz_start = xyz_best
                 f_start = f_best
                 f_xray_start = f_xray_best
                 predicted_start = predicted_best
+                gpu_start_batch = None
                 ###
                 if i == 0:
-                    gpu_start_batch = None
                     bond_param_array = p.bond_param_array
                     angle_param_array = p.angle_param_array
                     torsion_param_array = p.torsion_param_array
-                    if p.sampling_bool:
-                        # Boltzmann sample only in first restart
-                        print("Boltzmann distribution sampling...")
+                    auto_boltzmann_starts = (
+                        use_gpu_multi_chain
+                        and not p.sampling_bool
+                        and gpu_start_batch_base is None
+                    )
+                    if p.sampling_bool or auto_boltzmann_starts:
+                        # Boltzmann sample only on first phase (explicit or
+                        # auto for multi-chain without a pool / sampling flag).
+                        if auto_boltzmann_starts:
+                            print(
+                                f"[GPU] multi-chain: per-chain Boltzmann starts "
+                                f"(T={p.boltzmann_temperature} K) for conformational "
+                                "diversity (sampling_bool=false, no random pool)."
+                            )
+                        else:
+                            print("Boltzmann distribution sampling...")
                         if use_gpu_multi_chain:
                             if gpu_start_batch_base is not None:
                                 gpu_start_batch = gpu_start_batch_base.copy()
@@ -1265,11 +1370,17 @@ class Wrapper:
                                     n_gpu_chains,
                                     axis=0,
                                 )
-                            print(
-                                f"[GPU] Applying independent Boltzmann displacements "
-                                f"to each of {n_gpu_chains} chains "
-                                f"(T={p.boltzmann_temperature} K)."
-                            )
+                            if not auto_boltzmann_starts:
+                                print(
+                                    f"[GPU] Applying independent Boltzmann displacements "
+                                    f"to each of {n_gpu_chains} chains "
+                                    f"(T={p.boltzmann_temperature} K)."
+                                )
+                            else:
+                                print(
+                                    f"[GPU] Applying independent Boltzmann displacements "
+                                    f"to each of {n_gpu_chains} chains."
+                                )
                             gpu_start_batch = apply_per_chain_boltzmann_displacement(
                                 gpu_start_batch,
                                 displacements,
@@ -1298,8 +1409,26 @@ class Wrapper:
                                 atomlist,
                                 xyz_start,
                             )
-                elif use_gpu_multi_chain and gpu_start_batch_base is not None:
-                    gpu_start_batch = gpu_start_batch_base
+                    elif use_gpu_multi_chain and gpu_start_batch_base is not None:
+                        # Pool starts without Boltzmann (distinct XYZs already).
+                        gpu_start_batch = gpu_start_batch_base.copy()
+                        xyz_start = gpu_start_batch[0].copy()
+                elif use_gpu_multi_chain and multi_chain_state is not None:
+                    # Continue each chain from its own previous-phase best.
+                    def _to_host(arr):
+                        if hasattr(arr, "get"):
+                            return arr.get()
+                        return np.asarray(arr)
+
+                    gpu_start_batch = _to_host(multi_chain_state["xyz_best_all"])
+                    f_start = _to_host(multi_chain_state["f_best_all"])
+                    f_xray_start = _to_host(multi_chain_state["f_xray_best_all"])
+                    predicted_start = _to_host(multi_chain_state["predicted_best_all"])
+                    print(
+                        f"[GPU] Continuing {n_gpu_chains} independent chains from "
+                        f"previous-phase per-chain best structures "
+                        f"(not collapsing to a single global best)."
+                    )
                 # else:
                 # redefine angles and bond-distances based on xyz_best
 
@@ -1366,13 +1495,13 @@ class Wrapper:
                     elastic_ab_initio_correction=(
                         bool(abi_file) and abi_corr_mode == "elastic"
                     ),
-                    gpu_starting_xyz_batch=(
-                        gpu_start_batch if i == 0 else None
-                    ),
+                    gpu_starting_xyz_batch=gpu_start_batch,
                     gpu_per_chain_pool_picks=(
-                        pool_picks if i == 0 and gpu_start_batch is not None else None
+                        pool_picks if i == 0 and pool_picks is not None else None
                     ),
                 )
+                if use_gpu_multi_chain and getattr(sa, "last_chain_results", None):
+                    multi_chain_state = sa.last_chain_results
                 print("f_best (SA): %9.8f" % f_best)
                 print("Updating tuning parameter...")
                 print("c_tuning: %9.8f" % c_tuning)
@@ -1544,6 +1673,23 @@ class Wrapper:
                 print(
                     f"Writing outputs for {xyz_best_all.shape[0]} GPU chains "
                     "(no chain IDs in filenames)"
+                )
+                diversity_stats = summarize_chain_diversity(
+                    xyz_best_all,
+                    rmsd_indices=p.rmsd_indices,
+                    bond_indices=getattr(p, "bond_indices", None),
+                )
+                bond_label = "monitored bond"
+                if (
+                    getattr(p, "bond_indices", None) is not None
+                    and len(p.bond_indices) >= 2
+                ):
+                    bond_label = (
+                        f"bond atoms {int(p.bond_indices[0])}-"
+                        f"{int(p.bond_indices[1])}"
+                    )
+                print_chain_diversity_summary(
+                    diversity_stats, bond_label=bond_label
                 )
                 filename_counts = {}
                 for chain_idx in range(xyz_best_all.shape[0]):
