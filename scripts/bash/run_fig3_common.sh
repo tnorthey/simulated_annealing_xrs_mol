@@ -3,7 +3,7 @@
 # Shared launcher for Figure 3 CHD test-mode GPU runs.
 #
 # Writes a complete input.toml into RESULTS_DIR (so bond_ignore_array is
-# recorded with the run), then calls run.py. 1D IAM (not Ewald, not PCD).
+# recorded with the run), then calls run.py. 1D IAM in PCD mode (not Ewald).
 #
 # Usage:
 #   ./scripts/bash/run_fig3_common.sh --qmax 4 --qlen 41 --ring open
@@ -132,7 +132,7 @@ boltzmann_temperature = 300.0
 [scattering_params]
 inelastic_bool = true
 ion_mode_bool = false
-pcd_mode_bool = false
+pcd_mode_bool = true
 excitation_factor = 1.0
 
 [scattering_params.q]
@@ -196,6 +196,7 @@ EOF
 echo "=== Figure 3 run ==="
 echo "  ring           = $RING  (bond_ignore_array = $BOND_IGNORE)"
 echo "  q              = 0.0 .. ${QMAX}.0  (${QLEN} pts)"
+echo "  pcd_mode       = true  (IAM vs $REFERENCE_XYZ)"
 echo "  gpu_chains     = $GPU_CHAINS"
 echo "  target         = $TARGET_FILE"
 echo "  start          = $STARTING_XYZ"
@@ -215,6 +216,7 @@ RUN_CMD=(
     --restart-from-global-best
     --sampling
     --boltzmann-temperature 300.0
+    --pcd-mode
     --qmin 0.0
     --qmax "$QMAX"
     --qlen "$QLEN"
