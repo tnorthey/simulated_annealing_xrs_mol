@@ -171,6 +171,7 @@ def test_multi_chain_preserves_distinct_starts_across_restarts():
     np.testing.assert_allclose(xyz_phase2, xyz_phase1, atol=1e-12)
 
     # Without batch, all chains would be cloned from a single start.
+    # (wrap restart_from_global_best_bool=true semantics)
     a_collapse, *_ = _run_batched_sa(
         n_chains=n_chains,
         starting_xyz=xyz_phase1[0],
@@ -187,6 +188,55 @@ def test_multi_chain_preserves_distinct_starts_across_restarts():
     )
     for k in range(1, n_chains):
         np.testing.assert_allclose(xyz_collapse[k], xyz_collapse[0], atol=1e-12)
+
+
+@pytest.mark.unit
+def test_restart_from_global_best_wrap_semantics():
+    """Global-best restart clones scalar best onto every chain (old wrap policy)."""
+    inp = _minimal_sa_inputs()
+    base = inp["starting_xyz"].copy()
+    n_chains = 4
+    batch = np.stack(
+        [base + np.array([0.1 * k, 0.0, 0.0], dtype=np.float64) for k in range(n_chains)],
+        axis=0,
+    )
+
+    a1, *_ = _run_batched_sa(
+        n_chains=n_chains,
+        starting_xyz=base,
+        gpu_starting_xyz_batch=batch,
+        f_start=1e10,
+        f_xray_start=1e10,
+        predicted_start=0,
+        nsteps=1,
+        step_size=0.0,
+        inp=inp,
+    )
+    xyz_phase1 = np.asarray(a1.last_chain_results["xyz_best_all"], dtype=np.float64)
+    f_phase1 = np.asarray(a1.last_chain_results["f_best_all"], dtype=np.float64)
+    best_idx = int(np.argmin(f_phase1))
+    global_xyz = xyz_phase1[best_idx]
+    global_f = float(f_phase1[best_idx])
+    global_fx = float(a1.last_chain_results["f_xray_best_all"][best_idx])
+    global_pred = np.asarray(
+        a1.last_chain_results["predicted_best_all"][best_idx], dtype=np.float64
+    )
+
+    # restart_from_global_best_bool=true: no batch → clone scalar global best.
+    a2, *_ = _run_batched_sa(
+        n_chains=n_chains,
+        starting_xyz=global_xyz,
+        gpu_starting_xyz_batch=None,
+        f_start=global_f,
+        f_xray_start=global_fx,
+        predicted_start=global_pred,
+        nsteps=1,
+        step_size=0.0,
+        inp=inp,
+    )
+    xyz_phase2 = np.asarray(a2.last_chain_results["xyz_best_all"], dtype=np.float64)
+    for k in range(n_chains):
+        np.testing.assert_allclose(xyz_phase2[k], global_xyz, atol=1e-12)
 
 
 @pytest.mark.unit

@@ -96,6 +96,10 @@ def create_parser():
     options_group.add_argument('--gpu-chains', type=int,
                               dest='options.gpu_chains',
                               help='Number of independent GPU chains to run in parallel')
+    options_group.add_argument('--restart-from-global-best', action='store_true',
+                              dest='options.restart_from_global_best_bool',
+                              help='After each SA/GA phase, restart all GPU chains '
+                                   'from the single global-best structure')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')

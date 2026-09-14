@@ -117,6 +117,12 @@ class Input_to_params:
         self.gpu_chains = int(
             data.get("options", {}).get("gpu_chains", 1)
         )
+        # When true (gpu_chains > 1): after each SA/GA phase, clone the single
+        # global-best structure onto every chain. When false (default): each
+        # chain continues from its own previous best.
+        self.restart_from_global_best_bool = bool(
+            data.get("options", {}).get("restart_from_global_best_bool", False)
+        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")

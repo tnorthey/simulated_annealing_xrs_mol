@@ -59,6 +59,10 @@ gpu_backend = "cpu"
 gpu_emulation_bool = false
 # Number of independent chains to run in parallel on GPU backend
 gpu_chains = 1024
+# When true (gpu_chains > 1): after each SA/GA phase, clone the single
+# global-best structure onto every chain. When false (default): each chain
+# continues from its own previous best.
+restart_from_global_best_bool = false
 
 # ============================================================================
 # SAMPLING PARAMETERS

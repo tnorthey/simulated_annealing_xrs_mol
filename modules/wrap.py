@@ -1414,21 +1414,33 @@ class Wrapper:
                         gpu_start_batch = gpu_start_batch_base.copy()
                         xyz_start = gpu_start_batch[0].copy()
                 elif use_gpu_multi_chain and multi_chain_state is not None:
-                    # Continue each chain from its own previous-phase best.
-                    def _to_host(arr):
-                        if hasattr(arr, "get"):
-                            return arr.get()
-                        return np.asarray(arr)
+                    if getattr(p, "restart_from_global_best_bool", False):
+                        # Old policy: leave gpu_start_batch=None so sa.py clones
+                        # scalar xyz_best (global best) onto every chain.
+                        # xyz_start / f_start / etc. already set from scalar best.
+                        print(
+                            f"[GPU] Restarting {n_gpu_chains} chains from the "
+                            f"single global-best structure "
+                            f"(restart_from_global_best_bool=true)."
+                        )
+                    else:
+                        # Continue each chain from its own previous-phase best.
+                        def _to_host(arr):
+                            if hasattr(arr, "get"):
+                                return arr.get()
+                            return np.asarray(arr)
 
-                    gpu_start_batch = _to_host(multi_chain_state["xyz_best_all"])
-                    f_start = _to_host(multi_chain_state["f_best_all"])
-                    f_xray_start = _to_host(multi_chain_state["f_xray_best_all"])
-                    predicted_start = _to_host(multi_chain_state["predicted_best_all"])
-                    print(
-                        f"[GPU] Continuing {n_gpu_chains} independent chains from "
-                        f"previous-phase per-chain best structures "
-                        f"(not collapsing to a single global best)."
-                    )
+                        gpu_start_batch = _to_host(multi_chain_state["xyz_best_all"])
+                        f_start = _to_host(multi_chain_state["f_best_all"])
+                        f_xray_start = _to_host(multi_chain_state["f_xray_best_all"])
+                        predicted_start = _to_host(
+                            multi_chain_state["predicted_best_all"]
+                        )
+                        print(
+                            f"[GPU] Continuing {n_gpu_chains} independent chains from "
+                            f"previous-phase per-chain best structures "
+                            f"(not collapsing to a single global best)."
+                        )
                 # else:
                 # redefine angles and bond-distances based on xyz_best
 
