@@ -25,6 +25,7 @@ class TestInputToParams:
         assert p.ion_mode is False
         assert p.gpu_chains == 1
         assert p.restart_from_global_best_bool is False
+        assert p.restart_ratio == 1.0
         assert p.qmin == 0.1
         assert p.qmax == 10.0
         assert p.qlen == 50
@@ -40,6 +41,7 @@ class TestInputToParams:
             "simulated_annealing_params.sa_nsteps": 5000,
             "options.gpu_chains": 4,
             "options.restart_from_global_best_bool": True,
+            "options.restart_ratio": 0.1,
         }
         
         p = Input_to_params(sample_toml_file, overrides=overrides)
@@ -48,8 +50,22 @@ class TestInputToParams:
         assert p.sa_nsteps == 5000
         assert p.gpu_chains == 4
         assert p.restart_from_global_best_bool is True
+        assert p.restart_ratio == 0.1
         # Other parameters should remain unchanged
         assert p.mode == "test"
+
+    def test_restart_ratio_invalid_raises(self, sample_toml_file):
+        """restart_ratio outside (0, 1] exits during parse."""
+        with pytest.raises(SystemExit):
+            Input_to_params(
+                sample_toml_file,
+                overrides={"options.restart_ratio": 0.0},
+            )
+        with pytest.raises(SystemExit):
+            Input_to_params(
+                sample_toml_file,
+                overrides={"options.restart_ratio": 1.5},
+            )
 
     def test_hydrogen_force_constant_scale_default(self, sample_toml_file):
         """hydrogen_force_constant_scale defaults to 1.0 when omitted."""

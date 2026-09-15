@@ -16,6 +16,7 @@ from modules.sa import Annealing
 from modules.wrap import (
     apply_per_chain_boltzmann_displacement,
     print_chain_diversity_summary,
+    select_restart_batch,
     summarize_chain_diversity,
 )
 from modules.x import Xray
@@ -153,32 +154,42 @@ def test_multi_chain_preserves_distinct_starts_across_restarts():
     assert not np.allclose(xyz_phase1[0], xyz_phase1[-1])
     np.testing.assert_allclose(xyz_phase1, batch, atol=1e-12)
 
-    # Phase 2: continue from per-chain bests (wrap restart semantics).
+    # Phase 2: continue from per-chain bests via restart_ratio=1.0 tiling
+    # (full set, score-sorted; wrap restart semantics).
+    xyz_batch, f_batch, fx_batch, pred_batch, k = select_restart_batch(
+        xyz_phase1, f_phase1, fx_phase1, pred_phase1, 1.0
+    )
+    assert k == n_chains
     a2, *_ = _run_batched_sa(
         n_chains=n_chains,
-        starting_xyz=xyz_phase1[0],  # would be wrong to use for all if batch missing
-        gpu_starting_xyz_batch=xyz_phase1,
-        f_start=f_phase1,
-        f_xray_start=fx_phase1,
-        predicted_start=pred_phase1,
+        starting_xyz=xyz_batch[0],
+        gpu_starting_xyz_batch=xyz_batch,
+        f_start=f_batch,
+        f_xray_start=fx_batch,
+        predicted_start=pred_batch,
         nsteps=1,
         step_size=0.0,
         inp=inp,
     )
     xyz_phase2 = np.asarray(a2.last_chain_results["xyz_best_all"], dtype=np.float64)
-    assert not np.allclose(xyz_phase2[0], xyz_phase2[1])
+    # Full-set restart preserves the ensemble (order may be score-sorted).
+    assert {tuple(x.ravel()) for x in xyz_phase2} == {
+        tuple(x.ravel()) for x in xyz_phase1
+    }
     assert not np.allclose(xyz_phase2[0], xyz_phase2[-1])
-    np.testing.assert_allclose(xyz_phase2, xyz_phase1, atol=1e-12)
 
-    # Without batch, all chains would be cloned from a single start.
-    # (wrap restart_from_global_best_bool=true semantics)
+    # force_k=1 (deprecated global-best alias): all chains cloned from best.
+    xyz_g, f_g, fx_g, pred_g, k1 = select_restart_batch(
+        xyz_phase1, f_phase1, fx_phase1, pred_phase1, 1.0, force_k=1
+    )
+    assert k1 == 1
     a_collapse, *_ = _run_batched_sa(
         n_chains=n_chains,
-        starting_xyz=xyz_phase1[0],
-        gpu_starting_xyz_batch=None,
-        f_start=float(f_phase1[0]),
-        f_xray_start=float(fx_phase1[0]),
-        predicted_start=pred_phase1[0],
+        starting_xyz=xyz_g[0],
+        gpu_starting_xyz_batch=xyz_g,
+        f_start=f_g,
+        f_xray_start=fx_g,
+        predicted_start=pred_g,
         nsteps=1,
         step_size=0.0,
         inp=inp,
@@ -186,13 +197,13 @@ def test_multi_chain_preserves_distinct_starts_across_restarts():
     xyz_collapse = np.asarray(
         a_collapse.last_chain_results["xyz_best_all"], dtype=np.float64
     )
-    for k in range(1, n_chains):
-        np.testing.assert_allclose(xyz_collapse[k], xyz_collapse[0], atol=1e-12)
+    for k_idx in range(1, n_chains):
+        np.testing.assert_allclose(xyz_collapse[k_idx], xyz_collapse[0], atol=1e-12)
 
 
 @pytest.mark.unit
 def test_restart_from_global_best_wrap_semantics():
-    """Global-best restart clones scalar best onto every chain (old wrap policy)."""
+    """Deprecated bool path: force_k=1 clones global best + carried scores."""
     inp = _minimal_sa_inputs()
     base = inp["starting_xyz"].copy()
     n_chains = 4
@@ -214,29 +225,37 @@ def test_restart_from_global_best_wrap_semantics():
     )
     xyz_phase1 = np.asarray(a1.last_chain_results["xyz_best_all"], dtype=np.float64)
     f_phase1 = np.asarray(a1.last_chain_results["f_best_all"], dtype=np.float64)
+    fx_phase1 = np.asarray(a1.last_chain_results["f_xray_best_all"], dtype=np.float64)
+    pred_phase1 = np.asarray(
+        a1.last_chain_results["predicted_best_all"], dtype=np.float64
+    )
     best_idx = int(np.argmin(f_phase1))
     global_xyz = xyz_phase1[best_idx]
     global_f = float(f_phase1[best_idx])
-    global_fx = float(a1.last_chain_results["f_xray_best_all"][best_idx])
-    global_pred = np.asarray(
-        a1.last_chain_results["predicted_best_all"][best_idx], dtype=np.float64
-    )
 
-    # restart_from_global_best_bool=true: no batch → clone scalar global best.
+    xyz_g, f_g, fx_g, pred_g, k = select_restart_batch(
+        xyz_phase1, f_phase1, fx_phase1, pred_phase1, 1.0, force_k=1
+    )
+    assert k == 1
+    assert float(f_g[0]) == pytest.approx(global_f)
+    for chain_idx in range(n_chains):
+        np.testing.assert_allclose(xyz_g[chain_idx], global_xyz, atol=1e-12)
+        assert float(f_g[chain_idx]) == pytest.approx(global_f)
+
     a2, *_ = _run_batched_sa(
         n_chains=n_chains,
-        starting_xyz=global_xyz,
-        gpu_starting_xyz_batch=None,
-        f_start=global_f,
-        f_xray_start=global_fx,
-        predicted_start=global_pred,
+        starting_xyz=xyz_g[0],
+        gpu_starting_xyz_batch=xyz_g,
+        f_start=f_g,
+        f_xray_start=fx_g,
+        predicted_start=pred_g,
         nsteps=1,
         step_size=0.0,
         inp=inp,
     )
     xyz_phase2 = np.asarray(a2.last_chain_results["xyz_best_all"], dtype=np.float64)
-    for k in range(n_chains):
-        np.testing.assert_allclose(xyz_phase2[k], global_xyz, atol=1e-12)
+    for chain_idx in range(n_chains):
+        np.testing.assert_allclose(xyz_phase2[chain_idx], global_xyz, atol=1e-12)
 
 
 @pytest.mark.unit

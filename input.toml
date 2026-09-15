@@ -59,9 +59,12 @@ gpu_backend = "cpu"
 gpu_emulation_bool = false
 # Number of independent chains to run in parallel on GPU backend
 gpu_chains = 1024
-# When true (gpu_chains > 1): after each SA/GA phase, clone the single
-# global-best structure onto every chain. When false (default): each chain
-# continues from its own previous best.
+# Fraction of previous-phase per-chain bests (ranked by ascending total f)
+# used to reseed all GPU chains after each SA phase and into GA.
+#   1.0 → use all previous bests (≡ today’s per-chain default)
+#   0.1 → use lowest-f top 10%, tile onto all chains (shared score bars)
+restart_ratio = 1.0
+# Deprecated: when true, force K=1 (global best). Prefer restart_ratio instead.
 restart_from_global_best_bool = false
 
 # ============================================================================
