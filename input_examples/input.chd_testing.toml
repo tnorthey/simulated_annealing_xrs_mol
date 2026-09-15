@@ -53,8 +53,9 @@ gpu_backend = "cuda"
 gpu_emulation_bool = false
 # Number of independent chains to run in parallel on GPU backend
 gpu_chains = 512
-# When true: after each SA/GA phase, clone global best onto every chain.
-# When false (default): each chain continues from its own previous best.
+# Fraction of previous-phase bests (by total f) to reseed chains (1.0 = all).
+restart_ratio = 1.0
+# Deprecated: force K=1 (global best). Prefer restart_ratio.
 restart_from_global_best_bool = false
 
 # ============================================================================
