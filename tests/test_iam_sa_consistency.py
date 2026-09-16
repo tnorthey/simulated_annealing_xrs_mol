@@ -370,3 +370,108 @@ def test_iam_matches_sa_njit_loop_inelastic():
 
     np.testing.assert_allclose(predicted_sa, iam_py, rtol=1e-12, atol=1e-12)
 
+
+@pytest.mark.unit
+@pytest.mark.skipif(
+    not os.path.exists("data/Compton_Scattering_Intensities.npz"),
+    reason="Compton data file not found",
+)
+@pytest.mark.skipif(
+    not (
+        os.path.exists("xyz/chd_reference.xyz")
+        and os.path.exists("xyz/target_20.xyz")
+    ),
+    reason="CHD xyz files not found",
+)
+def test_fig3_pcd_inelastic_zero_chi2_at_true_target():
+    """Fig3 PCD: I_ref includes Compton; SA χ² at target_20 is ~0 (qmin=0)."""
+    import modules.mol as mol
+
+    x = Xray()
+    m = mol.Xyz()
+    _, _, atomlist, xyz_ref = m.read_xyz("xyz/chd_reference.xyz")
+    _, _, _, xyz_tgt = m.read_xyz("xyz/target_20.xyz")
+    atomic_numbers = [m.periodic_table(s) for s in atomlist]
+    qvector = np.linspace(0.0, 4.0, 41, dtype=np.float64)
+    compton_array = x.compton_spline(atomic_numbers, qvector)
+    iam_ref, atomic_total, _mo, compton_total, pre_molecular = x.iam_calc(
+        atomic_numbers,
+        xyz_ref,
+        qvector,
+        electron_mode=False,
+        inelastic=True,
+        compton_array=compton_array,
+    )
+    iam_tgt, _at, _mo_t, _co_t, _pm_t = x.iam_calc(
+        atomic_numbers,
+        xyz_tgt,
+        qvector,
+        electron_mode=False,
+        inelastic=True,
+        compton_array=compton_array,
+    )
+    iam_ref_elastic, *_ = x.iam_calc(
+        atomic_numbers,
+        xyz_ref,
+        qvector,
+        electron_mode=False,
+        inelastic=False,
+        compton_array=None,
+    )
+    # Compton must actually change I_ref at high q (the user's suspected bug).
+    assert iam_ref[-1] > iam_ref_elastic[-1] + 1.0
+
+    pcd_tgt = 100.0 * (iam_tgt / iam_ref - 1.0)
+    natoms = xyz_tgt.shape[0]
+    displacements = np.zeros((1, natoms, 3), dtype=np.float64)
+    mode_indices = np.array([0], dtype=np.int64)
+    step_size_array = np.array([0.0], dtype=np.float64)
+    bond_param_array = np.zeros((0, 4), dtype=np.float64)
+    angle_param_array = np.zeros((0, 5), dtype=np.float64)
+    torsion_param_array = np.zeros((0, 6), dtype=np.float64)
+    th = np.array([0.0, np.pi], dtype=np.float64)
+    ph = np.array([0.0, np.pi], dtype=np.float64)
+
+    a = Annealing()
+    (
+        _f_best,
+        f_xray_best,
+        predicted_best,
+        _xyz_best,
+        _c_tuning_adjusted,
+    ) = a.simulated_annealing_modes_ho(
+        starting_xyz=xyz_tgt.astype(np.float64),
+        displacements=displacements,
+        mode_indices=mode_indices,
+        target_function=pcd_tgt.astype(np.float64),
+        reference_iam=iam_ref.astype(np.float64),
+        qvector=qvector,
+        th=th,
+        ph=ph,
+        compton=compton_total.astype(np.float64),
+        atomic_total=atomic_total.astype(np.float64),
+        pre_molecular=pre_molecular.astype(np.float64),
+        step_size_array=step_size_array,
+        bond_param_array=bond_param_array,
+        angle_param_array=angle_param_array,
+        torsion_param_array=torsion_param_array,
+        starting_temp=0.0,
+        nsteps=1,
+        inelastic=True,
+        pcd_mode=True,
+        ewald_mode=False,
+        bonds_bool=False,
+        angles_bool=False,
+        torsions_bool=False,
+        verbose=False,
+        gpu_emulation=True,
+        gpu_chains=2,
+    )
+    np.testing.assert_allclose(
+        np.asarray(predicted_best, dtype=np.float64),
+        pcd_tgt,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+    assert float(f_xray_best) < 1e-20
+

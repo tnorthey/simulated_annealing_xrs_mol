@@ -1,8 +1,6 @@
 import os
 import random
 import sys
-import json
-import time
 import pprint
 import numpy as np
 from numpy import linalg as LA
@@ -15,29 +13,6 @@ try:
 except ImportError:
     HAVE_PYSCF = False
 
-# #region agent log
-def _agent_debug_log(hypothesis_id, location, message, data):
-    _p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "debug-11f1de.log")
-    try:
-        with open(_p, "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "11f1de",
-                        "hypothesisId": hypothesis_id,
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                    }
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-
-
-# #endregion
 
 # my modules
 import modules.mol as mol
@@ -992,8 +967,12 @@ class Wrapper:
             if ref_dat_path.lower() == "none":
                 ref_dat_path = None
         if p.pcd_mode and ref_dat_path:
-            # Load reference IAM from DAT file
-            print(f"Loading reference IAM from DAT file: {ref_dat_path}")
+            # Load reference IAM from DAT file (used as-is; Compton is not added here)
+            print(
+                f"Loading reference IAM from DAT file: {ref_dat_path} "
+                f"(PCD I_ref as tabulated; inelastic={bool(p.inelastic)} applies to "
+                f"IAM(target/trial), not to this file)"
+            )
             ref_q, ref_iam, ref_has_explicit_q = _read_scattering_dat(ref_dat_path)
 
             if not ref_has_explicit_q:
@@ -1020,6 +999,11 @@ class Wrapper:
                 print(f"Reference DAT q-grid matches qvector ({len(ref_q)} points)")
         else:
             # Calculate reference IAM from XYZ file (default behavior)
+            print(
+                f"Computing reference IAM from XYZ: {p.reference_xyz_file} "
+                f"(inelastic={bool(p.inelastic)}, so Compton "
+                f"{'is' if p.inelastic else 'is not'} included in I_ref)"
+            )
             reference_iam, atomic, compton, pre_molecular = xyz2iam(
                 reference_xyz, atomic_numbers, compton_array, p.ewald_mode
             )
@@ -1028,22 +1012,6 @@ class Wrapper:
         if save_starting_reference_iams:
             np.savetxt("starting_iam.dat", np.column_stack((p.qvector, starting_iam)))
             np.savetxt("reference_iam.dat", np.column_stack((p.qvector, reference_iam)))
-
-        # #region agent log
-        if p.pcd_mode:
-            _ri = np.asarray(reference_iam, dtype=np.float64).ravel()
-            _agent_debug_log(
-                "H2",
-                "wrap.py:after_reference_iam",
-                "reference_iam stats",
-                {
-                    "min": float(np.nanmin(_ri)),
-                    "max": float(np.nanmax(_ri)),
-                    "mean": float(np.nanmean(_ri)),
-                    "qlen": int(_ri.size),
-                },
-            )
-        # #endregion
 
         natoms = xyz_start.shape[0]
         ###### mode displacements ######
@@ -1316,33 +1284,6 @@ class Wrapper:
             correction_factor_q = np.ones(p.qlen, dtype=np.float64)
             abi_corr_mode = "elastic"
 
-        # #region agent log
-        _cf = np.asarray(correction_factor_q, dtype=np.float64).ravel()
-        _cmin, _cmax = float(np.nanmin(_cf)), float(np.nanmax(_cf))
-        _agent_debug_log(
-            "H1",
-            "wrap.py:after_correction_factor_q",
-            "correction_factor_q stats",
-            {
-                "min": _cmin,
-                "max": _cmax,
-                "mean": float(np.nanmean(_cf)),
-                "median": float(np.median(_cf)),
-                "has_ab_initio_file": bool(abi_file),
-            },
-        )
-        if p.pcd_mode and _cmax > 1.01:
-            _agent_debug_log(
-                "H4",
-                "wrap.py:pcd_formula_sanity",
-                "if I_tot equals ref, new PCD_full is 100*(c-1) per q",
-                {
-                    "example_new_pcd_if_I_equals_ref": 100.0 * (_cmax - 1.0),
-                    "example_old_scaled_pcd_if_uncorr_0p04": 0.04 * _cmax,
-                },
-            )
-        # #endregion
-
         # load target function from file
         # if os.path.exists(target_function_file):
         #    print("Loading data from %s ..." % target_function_file)
@@ -1607,20 +1548,6 @@ class Wrapper:
 
             # Scale predicted output from 100% excitation level back to
             # the experimental excitation level so it matches the raw target.
-            # #region agent log
-            if p.pcd_mode:
-                _pb = np.asarray(predicted_best, dtype=np.float64).ravel()
-                _agent_debug_log(
-                    "H5",
-                    "wrap.py:predicted_before_excitation",
-                    "predicted_best before excitation_factor",
-                    {
-                        "min": float(np.nanmin(_pb)),
-                        "max": float(np.nanmax(_pb)),
-                        "mean": float(np.nanmean(_pb)),
-                    },
-                )
-            # #endregion
             if p.mode == "normal":
                 predicted_best = predicted_best * p.excitation_factor
                 chain_results = getattr(sa, "last_chain_results", None)
@@ -1631,27 +1558,6 @@ class Wrapper:
                     chain_results["predicted_best_all"] = (
                         chain_results["predicted_best_all"] * p.excitation_factor
                     )
-
-            # #region agent log
-            if p.pcd_mode:
-                _pb2 = np.asarray(predicted_best, dtype=np.float64).ravel()
-                _tgt = np.asarray(target_function_, dtype=np.float64).ravel()
-                _tfs = np.asarray(target_for_sa, dtype=np.float64).ravel()
-                _agent_debug_log(
-                    "H3",
-                    "wrap.py:predicted_vs_target_after_excitation",
-                    "compare scales",
-                    {
-                        "predicted_min": float(np.nanmin(_pb2)),
-                        "predicted_max": float(np.nanmax(_pb2)),
-                        "target_raw_min": float(np.nanmin(_tgt)),
-                        "target_raw_max": float(np.nanmax(_tgt)),
-                        "target_for_sa_min": float(np.nanmin(_tfs)),
-                        "target_for_sa_max": float(np.nanmax(_tfs)),
-                        "excitation_factor": float(p.excitation_factor),
-                    },
-                )
-            # #endregion
 
             ### analysis on xyz_best
             # In signal-only mode, skip geometry/HF analysis entirely.

@@ -2,8 +2,10 @@
 # ============================================================================
 # Figure 3 CHD test-mode GPU runs.
 #
-# Uses repo input.toml for SA/MM defaults. This script only passes
-# experiment-specific CLI flags (q-grid, open/closed C1-C6, files, GPU).
+# Uses repo input.toml for MM/molecule defaults, plus experiment CLI:
+# q-grid, open/closed C1-C6, files, GPU, PCD, and the Figure 3 SA schedule
+# (step 0.025, GA 8000, n_tuning 100, nrestarts 1). Those SA values are
+# NOT taken from input.toml (CHD+ production defaults are smaller/shorter).
 #
 # Usage:
 #   ./scripts/bash/run_fig3_common.sh --qmax 4 --qlen 41 --ring open
@@ -23,6 +25,14 @@
 #   COMMENT            (unset) same as --comment
 #   RESULTS_DIR        (unset) auto from qmax/ring/comment
 #   RESTART_RATIO      (unset) inherit from CONFIG
+#   SA_NSTEPS          4000
+#   GA_NSTEPS          8000
+#   SA_STEP_SIZE       0.025
+#   GA_STEP_SIZE       0.025
+#   NRESTARTS          1
+#   N_TUNING_UPDATE_FREQ 100
+#   C_TUNING_INITIAL   0.1
+#   TUNING_RATIO_TARGET 0.5
 #   EXTRA_RUN_PY_ARGS  (unset) extra args appended to run.py
 # ============================================================================
 set -euo pipefail
@@ -41,13 +51,21 @@ EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 COMMENT="${COMMENT:-}"
 RESULTS_DIR_OVERRIDE="${RESULTS_DIR:-}"
 RESTART_RATIO="${RESTART_RATIO:-}"
+SA_NSTEPS="${SA_NSTEPS:-4000}"
+GA_NSTEPS="${GA_NSTEPS:-8000}"
+SA_STEP_SIZE="${SA_STEP_SIZE:-0.025}"
+GA_STEP_SIZE="${GA_STEP_SIZE:-0.025}"
+NRESTARTS="${NRESTARTS:-1}"
+N_TUNING_UPDATE_FREQ="${N_TUNING_UPDATE_FREQ:-100}"
+C_TUNING_INITIAL="${C_TUNING_INITIAL:-0.1}"
+TUNING_RATIO_TARGET="${TUNING_RATIO_TARGET:-0.5}"
 
 QMAX=""
 QLEN=""
 RING=""
 
 usage() {
-    sed -n '3,28p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,40p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -131,13 +149,16 @@ fi
 mkdir -p "$RESULTS_DIR"
 
 echo "=== Figure 3 run ==="
-echo "  config         = $CONFIG  (SA/MM defaults; this script does not generate a toml)"
+echo "  config         = $CONFIG  (MM/molecule defaults; this script does not generate a toml)"
 echo "  ring           = $RING  (--bond-ignore-array $BOND_IGNORE)"
 echo "  q              = 0.0 .. ${QMAX}.0  (${QLEN} pts)"
-echo "  pcd_mode       = true  (IAM vs $REFERENCE_XYZ)"
+echo "  pcd_mode       = true  (IAM vs $REFERENCE_XYZ, inelastic Compton in I_ref)"
 echo "  comment        = ${COMMENT:-<none>}"
 echo "  gpu_chains     = $GPU_CHAINS"
 echo "  restart_ratio  = ${RESTART_RATIO:-<from $CONFIG>}"
+echo "  sa/ga steps    = $SA_NSTEPS / $GA_NSTEPS  (step $SA_STEP_SIZE / $GA_STEP_SIZE)"
+echo "  nrestarts      = $NRESTARTS  n_tuning_update_freq=$N_TUNING_UPDATE_FREQ"
+echo "  c_tuning       = $C_TUNING_INITIAL  tuning_ratio_target=$TUNING_RATIO_TARGET"
 echo "  target         = $TARGET_FILE"
 echo "  start          = $STARTING_XYZ"
 echo "  results_dir    = $RESULTS_DIR"
@@ -158,10 +179,19 @@ RUN_CMD=(
     --gpu-chains "$GPU_CHAINS"
     --sampling
     --pcd-mode
+    --inelastic
     --qmin 0.0
     --qmax "$QMAX"
     --qlen "$QLEN"
     --bond-ignore-array "$BOND_IGNORE"
+    --sa-nsteps "$SA_NSTEPS"
+    --ga-nsteps "$GA_NSTEPS"
+    --sa-step-size "$SA_STEP_SIZE"
+    --ga-step-size "$GA_STEP_SIZE"
+    --nrestarts "$NRESTARTS"
+    --n-tuning-update-freq "$N_TUNING_UPDATE_FREQ"
+    --c-tuning-initial "$C_TUNING_INITIAL"
+    --tuning-ratio-target "$TUNING_RATIO_TARGET"
 )
 
 if [[ -n "$RESTART_RATIO" ]]; then
