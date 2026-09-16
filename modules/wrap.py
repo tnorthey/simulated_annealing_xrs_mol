@@ -1463,6 +1463,39 @@ class Wrapper:
                                 reduced_mass_amu=reduced_mass,
                             )
                             xyz_start = gpu_start_batch[0].copy()
+                            # #region agent log
+                            try:
+                                import json as _json
+                                from time import time as _time
+                                _bi = list(getattr(p, "bond_indices", [0, 5]))
+                                _c16 = np.linalg.norm(
+                                    gpu_start_batch[:, _bi[0], :]
+                                    - gpu_start_batch[:, _bi[1], :],
+                                    axis=1,
+                                )
+                                _logp = os.path.join(
+                                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    "debug-3d2523.log",
+                                )
+                                with open(_logp, "a", encoding="utf-8") as _lf:
+                                    _lf.write(_json.dumps({
+                                        "sessionId": "3d2523",
+                                        "hypothesisId": "E",
+                                        "location": "wrap.py:boltzmann_starts",
+                                        "message": "GPU per-chain Boltzmann starts",
+                                        "data": {
+                                            "n_chains": int(n_gpu_chains),
+                                            "T_K": float(p.boltzmann_temperature),
+                                            "c16_min": float(np.min(_c16)),
+                                            "c16_median": float(np.median(_c16)),
+                                            "c16_max": float(np.max(_c16)),
+                                            "c16_chain0": float(_c16[0]),
+                                        },
+                                        "timestamp": int(_time() * 1000),
+                                    }) + "\n")
+                            except Exception:
+                                pass
+                            # #endregion
                         else:
                             sampling_displacements = (
                                 _sample().generate_boltzmann_displacement(
@@ -1497,25 +1530,86 @@ class Wrapper:
                     fx_all = _to_host(multi_chain_state["f_xray_best_all"])
                     pred_all = _to_host(multi_chain_state["predicted_best_all"])
                     restart_ratio = float(getattr(p, "restart_ratio", 1.0))
-                    (
-                        gpu_start_batch,
-                        f_start,
-                        f_xray_start,
-                        predicted_start,
-                        restart_k,
-                    ) = select_restart_batch(
-                        xyz_all,
-                        f_all,
-                        fx_all,
-                        pred_all,
-                        restart_ratio,
+                    fx_all = np.asarray(fx_all, dtype=np.float64).reshape(-1)
+                    fx_min_prev = float(np.min(fx_all)) if fx_all.size else 1e10
+                    # CPU is one walker: the next phase starts from that walker's
+                    # xyz_best. GPU used to tile the lowest-χ² elite and *carry*
+                    # their total-f score bar. After high-T SA that elite is the
+                    # closed-ring basin (χ² ~ 2–5, low MM). Carrying f≈4 then
+                    # rejects ring-opening because open-ring MM makes f_ ≫ 4.
+                    # If nobody has a real fit yet, keep every chain's geometry
+                    # (128 independent walkers) and drop the score bar.
+                    _keep_all = fx_min_prev > 0.1
+                    if _keep_all:
+                        gpu_start_batch = np.asarray(xyz_all, dtype=np.float64)
+                        restart_k = int(gpu_start_batch.shape[0])
+                        reseed_mode = "keep_all_reset_scores"
+                    else:
+                        (
+                            gpu_start_batch,
+                            _f_unused,
+                            _fx_unused,
+                            _pred_unused,
+                            restart_k,
+                        ) = select_restart_batch(
+                            xyz_all,
+                            f_all,
+                            fx_all,
+                            pred_all,
+                            restart_ratio,
+                        )
+                        reseed_mode = "elite_f_xray_reset_scores"
+                    n_c = int(gpu_start_batch.shape[0])
+                    f_start = np.full(n_c, 1e10, dtype=np.float64)
+                    f_xray_start = np.full(n_c, 1e10, dtype=np.float64)
+                    predicted_start = np.zeros(
+                        np.asarray(pred_all).shape[1:], dtype=np.float64
                     )
                     xyz_start = gpu_start_batch[0].copy()
                     print(
-                        f"[GPU] restart_ratio={restart_ratio}: reseeding "
-                        f"{n_gpu_chains} chains from top {restart_k}/{n_gpu_chains} "
-                        f"(rank_by=f_xray, tile, scores carried)."
+                        f"[GPU] reseed phase {i}: mode={reseed_mode} "
+                        f"k={restart_k}/{n_gpu_chains} prev_fx_min={fx_min_prev:.4g} "
+                        f"(scores reset to 1e10; not carrying closed-basin f)."
                     )
+                    # #region agent log
+                    try:
+                        import json as _json
+                        from time import time as _time
+                        _bi = list(getattr(p, "bond_indices", [0, 5]))
+                        _c16 = np.linalg.norm(
+                            gpu_start_batch[:, _bi[0], :] - gpu_start_batch[:, _bi[1], :],
+                            axis=1,
+                        )
+                        _logp = os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "debug-3d2523.log",
+                        )
+                        with open(_logp, "a", encoding="utf-8") as _lf:
+                            _lf.write(_json.dumps({
+                                "sessionId": "3d2523",
+                                "hypothesisId": "B",
+                                "location": "wrap.py:select_restart_batch",
+                                "message": "GPU restart_ratio reseed",
+                                "data": {
+                                    "phase_i": int(i),
+                                    "reseed_mode": reseed_mode,
+                                    "restart_ratio": float(restart_ratio),
+                                    "restart_k": int(restart_k),
+                                    "n_chains": int(n_gpu_chains),
+                                    "prev_fx_min": fx_min_prev,
+                                    "f_start_reset": True,
+                                    "fx_pool_min": float(np.min(f_xray_start)),
+                                    "fx_pool_median": float(np.median(f_xray_start)),
+                                    "fx_pool_max": float(np.max(f_xray_start)),
+                                    "c16_pool_min": float(np.min(_c16)),
+                                    "c16_pool_median": float(np.median(_c16)),
+                                    "c16_pool_max": float(np.max(_c16)),
+                                },
+                                "timestamp": int(_time() * 1000),
+                            }) + "\n")
+                    except Exception:
+                        pass
+                    # #endregion
                 # else:
                 # redefine angles and bond-distances based on xyz_best
 
@@ -1594,6 +1688,92 @@ class Wrapper:
                 print("c_tuning: %9.8f" % c_tuning)
                 c_tuning = c_tuning_adjusted
                 print("c_tuning_adjusted: %9.8f" % c_tuning_adjusted)
+                # #region agent log
+                try:
+                    import json as _json
+                    from time import time as _time
+                    _bi = list(getattr(p, "bond_indices", [0, 5]))
+                    _xyz = xyz_best
+                    if hasattr(_xyz, "get"):
+                        _xyz = _xyz.get()
+                    _xyz = np.asarray(_xyz)
+                    _c16_best = float(np.linalg.norm(_xyz[_bi[0]] - _xyz[_bi[1]]))
+                    _chain = {}
+                    _cr = getattr(sa, "last_chain_results", None)
+                    if _cr is not None:
+                        def _to_host(_a):
+                            if hasattr(_a, "get"):
+                                return _a.get()
+                            return np.asarray(_a)
+                        _fx = np.asarray(_to_host(_cr["f_xray_best_all"]), dtype=np.float64)
+                        _fb = np.asarray(_to_host(_cr["f_best_all"]), dtype=np.float64)
+                        _xyz_all = np.asarray(_to_host(_cr["xyz_best_all"]), dtype=np.float64)
+                        _c16_all = np.linalg.norm(
+                            _xyz_all[:, _bi[0], :] - _xyz_all[:, _bi[1], :], axis=1
+                        )
+                        _chain = {
+                            "n_chains": int(_fx.size),
+                            "fx_min": float(np.min(_fx)),
+                            "fx_p10": float(np.percentile(_fx, 10)),
+                            "fx_median": float(np.median(_fx)),
+                            "fx_max": float(np.max(_fx)),
+                            "n_fx_lt_0p01": int(np.sum(_fx < 0.01)),
+                            "n_fx_still_1e10": int(np.sum(_fx >= 1e9)),
+                            "c16_min": float(np.min(_c16_all)),
+                            "c16_median": float(np.median(_c16_all)),
+                            "c16_max": float(np.max(_c16_all)),
+                            "c16_at_best_fx": float(_c16_all[int(np.argmin(_fx))]),
+                            "f_at_best_fx": float(_fb[int(np.argmin(_fx))]),
+                            "f_min": float(np.min(_fb)),
+                        }
+                        print(
+                            "[GPU] chain χ² min/p10/med/max=%.4g/%.4g/%.4g/%.4g "
+                            "n_lt_0.01=%d C1-C6 min/med/max=%.3f/%.3f/%.3f "
+                            "returned_C1-C6=%.3f"
+                            % (
+                                _chain["fx_min"],
+                                _chain["fx_p10"],
+                                _chain["fx_median"],
+                                _chain["fx_max"],
+                                _chain["n_fx_lt_0p01"],
+                                _chain["c16_min"],
+                                _chain["c16_median"],
+                                _chain["c16_max"],
+                                _c16_best,
+                            )
+                        )
+                    _logp = os.path.join(
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "debug-3d2523.log",
+                    )
+                    with open(_logp, "a", encoding="utf-8") as _lf:
+                        _lf.write(_json.dumps({
+                            "sessionId": "3d2523",
+                            "hypothesisId": "A-B-C-D",
+                            "location": "wrap.py:post_phase",
+                            "message": "phase finished",
+                            "data": {
+                                "backend": str(getattr(p, "gpu_backend", "cpu")),
+                                "gpu_chains_cfg": int(getattr(p, "gpu_chains", 1)),
+                                "use_gpu_multi_chain": bool(use_gpu_multi_chain),
+                                "phase_i": int(i),
+                                "nrestarts": int(p.nrestarts),
+                                "kind": "SA" if i < p.nrestarts else "GA",
+                                "nsteps": int(nsteps),
+                                "starting_temp": float(starting_temp),
+                                "c_tuning_passed_to_sa": float(p.c_tuning_initial),
+                                "c_tuning_adjusted": float(c_tuning_adjusted),
+                                "n_tuning_update_freq": int(getattr(p, "n_tuning_update_freq", 0)),
+                                "f_best": float(f_best),
+                                "f_xray_best": float(f_xray_best),
+                                "c16_returned_xyz_best": _c16_best,
+                                "chain_stats": _chain,
+                            },
+                            "timestamp": int(_time() * 1000),
+                        }) + "\n")
+                except Exception:
+                    pass
+                # #endregion
 
             if use_gpu_persistent:
                 if hasattr(xyz_best, "get"):
