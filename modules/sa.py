@@ -988,6 +988,51 @@ class Annealing:
             predicted_best_chain = predicted_best[best_chain_idx]
             xyz_best_chain = xyz_best[best_chain_idx]
             loop_time_s = default_timer() - loop_start
+            # #region agent log
+            try:
+                import json as _json
+                import os as _os
+                from time import time as _time
+                _fx = np.asarray(to_numpy(f_xray_best, xp), dtype=np.float64)
+                _ct = np.asarray(to_numpy(c_tuning_local, xp), dtype=np.float64)
+                _xyzb = np.asarray(to_numpy(xyz_best, xp), dtype=np.float64)
+                _c16 = None
+                if _xyzb.ndim == 3 and _xyzb.shape[1] > 5:
+                    _c16 = np.linalg.norm(_xyzb[:, 0, :] - _xyzb[:, 5, :], axis=1)
+                _logp = _os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "debug-3d2523.log",
+                )
+                with open(_logp, "a", encoding="utf-8") as _lf:
+                    _lf.write(_json.dumps({
+                        "sessionId": "3d2523",
+                        "hypothesisId": "D",
+                        "location": "sa.py:gpu_phase_end",
+                        "message": "GPU batched phase c_tuning and chi2",
+                        "data": {
+                            "n_chains": int(n_chains),
+                            "nsteps": int(nsteps),
+                            "starting_temp": float(starting_temp),
+                            "n_tuning_update_freq": int(n_tuning_update_freq),
+                            "c_tuning_initial": float(c_tuning_initial),
+                            "c_min": float(np.min(_ct)),
+                            "c_median": float(np.median(_ct)),
+                            "c_max": float(np.max(_ct)),
+                            "c_best_chain": float(c_best),
+                            "best_chain_idx": int(best_chain_idx),
+                            "fx_min": float(np.min(_fx)),
+                            "fx_median": float(np.median(_fx)),
+                            "fx_max": float(np.max(_fx)),
+                            "c16_min": None if _c16 is None else float(np.min(_c16)),
+                            "c16_median": None if _c16 is None else float(np.median(_c16)),
+                            "c16_max": None if _c16 is None else float(np.max(_c16)),
+                            "c16_best": None if _c16 is None else float(_c16[best_chain_idx]),
+                        },
+                        "timestamp": int(_time() * 1000),
+                    }) + "\n")
+            except Exception:
+                pass
+            # #endregion
 
             return (
                 f_best_scalar,
