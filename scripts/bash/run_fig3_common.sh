@@ -2,10 +2,12 @@
 # ============================================================================
 # Figure 3 CHD test-mode GPU runs.
 #
-# Uses repo input.toml for MM/molecule defaults, plus experiment CLI:
-# q-grid, open/closed C1-C6, files, GPU, PCD, and the Figure 3 SA schedule
-# (step 0.025, GA 8000, n_tuning 100, nrestarts 1). Those SA values are
-# NOT taken from input.toml (CHD+ production defaults are smaller/shorter).
+# Uses repo input.toml for SA/MM/file defaults. This script only passes
+# experiment CLI (q-grid, open/closed C1-C6, GPU, PCD, results dir).
+#
+# Taken from CONFIG (input.toml), not overridden here:
+#   start_xyz_file, target_file, nrestarts, sa_step_size, ga_step_size,
+#   n_tuning_update_freq, c_tuning_initial, tuning_ratio_target
 #
 # Usage:
 #   ./scripts/bash/run_fig3_common.sh --qmax 4 --qlen 41 --ring open
@@ -20,19 +22,19 @@
 #   PYTHON             python3
 #   CONFIG             input.toml
 #   GPU_CHAINS         128
-#   STARTING_XYZ       xyz/start.xyz
-#   TARGET_FILE        xyz/target_20.xyz
 #   COMMENT            (unset) same as --comment
 #   RESULTS_DIR        (unset) auto from qmax/ring/comment
 #   RESTART_RATIO      (unset) inherit from CONFIG
+#   STARTING_XYZ       (unset) inherit from CONFIG start_xyz_file
+#   TARGET_FILE        (unset) inherit from CONFIG target_file
+#   NRESTARTS          (unset) inherit from CONFIG
+#   SA_STEP_SIZE       (unset) inherit from CONFIG
+#   GA_STEP_SIZE       (unset) inherit from CONFIG
+#   N_TUNING_UPDATE_FREQ (unset) inherit from CONFIG
+#   C_TUNING_INITIAL   (unset) inherit from CONFIG
+#   TUNING_RATIO_TARGET (unset) inherit from CONFIG
 #   SA_NSTEPS          4000
 #   GA_NSTEPS          8000
-#   SA_STEP_SIZE       0.025
-#   GA_STEP_SIZE       0.025
-#   NRESTARTS          1
-#   N_TUNING_UPDATE_FREQ 100
-#   C_TUNING_INITIAL   0.1
-#   TUNING_RATIO_TARGET 0.5
 #   EXTRA_RUN_PY_ARGS  (unset) extra args appended to run.py
 # ============================================================================
 set -euo pipefail
@@ -43,8 +45,8 @@ cd "$REPO_ROOT"
 PYTHON="${PYTHON:-python3}"
 CONFIG="${CONFIG:-input.toml}"
 GPU_CHAINS="${GPU_CHAINS:-128}"
-STARTING_XYZ="${STARTING_XYZ:-xyz/start.xyz}"
-TARGET_FILE="${TARGET_FILE:-xyz/target_20.xyz}"
+STARTING_XYZ="${STARTING_XYZ:-}"
+TARGET_FILE="${TARGET_FILE:-}"
 START_SDF="${START_SDF:-sdf/chd_start.sdf}"
 REFERENCE_XYZ="${REFERENCE_XYZ:-xyz/chd_reference.xyz}"
 EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
@@ -53,19 +55,19 @@ RESULTS_DIR_OVERRIDE="${RESULTS_DIR:-}"
 RESTART_RATIO="${RESTART_RATIO:-}"
 SA_NSTEPS="${SA_NSTEPS:-4000}"
 GA_NSTEPS="${GA_NSTEPS:-8000}"
-SA_STEP_SIZE="${SA_STEP_SIZE:-0.025}"
-GA_STEP_SIZE="${GA_STEP_SIZE:-0.025}"
-NRESTARTS="${NRESTARTS:-1}"
-N_TUNING_UPDATE_FREQ="${N_TUNING_UPDATE_FREQ:-100}"
-C_TUNING_INITIAL="${C_TUNING_INITIAL:-0.1}"
-TUNING_RATIO_TARGET="${TUNING_RATIO_TARGET:-0.5}"
+SA_STEP_SIZE="${SA_STEP_SIZE:-}"
+GA_STEP_SIZE="${GA_STEP_SIZE:-}"
+NRESTARTS="${NRESTARTS:-}"
+N_TUNING_UPDATE_FREQ="${N_TUNING_UPDATE_FREQ:-}"
+C_TUNING_INITIAL="${C_TUNING_INITIAL:-}"
+TUNING_RATIO_TARGET="${TUNING_RATIO_TARGET:-}"
 
 QMAX=""
 QLEN=""
 RING=""
 
 usage() {
-    sed -n '3,40p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,39p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -137,11 +139,11 @@ if [[ ! -f "$CONFIG" ]]; then
     echo "ERROR: CONFIG='$CONFIG' does not exist" >&2
     exit 1
 fi
-if [[ ! -f "$STARTING_XYZ" ]]; then
+if [[ -n "$STARTING_XYZ" && ! -f "$STARTING_XYZ" ]]; then
     echo "ERROR: STARTING_XYZ='$STARTING_XYZ' does not exist" >&2
     exit 1
 fi
-if [[ ! -f "$TARGET_FILE" ]]; then
+if [[ -n "$TARGET_FILE" && ! -f "$TARGET_FILE" ]]; then
     echo "ERROR: TARGET_FILE='$TARGET_FILE' does not exist" >&2
     exit 1
 fi
@@ -149,18 +151,21 @@ fi
 mkdir -p "$RESULTS_DIR"
 
 echo "=== Figure 3 run ==="
-echo "  config         = $CONFIG  (MM/molecule defaults; this script does not generate a toml)"
+echo "  config         = $CONFIG  (SA/MM/file defaults; this script does not generate a toml)"
 echo "  ring           = $RING  (--bond-ignore-array $BOND_IGNORE)"
 echo "  q              = 0.0 .. ${QMAX}.0  (${QLEN} pts)"
 echo "  pcd_mode       = true  (IAM vs $REFERENCE_XYZ, inelastic Compton in I_ref)"
 echo "  comment        = ${COMMENT:-<none>}"
 echo "  gpu_chains     = $GPU_CHAINS"
 echo "  restart_ratio  = ${RESTART_RATIO:-<from $CONFIG>}"
-echo "  sa/ga steps    = $SA_NSTEPS / $GA_NSTEPS  (step $SA_STEP_SIZE / $GA_STEP_SIZE)"
-echo "  nrestarts      = $NRESTARTS  n_tuning_update_freq=$N_TUNING_UPDATE_FREQ"
-echo "  c_tuning       = $C_TUNING_INITIAL  tuning_ratio_target=$TUNING_RATIO_TARGET"
-echo "  target         = $TARGET_FILE"
-echo "  start          = $STARTING_XYZ"
+echo "  sa/ga nsteps   = $SA_NSTEPS / $GA_NSTEPS"
+echo "  sa/ga step     = ${SA_STEP_SIZE:-<from $CONFIG>} / ${GA_STEP_SIZE:-<from $CONFIG>}"
+echo "  nrestarts      = ${NRESTARTS:-<from $CONFIG>}"
+echo "  n_tuning_freq  = ${N_TUNING_UPDATE_FREQ:-<from $CONFIG>}"
+echo "  c_tuning       = ${C_TUNING_INITIAL:-<from $CONFIG>}"
+echo "  tuning_ratio   = ${TUNING_RATIO_TARGET:-<from $CONFIG>}"
+echo "  target         = ${TARGET_FILE:-<from $CONFIG>}"
+echo "  start          = ${STARTING_XYZ:-<from $CONFIG>}"
 echo "  results_dir    = $RESULTS_DIR"
 
 RUN_CMD=(
@@ -169,10 +174,8 @@ RUN_CMD=(
     --mode test
     --run-id "$RUN_ID"
     --results-dir "$RESULTS_DIR"
-    --start-xyz-file "$STARTING_XYZ"
     --start-sdf-file "$START_SDF"
     --reference-xyz-file "$REFERENCE_XYZ"
-    --target-file "$TARGET_FILE"
     --ab-initio-scattering-file ""
     --reference-dat-file ""
     --gpu-backend cuda
@@ -186,14 +189,32 @@ RUN_CMD=(
     --bond-ignore-array "$BOND_IGNORE"
     --sa-nsteps "$SA_NSTEPS"
     --ga-nsteps "$GA_NSTEPS"
-    --sa-step-size "$SA_STEP_SIZE"
-    --ga-step-size "$GA_STEP_SIZE"
-    --nrestarts "$NRESTARTS"
-    --n-tuning-update-freq "$N_TUNING_UPDATE_FREQ"
-    --c-tuning-initial "$C_TUNING_INITIAL"
-    --tuning-ratio-target "$TUNING_RATIO_TARGET"
 )
 
+if [[ -n "$STARTING_XYZ" ]]; then
+    RUN_CMD+=(--start-xyz-file "$STARTING_XYZ")
+fi
+if [[ -n "$TARGET_FILE" ]]; then
+    RUN_CMD+=(--target-file "$TARGET_FILE")
+fi
+if [[ -n "$SA_STEP_SIZE" ]]; then
+    RUN_CMD+=(--sa-step-size "$SA_STEP_SIZE")
+fi
+if [[ -n "$GA_STEP_SIZE" ]]; then
+    RUN_CMD+=(--ga-step-size "$GA_STEP_SIZE")
+fi
+if [[ -n "$NRESTARTS" ]]; then
+    RUN_CMD+=(--nrestarts "$NRESTARTS")
+fi
+if [[ -n "$N_TUNING_UPDATE_FREQ" ]]; then
+    RUN_CMD+=(--n-tuning-update-freq "$N_TUNING_UPDATE_FREQ")
+fi
+if [[ -n "$C_TUNING_INITIAL" ]]; then
+    RUN_CMD+=(--c-tuning-initial "$C_TUNING_INITIAL")
+fi
+if [[ -n "$TUNING_RATIO_TARGET" ]]; then
+    RUN_CMD+=(--tuning-ratio-target "$TUNING_RATIO_TARGET")
+fi
 if [[ -n "$RESTART_RATIO" ]]; then
     RUN_CMD+=(--restart-ratio "$RESTART_RATIO")
 fi
