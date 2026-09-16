@@ -356,3 +356,68 @@ def test_print_chain_diversity_summary_smoke(capsys):
     out = capsys.readouterr().out
     assert "pairwise centroid-aligned RMSD" in out
     assert "bond 0-5" in out
+
+
+@pytest.mark.unit
+def test_gpu_returns_best_chi2_chain_even_if_total_f_is_worse():
+    """GPU used to return argmin(total f). A closed low-MM chain then beats an
+    open good χ² fit — the CPU/GPU discrepancy the Figure 3 runs hit."""
+    x = Xray()
+    xyz_open = np.array([[0.0, 0.0, 0.0], [2.50, 0.0, 0.0]], dtype=np.float64)
+    xyz_closed = np.array([[0.0, 0.0, 0.0], [1.50, 0.0, 0.0]], dtype=np.float64)
+    qvector = np.linspace(0.2, 4.0, 32, dtype=np.float64)
+    atomic_numbers = [6, 6]
+    iam_open, atomic_total, _mol, compton, pre_molecular = x.iam_calc(
+        atomic_numbers,
+        xyz_open,
+        qvector,
+        electron_mode=False,
+        inelastic=False,
+        compton_array=np.zeros((0,)),
+    )
+    natoms = 2
+    a = Annealing()
+    f_best, f_xray_best, _pred, xyz_best, _c = a.simulated_annealing_modes_ho(
+        starting_xyz=xyz_closed,
+        displacements=np.zeros((1, natoms, 3), dtype=np.float64),
+        mode_indices=np.array([0], dtype=np.int64),
+        target_function=iam_open.astype(np.float64),
+        reference_iam=np.ones_like(iam_open),
+        qvector=qvector,
+        th=np.array([0.0, np.pi], dtype=np.float64),
+        ph=np.array([0.0, np.pi], dtype=np.float64),
+        compton=compton.astype(np.float64),
+        atomic_total=atomic_total.astype(np.float64),
+        pre_molecular=pre_molecular.astype(np.float64),
+        step_size_array=np.array([0.0], dtype=np.float64),
+        bond_param_array=np.array([[0.0, 1.0, 1.50, 400.0]], dtype=np.float64),
+        angle_param_array=np.zeros((0, 5), dtype=np.float64),
+        torsion_param_array=np.zeros((0, 6), dtype=np.float64),
+        starting_temp=0.0,
+        nsteps=1,
+        inelastic=False,
+        pcd_mode=False,
+        ewald_mode=False,
+        bonds_bool=True,
+        angles_bool=False,
+        torsions_bool=False,
+        f_start=1e10,
+        f_xray_start=1e10,
+        predicted_start=0,
+        c_tuning_initial=50.0,
+        n_tuning_update_freq=0,
+        verbose=False,
+        backend="cuda",
+        gpu_emulation=True,
+        gpu_chains=2,
+        gpu_starting_xyz_batch=np.stack([xyz_open, xyz_closed], axis=0),
+    )
+    assert a.last_chain_results is not None
+    f_all = np.asarray(a.last_chain_results["f_best_all"], dtype=np.float64)
+    fx_all = np.asarray(a.last_chain_results["f_xray_best_all"], dtype=np.float64)
+    # Closed chain is cheaper on total f (MM=0) but worse on χ².
+    assert fx_all[0] < fx_all[1]
+    assert f_all[0] > f_all[1]
+    np.testing.assert_allclose(np.asarray(xyz_best), xyz_open, atol=1e-12)
+    assert float(f_xray_best) == pytest.approx(float(fx_all[0]))
+    assert float(f_xray_best) < 1e-6

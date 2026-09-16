@@ -605,7 +605,12 @@ class Annealing:
             return the best chain outcome.
             """
             prep_start = default_timer()
-            c_tuning_local = c_tuning_initial
+            # One c_tuning per chain. A shared scalar retuned from the *sum* of
+            # all-chain windows lets closed, low-MM chains inflate c_tuning and
+            # trap every chain (CPU is one chain, so it never sees this).
+            c_tuning_local = xp.full(
+                n_chains, float(c_tuning_initial), dtype=xp.float64
+            )
             # Backend arrays with chain dimension
             if (
                 gpu_starting_xyz_batch is not None
@@ -734,7 +739,7 @@ class Annealing:
             total_angular_xp = xp.zeros(n_chains, dtype=xp.float64)
             total_torsional_xp = xp.zeros(n_chains, dtype=xp.float64)
             total_xray_xp = xp.zeros(n_chains, dtype=xp.float64)
-            # Windowed accumulators for periodic retuning (scalar c_tuning shared across chains).
+            # Windowed accumulators for periodic per-chain retuning.
             win_bonding_xp = xp.zeros(n_chains, dtype=xp.float64)
             win_angular_xp = xp.zeros(n_chains, dtype=xp.float64)
             win_torsional_xp = xp.zeros(n_chains, dtype=xp.float64)
@@ -795,8 +800,10 @@ class Annealing:
                 dz = xyz_trial[:, pair_i_xp, 2] - xyz_trial[:, pair_j_xp, 2]
                 r_pairs = xp.sqrt(dx * dx + dy * dy + dz * dz)
                 qd = r_pairs[:, :, xp.newaxis] * qvector_xp[xp.newaxis, xp.newaxis, :]
-                # Stable sin(qd)/qd evaluation (limit is 1 at qd -> 0)
-                sinc = xp.where(qd == 0.0, 1.0, xp.sin(qd) / qd)
+                # Stable sin(qd)/qd: never divide by zero (CuPy where still evaluates both arms)
+                qd_safe = xp.where(qd == 0.0, 1.0, qd)
+                sinc = xp.sin(qd) / qd_safe
+                sinc = xp.where(qd == 0.0, 1.0, sinc)
                 iam = xp.sum(
                     2.0 * pre_molecular_xp[xp.newaxis, :, :] * sinc,
                     axis=1,
@@ -924,18 +931,18 @@ class Annealing:
                 win_torsional_xp += c_tuning_local * torsion_contrib * improve_f
                 win_xray_xp += xray_contrib * improve_f
 
-                # Periodic retuning (infrequent host sync when enabled).
+                # Periodic per-chain retuning (stays on device).
                 if n_tuning_update_freq > 0 and ((i + 1) % n_tuning_update_freq == 0):
-                    win_b = float(to_numpy(xp.sum(win_bonding_xp), xp))
-                    win_a = float(to_numpy(xp.sum(win_angular_xp), xp))
-                    win_t = float(to_numpy(xp.sum(win_torsional_xp), xp))
-                    win_x = float(to_numpy(xp.sum(win_xray_xp), xp))
-                    priors_w = win_b + win_a + win_t
-                    total_w = win_x + priors_w
-                    if total_w > 0.0 and priors_w > 0.0:
-                        denom = 1.0 - (win_x / total_w)
-                        if denom != 0.0:
-                            c_tuning_local = (1.0 - tuning_ratio_target) * c_tuning_local / denom
+                    priors_w = win_bonding_xp + win_angular_xp + win_torsional_xp
+                    total_w = win_xray_xp + priors_w
+                    safe_total = xp.where(total_w > 0.0, total_w, 1.0)
+                    denom = 1.0 - (win_xray_xp / safe_total)
+                    safe_denom = xp.where(denom != 0.0, denom, 1.0)
+                    c_new = (
+                        (1.0 - tuning_ratio_target) * c_tuning_local / safe_denom
+                    )
+                    retune = (total_w > 0.0) & (priors_w > 0.0) & (denom != 0.0)
+                    c_tuning_local = xp.where(retune, c_new, c_tuning_local)
                     win_bonding_xp *= 0.0
                     win_angular_xp *= 0.0
                     win_torsional_xp *= 0.0
@@ -957,26 +964,27 @@ class Annealing:
                 bonding_ratio = total_bonding_contrib / total_contrib
                 angular_ratio = total_angular_contrib / total_contrib
                 torsional_ratio = total_torsional_contrib / total_contrib
+            else:
+                xray_ratio = bonding_ratio = angular_ratio = torsional_ratio = 0.0
+
+            # Report the chain with the best χ², not the best total f.
+            # Total f includes MM; a closed low-MM chain can beat an open good
+            # fit and become the GPU result while CPU (one chain) keeps the fit.
+            best_chain_idx = int(to_numpy(xp.argmin(f_xray_best), xp))
+            f_best_scalar = float(to_numpy(f_best[best_chain_idx], xp))
+            f_xray_best_scalar = float(to_numpy(f_xray_best[best_chain_idx], xp))
+            c_best = float(to_numpy(c_tuning_local[best_chain_idx], xp))
+            if total_contrib > 0 and priors_contrib > 0:
                 if n_tuning_update_freq > 0:
-                    c_tuning_adjusted = c_tuning_local
+                    c_tuning_adjusted = c_best
                 else:
                     c_tuning_adjusted = (
                         (1 - tuning_ratio_target)
-                        * c_tuning_local
+                        * c_best
                         / (1 - total_xray_contrib / total_contrib)
                     )
             else:
-                (
-                    xray_ratio,
-                    bonding_ratio,
-                    angular_ratio,
-                    torsional_ratio,
-                    c_tuning_adjusted,
-                ) = (0, 0, 0, 0, 0)
-
-            best_chain_idx = int(to_numpy(xp.argmin(f_best), xp))
-            f_best_scalar = float(to_numpy(f_best[best_chain_idx], xp))
-            f_xray_best_scalar = float(to_numpy(f_xray_best[best_chain_idx], xp))
+                c_tuning_adjusted = 0.0
             predicted_best_chain = predicted_best[best_chain_idx]
             xyz_best_chain = xyz_best[best_chain_idx]
             loop_time_s = default_timer() - loop_start

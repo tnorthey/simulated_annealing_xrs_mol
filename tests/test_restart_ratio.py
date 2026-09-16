@@ -91,6 +91,28 @@ def test_tiled_clones_share_score_bar():
 
 
 @pytest.mark.unit
+def test_restart_ranks_by_f_xray_not_total_f():
+    """A low-MM / high-χ² chain must not crowd out the best χ² chain."""
+    n = 4
+    natoms = 3
+    qlen = 8
+    xyz = np.zeros((n, natoms, 3), dtype=np.float64)
+    for i in range(n):
+        xyz[i, 0, 0] = float(i)
+    # Chain 2 has the best χ² but the worst total f (high MM).
+    f = np.array([1.0, 2.0, 50.0, 3.0])
+    fx = np.array([8.0, 7.0, 0.001, 6.0])
+    pred = np.arange(n, dtype=np.float64)[:, None] + np.linspace(0.0, 1.0, qlen)
+    xyz_b, f_b, fx_b, pred_b, k = select_restart_batch(xyz, f, fx, pred, 0.25)
+    assert k == 1
+    np.testing.assert_allclose(xyz_b[0], xyz[2])
+    assert fx_b[0] == pytest.approx(0.001)
+    assert f_b[0] == pytest.approx(50.0)
+    for i in range(n):
+        np.testing.assert_allclose(xyz_b[i], xyz[2])
+
+
+@pytest.mark.unit
 def test_restart_ratio_rejects_invalid():
     xyz, f, fx, pred = _fake_phase(n_chains=4)
     with pytest.raises(ValueError, match="restart_ratio"):

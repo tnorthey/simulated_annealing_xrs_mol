@@ -143,7 +143,7 @@ def select_restart_batch(
     """
     Reseed multi-chain starts from the top fraction of previous-phase bests.
 
-    Ranks by ascending total ``f``, takes ``K = max(1, ceil(ratio * N))``
+    Ranks by ascending ``f_xray`` (χ²), takes ``K = max(1, ceil(ratio * N))``
     (or ``force_k`` when set), then deterministically tiles
     ``thread i ← pool[i % K]``. Carries ``f_best`` / ``f_xray_best`` /
     ``predicted_best`` with each assigned geometry so tiled clones share
@@ -191,7 +191,7 @@ def select_restart_batch(
         k = max(1, min(int(force_k), n_chains))
     k = min(k, n_chains)
 
-    order = np.argsort(f_best_all, kind="mergesort")
+    order = np.argsort(f_xray_best_all, kind="mergesort")
     pool_idx = order[:k]
     assign = pool_idx[np.arange(n_chains, dtype=np.int64) % k]
 
@@ -602,18 +602,25 @@ class Wrapper:
             # Bonds
             n_before = len(bond_param_array)
             mask = np.ones(n_before, dtype=bool)
+            ignored_bonds = set()
             for i, j in p.bond_ignore_array:
+                ii, jj = int(i), int(j)
+                ignored_bonds.add((min(ii, jj), max(ii, jj)))
                 remove = ((bond_param_array[:, 0] == i) & (bond_param_array[:, 1] == j)) | (
                     (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
                 )
                 n_hit = int(np.sum(remove))
                 if n_hit == 0:
-                    print(f"  WARNING: bond_ignore [{int(i)}, {int(j)}] matched 0 rows in param array")
+                    print(f"  WARNING: bond_ignore [{ii}, {jj}] matched 0 rows in param array")
                 mask &= ~remove
             bond_param_array = bond_param_array[mask]
             n_removed = n_before - len(bond_param_array)
             if len(p.bond_ignore_array) > 0:
                 print(f"  Bonds: {n_before} -> {len(bond_param_array)} ({n_removed} removed by ignore list)")
+
+            def _uses_ignored_bond(atom_u, atom_v):
+                uu, vv = int(atom_u), int(atom_v)
+                return (min(uu, vv), max(uu, vv)) in ignored_bonds
 
             # Angles
             if len(angle_param_array) > 0:
@@ -631,10 +638,21 @@ class Wrapper:
                     if n_hit == 0:
                         print(f"  WARNING: angle_ignore [{int(i)}, {int(j)}, {int(k)}] matched 0 rows in param array")
                     mask &= ~remove
+                if ignored_bonds:
+                    # Valence angle a-b-c uses bonds a-b and b-c. Drop it if either
+                    # leg is an ignored bond (e.g. open C1-C6 still had C2-C1-C6).
+                    for idx, row in enumerate(angle_param_array):
+                        if _uses_ignored_bond(row[0], row[1]) or _uses_ignored_bond(
+                            row[1], row[2]
+                        ):
+                            mask[idx] = False
                 angle_param_array = angle_param_array[mask]
                 n_removed = n_before - len(angle_param_array)
-                if len(p.angle_ignore_array) > 0:
-                    print(f"  Angles: {n_before} -> {len(angle_param_array)} ({n_removed} removed by ignore list)")
+                if n_removed > 0:
+                    print(
+                        f"  Angles: {n_before} -> {len(angle_param_array)} "
+                        f"({n_removed} removed by ignore list / ignored-bond cascade)"
+                    )
 
             # Torsions
             if len(torsion_param_array) > 0:
@@ -658,10 +676,21 @@ class Wrapper:
                     if n_hit == 0:
                         print(f"  WARNING: torsion_ignore [{int(i)}, {int(j)}, {int(k)}, {int(l)}] matched 0 rows in param array")
                     mask &= ~remove
+                if ignored_bonds:
+                    for idx, row in enumerate(torsion_param_array):
+                        if (
+                            _uses_ignored_bond(row[0], row[1])
+                            or _uses_ignored_bond(row[1], row[2])
+                            or _uses_ignored_bond(row[2], row[3])
+                        ):
+                            mask[idx] = False
                 torsion_param_array = torsion_param_array[mask]
                 n_removed = n_before - len(torsion_param_array)
-                if len(p.torsion_ignore_array) > 0:
-                    print(f"  Torsions: {n_before} -> {len(torsion_param_array)} ({n_removed} removed by ignore list)")
+                if n_removed > 0:
+                    print(
+                        f"  Torsions: {n_before} -> {len(torsion_param_array)} "
+                        f"({n_removed} removed by ignore list / ignored-bond cascade)"
+                    )
 
             h_scale = getattr(p, "hydrogen_force_constant_scale", 1.0)
             bond_param_array, angle_param_array, torsion_param_array = (
@@ -1485,7 +1514,7 @@ class Wrapper:
                     print(
                         f"[GPU] restart_ratio={restart_ratio}: reseeding "
                         f"{n_gpu_chains} chains from top {restart_k}/{n_gpu_chains} "
-                        f"(rank_by=f, tile, f_best carried)."
+                        f"(rank_by=f_xray, tile, scores carried)."
                     )
                 # else:
                 # redefine angles and bond-distances based on xyz_best
