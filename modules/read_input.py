@@ -117,9 +117,13 @@ class Input_to_params:
         self.gpu_chains = int(
             data.get("options", {}).get("gpu_chains", 1)
         )
-        # When true (gpu_chains > 1): after each SA/GA phase, clone the single
-        # global-best structure onto every chain. When false (default): each
-        # chain continues from its own previous best.
+        # Fraction of previous-phase per-chain bests (by ascending total f)
+        # used to reseed GPU chains after each SA/GA phase. 1.0 = full set
+        # (≡ per-chain ensemble); smaller values tile the top-K elites.
+        self.restart_ratio = float(
+            data.get("options", {}).get("restart_ratio", 1.0)
+        )
+        # Deprecated: when true, force K=1 (global best) regardless of ratio.
         self.restart_from_global_best_bool = bool(
             data.get("options", {}).get("restart_from_global_best_bool", False)
         )
@@ -150,6 +154,18 @@ class Input_to_params:
             print(f"  Value: {self.gpu_chains}")
             print(f"  Allowed values: integer >= 1")
             print(f"  Suggestion: Set gpu_chains = 1 (or larger) in [options]")
+            print(f"{'='*60}\n")
+            sys.exit(1)
+        if not (self.restart_ratio > 0.0 and self.restart_ratio <= 1.0):
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid restart_ratio value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.restart_ratio}")
+            print(f"  Allowed values: float in (0, 1]")
+            print(
+                f"  Suggestion: Set restart_ratio = 1.0 (all previous bests) "
+                f"or e.g. 0.1 (top 10%)"
+            )
             print(f"{'='*60}\n")
             sys.exit(1)
         # sampling options

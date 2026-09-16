@@ -156,6 +156,77 @@ def _angle_rad(p0: np.ndarray, p1: np.ndarray, p2: np.ndarray) -> float:
     return float(np.arccos(c))
 
 
+def select_restart_batch(
+    xyz_best_all: np.ndarray,
+    f_best_all: np.ndarray,
+    f_xray_best_all: np.ndarray,
+    predicted_best_all: np.ndarray,
+    restart_ratio: float,
+    *,
+    force_k: int | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    """
+    Reseed multi-chain starts from the top fraction of previous-phase bests.
+
+    Ranks by ascending total ``f``, takes ``K = max(1, ceil(ratio * N))``
+    (or ``force_k`` when set), then deterministically tiles
+    ``thread i ← pool[i % K]``. Carries ``f_best`` / ``f_xray_best`` /
+    ``predicted_best`` with each assigned geometry so tiled clones share
+    the same score bar.
+
+    Returns
+    -------
+    xyz_batch, f_start, f_xray_start, predicted_start, K
+    """
+    xyz_best_all = np.asarray(xyz_best_all, dtype=np.float64)
+    f_best_all = np.asarray(f_best_all, dtype=np.float64).reshape(-1)
+    f_xray_best_all = np.asarray(f_xray_best_all, dtype=np.float64).reshape(-1)
+    predicted_best_all = np.asarray(predicted_best_all, dtype=np.float64)
+
+    if xyz_best_all.ndim != 3:
+        raise ValueError(
+            f"xyz_best_all must have shape (n_chains, natoms, 3), "
+            f"got {xyz_best_all.shape}"
+        )
+    n_chains = int(xyz_best_all.shape[0])
+    if n_chains < 1:
+        raise ValueError("n_chains must be >= 1")
+    if f_best_all.shape[0] != n_chains:
+        raise ValueError(
+            f"f_best_all length {f_best_all.shape[0]} != n_chains {n_chains}"
+        )
+    if f_xray_best_all.shape[0] != n_chains:
+        raise ValueError(
+            f"f_xray_best_all length {f_xray_best_all.shape[0]} != n_chains {n_chains}"
+        )
+    if predicted_best_all.shape[0] != n_chains:
+        raise ValueError(
+            f"predicted_best_all leading dim {predicted_best_all.shape[0]} "
+            f"!= n_chains {n_chains}"
+        )
+
+    ratio = float(restart_ratio)
+    if not (ratio > 0.0 and ratio <= 1.0):
+        raise ValueError(
+            f"restart_ratio must be in (0, 1], got {restart_ratio}"
+        )
+
+    k = max(1, int(np.ceil(ratio * n_chains)))
+    if force_k is not None:
+        k = max(1, min(int(force_k), n_chains))
+    k = min(k, n_chains)
+
+    order = np.argsort(f_best_all, kind="mergesort")
+    pool_idx = order[:k]
+    assign = pool_idx[np.arange(n_chains, dtype=np.int64) % k]
+
+    xyz_batch = xyz_best_all[assign]
+    f_start = f_best_all[assign]
+    f_xray_start = f_xray_best_all[assign]
+    predicted_start = predicted_best_all[assign]
+    return xyz_batch, f_start, f_xray_start, predicted_start, k
+
+
 def build_gpu_per_chain_start_batch(
     pool_file: str,
     n_chains: int,
@@ -1414,33 +1485,54 @@ class Wrapper:
                         gpu_start_batch = gpu_start_batch_base.copy()
                         xyz_start = gpu_start_batch[0].copy()
                 elif use_gpu_multi_chain and multi_chain_state is not None:
-                    if getattr(p, "restart_from_global_best_bool", False):
-                        # Old policy: leave gpu_start_batch=None so sa.py clones
-                        # scalar xyz_best (global best) onto every chain.
-                        # xyz_start / f_start / etc. already set from scalar best.
-                        print(
-                            f"[GPU] Restarting {n_gpu_chains} chains from the "
-                            f"single global-best structure "
-                            f"(restart_from_global_best_bool=true)."
-                        )
-                    else:
-                        # Continue each chain from its own previous-phase best.
-                        def _to_host(arr):
-                            if hasattr(arr, "get"):
-                                return arr.get()
-                            return np.asarray(arr)
+                    def _to_host(arr):
+                        if hasattr(arr, "get"):
+                            return arr.get()
+                        return np.asarray(arr)
 
-                        gpu_start_batch = _to_host(multi_chain_state["xyz_best_all"])
-                        f_start = _to_host(multi_chain_state["f_best_all"])
-                        f_xray_start = _to_host(multi_chain_state["f_xray_best_all"])
-                        predicted_start = _to_host(
-                            multi_chain_state["predicted_best_all"]
-                        )
+                    xyz_all = _to_host(multi_chain_state["xyz_best_all"])
+                    f_all = _to_host(multi_chain_state["f_best_all"])
+                    fx_all = _to_host(multi_chain_state["f_xray_best_all"])
+                    pred_all = _to_host(multi_chain_state["predicted_best_all"])
+                    restart_ratio = float(getattr(p, "restart_ratio", 1.0))
+                    force_k = None
+                    legacy_global = bool(
+                        getattr(p, "restart_from_global_best_bool", False)
+                    )
+                    if legacy_global:
+                        force_k = 1
                         print(
-                            f"[GPU] Continuing {n_gpu_chains} independent chains from "
-                            f"previous-phase per-chain best structures "
-                            f"(not collapsing to a single global best)."
+                            "WARNING: restart_from_global_best_bool is deprecated; "
+                            "use restart_ratio so K=1 (e.g. restart_ratio = "
+                            f"{1.0 / max(n_gpu_chains, 1):.6g}) instead. "
+                            "Forcing K=1 (global best) for compatibility."
                         )
+                        if restart_ratio != 1.0:
+                            print(
+                                "WARNING: both restart_from_global_best_bool=true "
+                                f"and restart_ratio={restart_ratio} are set; "
+                                "deprecated bool wins (K=1)."
+                            )
+                    (
+                        gpu_start_batch,
+                        f_start,
+                        f_xray_start,
+                        predicted_start,
+                        restart_k,
+                    ) = select_restart_batch(
+                        xyz_all,
+                        f_all,
+                        fx_all,
+                        pred_all,
+                        restart_ratio,
+                        force_k=force_k,
+                    )
+                    xyz_start = gpu_start_batch[0].copy()
+                    print(
+                        f"[GPU] restart_ratio={restart_ratio}: reseeding "
+                        f"{n_gpu_chains} chains from top {restart_k}/{n_gpu_chains} "
+                        f"(rank_by=f, tile, f_best carried)."
+                    )
                 # else:
                 # redefine angles and bond-distances based on xyz_best
 
