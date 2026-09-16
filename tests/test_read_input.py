@@ -31,7 +31,25 @@ class TestInputToParams:
         assert p.sa_starting_temp == 1.0
         assert p.sa_nsteps == 1000
         assert p.ab_initio_scattering_file is None
+        assert p.reference_dat_file is None
         assert p.ab_initio_correction_mode == "elastic"
+
+    def test_empty_optional_file_overrides_are_none(self, sample_toml_file):
+        """CLI '' must clear optional DAT paths, not stringify to 'None'."""
+        p = Input_to_params(
+            sample_toml_file,
+            overrides={
+                "files.reference_dat_file": "",
+                "files.ab_initio_scattering_file": "",
+            },
+        )
+        assert p.reference_dat_file is None
+        assert p.ab_initio_scattering_file is None
+        p_none_str = Input_to_params(
+            sample_toml_file,
+            overrides={"files.reference_dat_file": "None"},
+        )
+        assert p_none_str.reference_dat_file is None
     
     def test_read_with_overrides(self, sample_toml_file):
         """Test reading with parameter overrides"""

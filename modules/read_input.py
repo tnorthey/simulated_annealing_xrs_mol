@@ -13,6 +13,16 @@ except ImportError:
         raise ImportError("Please install 'tomli' package: pip install tomli")
 
 
+def _optional_file_path(value):
+    """Return a filesystem path, or None if unset/empty/the literal 'None'."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "" or text.lower() == "none":
+        return None
+    return text
+
+
 ######
 class Input_to_params:
     """read parameters for simulated annealing"""
@@ -52,15 +62,17 @@ class Input_to_params:
         if overrides:
             self._apply_overrides(data, overrides)
         
-        # Handle reference_dat_file: ensure it's None if empty string
-        if "files" in data and "reference_dat_file" in data["files"]:
-            ref_dat = str(data["files"]["reference_dat_file"])
-            if ref_dat == "":
-                data["files"]["reference_dat_file"] = None
-        if "files" in data and "ab_initio_scattering_file" in data["files"]:
-            abi = str(data["files"]["ab_initio_scattering_file"])
-            if abi == "":
-                data["files"]["ab_initio_scattering_file"] = None
+        # Optional files: empty CLI/TOML (and the literal "None") mean unset
+        if "files" in data:
+            files = data["files"]
+            if "reference_dat_file" in files:
+                files["reference_dat_file"] = _optional_file_path(
+                    files["reference_dat_file"]
+                )
+            if "ab_initio_scattering_file" in files:
+                files["ab_initio_scattering_file"] = _optional_file_path(
+                    files["ab_initio_scattering_file"]
+                )
         
         ### Parameters
         # mode
@@ -172,20 +184,13 @@ class Input_to_params:
         self.start_xyz_file = str(data["files"]["start_xyz_file"])
         self.start_sdf_file = str(data["files"]["start_sdf_file"])
         self.reference_xyz_file = str(data["files"]["reference_xyz_file"])
-        # reference_dat_file is optional
-        if "reference_dat_file" in data["files"]:
-            self.reference_dat_file = str(data["files"]["reference_dat_file"])
-            # Treat empty string as None
-            if self.reference_dat_file == "":
-                self.reference_dat_file = None
-        else:
-            self.reference_dat_file = None
-        if "ab_initio_scattering_file" in data["files"]:
-            self.ab_initio_scattering_file = str(data["files"]["ab_initio_scattering_file"])
-            if self.ab_initio_scattering_file == "":
-                self.ab_initio_scattering_file = None
-        else:
-            self.ab_initio_scattering_file = None
+        # reference_dat_file / ab_initio_scattering_file are optional
+        self.reference_dat_file = _optional_file_path(
+            data["files"].get("reference_dat_file")
+        )
+        self.ab_initio_scattering_file = _optional_file_path(
+            data["files"].get("ab_initio_scattering_file")
+        )
         self.ab_initio_correction_mode = str(
             data.get("files", {}).get("ab_initio_correction_mode", "elastic")
         ).lower()

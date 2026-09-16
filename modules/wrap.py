@@ -984,11 +984,17 @@ class Wrapper:
             xyz_start, atomic_numbers, compton_array, p.ewald_mode
         )
         
-        # Check if reference DAT file is provided for PCD mode
-        if p.pcd_mode and p.reference_dat_file is not None and p.reference_dat_file != "":
+        # PCD I_ref from a DAT file only when a real path is set (any mode).
+        # Empty / None → compute IAM from reference_xyz instead.
+        ref_dat_path = getattr(p, "reference_dat_file", None)
+        if isinstance(ref_dat_path, str):
+            ref_dat_path = ref_dat_path.strip()
+            if ref_dat_path.lower() == "none":
+                ref_dat_path = None
+        if p.pcd_mode and ref_dat_path:
             # Load reference IAM from DAT file
-            print(f"Loading reference IAM from DAT file: {p.reference_dat_file}")
-            ref_q, ref_iam, ref_has_explicit_q = _read_scattering_dat(p.reference_dat_file)
+            print(f"Loading reference IAM from DAT file: {ref_dat_path}")
+            ref_q, ref_iam, ref_has_explicit_q = _read_scattering_dat(ref_dat_path)
 
             if not ref_has_explicit_q:
                 if ref_iam.size != p.qvector.size:
