@@ -1185,6 +1185,32 @@ class Wrapper:
         else:
             target_for_sa = target_function_
 
+        if p.pcd_mode and not p.ewald_mode:
+            _ref = np.asarray(reference_iam, dtype=np.float64).ravel()
+            _co = np.asarray(compton, dtype=np.float64).ravel()
+            _tgt = np.asarray(target_for_sa, dtype=np.float64).ravel()
+            _start_pcd = 100.0 * (
+                np.asarray(starting_iam, dtype=np.float64).ravel() / _ref - 1.0
+            )
+            _co_qmax = float(_co[-1]) if _co.size == _ref.size else float("nan")
+            print(
+                "PCD I_ref: qmin=%.4f I=%.4f; qmax=%.4f I=%.4f Compton=%.4f "
+                "(inelastic=%s)"
+                % (
+                    float(p.qvector[0]),
+                    float(_ref[0]),
+                    float(p.qvector[-1]),
+                    float(_ref[-1]),
+                    _co_qmax,
+                    bool(p.inelastic),
+                )
+            )
+            print(
+                "PCD chi2 of starting XYZ vs target "
+                "(expected initial f_xray) = %.6e"
+                % float(np.mean((_start_pcd - _tgt) ** 2))
+            )
+
         abi_file = getattr(p, "ab_initio_scattering_file", None)
         if p.ewald_mode and abi_file:
             raise ValueError(
