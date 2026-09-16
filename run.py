@@ -6,6 +6,7 @@ Run simulated annealing
 # Override defaults: python3 run.py --mode test --run-id test_run
 
 import argparse
+import json
 from timeit import default_timer
 
 start = default_timer()
@@ -15,6 +16,22 @@ import numpy as np
 import modules.mol as mol
 import modules.wrap as wrap
 import modules.read_input as read_input
+
+
+def _json_list(value):
+    """Parse a JSON list for CLI molecule-param arrays."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise argparse.ArgumentTypeError(
+            f"must be JSON (e.g. '[]' or '[[0, 5]]'): {exc}"
+        ) from exc
+    if not isinstance(parsed, list):
+        raise argparse.ArgumentTypeError(
+            f"must be a JSON list, got {type(parsed).__name__}"
+        )
+    return parsed
+
 
 def create_parser():
     """Create argparse parser with all parameters"""
@@ -101,10 +118,6 @@ def create_parser():
                               help='Fraction of previous-phase bests (by total f) '
                                    'to reseed GPU chains after each SA/GA phase '
                                    '(in (0, 1]; default 1.0)')
-    options_group.add_argument('--restart-from-global-best', action='store_true',
-                              dest='options.restart_from_global_best_bool',
-                              help='Deprecated: force K=1 (all chains from the '
-                                   'single global-best). Prefer --restart-ratio')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')
@@ -227,6 +240,14 @@ def create_parser():
     sa_group.add_argument('--hf-energy', action='store_true',
                          dest='simulated_annealing_params.hf_energy_bool',
                          help='Run PySCF HF energy')
+
+    mol_group = parser.add_argument_group('molecule_params', 'Molecule parameters')
+    mol_group.add_argument(
+        '--bond-ignore-array',
+        type=_json_list,
+        dest='molecule_params.bond_ignore_array',
+        help='JSON list of [i, j] atom pairs to ignore, e.g. "[]" or "[[0, 5]]"',
+    )
     
     return parser
 

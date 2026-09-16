@@ -24,7 +24,6 @@ class TestInputToParams:
         assert hasattr(p, "ion_mode")
         assert p.ion_mode is False
         assert p.gpu_chains == 1
-        assert p.restart_from_global_best_bool is False
         assert p.restart_ratio == 1.0
         assert p.qmin == 0.1
         assert p.qmax == 10.0
@@ -40,7 +39,6 @@ class TestInputToParams:
             "run_params.run_id": "override_run",
             "simulated_annealing_params.sa_nsteps": 5000,
             "options.gpu_chains": 4,
-            "options.restart_from_global_best_bool": True,
             "options.restart_ratio": 0.1,
         }
         
@@ -49,7 +47,6 @@ class TestInputToParams:
         assert p.run_id == "override_run"
         assert p.sa_nsteps == 5000
         assert p.gpu_chains == 4
-        assert p.restart_from_global_best_bool is True
         assert p.restart_ratio == 0.1
         # Other parameters should remain unchanged
         assert p.mode == "test"
@@ -66,6 +63,19 @@ class TestInputToParams:
                 sample_toml_file,
                 overrides={"options.restart_ratio": 1.5},
             )
+
+    def test_bond_ignore_array_override(self, sample_toml_file):
+        """bond_ignore_array can be set via list overrides (CLI JSON → list)."""
+        p_open = Input_to_params(
+            sample_toml_file,
+            overrides={"molecule_params.bond_ignore_array": [[0, 1]]},
+        )
+        assert p_open.bond_ignore_array.tolist() == [[0, 1]]
+        p_closed = Input_to_params(
+            sample_toml_file,
+            overrides={"molecule_params.bond_ignore_array": []},
+        )
+        assert p_closed.bond_ignore_array.size == 0
 
     def test_hydrogen_force_constant_scale_default(self, sample_toml_file):
         """hydrogen_force_constant_scale defaults to 1.0 when omitted."""

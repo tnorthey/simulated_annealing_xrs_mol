@@ -58,8 +58,6 @@ gpu_emulation_bool = false
 gpu_chains = 1024
 # Fraction of previous-phase bests (by total f) to reseed chains (1.0 = all).
 restart_ratio = 1.0
-# Deprecated: force K=1 (global best). Prefer restart_ratio.
-restart_from_global_best_bool = false
 
 # ============================================================================
 # SAMPLING PARAMETERS

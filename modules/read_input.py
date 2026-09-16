@@ -123,10 +123,6 @@ class Input_to_params:
         self.restart_ratio = float(
             data.get("options", {}).get("restart_ratio", 1.0)
         )
-        # Deprecated: when true, force K=1 (global best) regardless of ratio.
-        self.restart_from_global_best_bool = bool(
-            data.get("options", {}).get("restart_from_global_best_bool", False)
-        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")

@@ -1495,24 +1495,6 @@ class Wrapper:
                     fx_all = _to_host(multi_chain_state["f_xray_best_all"])
                     pred_all = _to_host(multi_chain_state["predicted_best_all"])
                     restart_ratio = float(getattr(p, "restart_ratio", 1.0))
-                    force_k = None
-                    legacy_global = bool(
-                        getattr(p, "restart_from_global_best_bool", False)
-                    )
-                    if legacy_global:
-                        force_k = 1
-                        print(
-                            "WARNING: restart_from_global_best_bool is deprecated; "
-                            "use restart_ratio so K=1 (e.g. restart_ratio = "
-                            f"{1.0 / max(n_gpu_chains, 1):.6g}) instead. "
-                            "Forcing K=1 (global best) for compatibility."
-                        )
-                        if restart_ratio != 1.0:
-                            print(
-                                "WARNING: both restart_from_global_best_bool=true "
-                                f"and restart_ratio={restart_ratio} are set; "
-                                "deprecated bool wins (K=1)."
-                            )
                     (
                         gpu_start_batch,
                         f_start,
@@ -1525,7 +1507,6 @@ class Wrapper:
                         fx_all,
                         pred_all,
                         restart_ratio,
-                        force_k=force_k,
                     )
                     xyz_start = gpu_start_batch[0].copy()
                     print(

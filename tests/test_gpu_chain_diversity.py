@@ -178,7 +178,7 @@ def test_multi_chain_preserves_distinct_starts_across_restarts():
     }
     assert not np.allclose(xyz_phase2[0], xyz_phase2[-1])
 
-    # force_k=1 (deprecated global-best alias): all chains cloned from best.
+    # force_k=1: all chains cloned from best.
     xyz_g, f_g, fx_g, pred_g, k1 = select_restart_batch(
         xyz_phase1, f_phase1, fx_phase1, pred_phase1, 1.0, force_k=1
     )
@@ -202,8 +202,8 @@ def test_multi_chain_preserves_distinct_starts_across_restarts():
 
 
 @pytest.mark.unit
-def test_restart_from_global_best_wrap_semantics():
-    """Deprecated bool path: force_k=1 clones global best + carried scores."""
+def test_restart_force_k_one_wrap_semantics():
+    """force_k=1 clones the global best onto every chain with carried scores."""
     inp = _minimal_sa_inputs()
     base = inp["starting_xyz"].copy()
     n_chains = 4

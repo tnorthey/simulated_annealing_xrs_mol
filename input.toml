@@ -64,8 +64,6 @@ gpu_chains = 1024
 #   1.0 → use all previous bests (≡ today’s per-chain default)
 #   0.1 → use lowest-f top 10%, tile onto all chains (shared score bars)
 restart_ratio = 1.0
-# Deprecated: when true, force K=1 (global best). Prefer restart_ratio instead.
-restart_from_global_best_bool = false
 
 # ============================================================================
 # SAMPLING PARAMETERS
