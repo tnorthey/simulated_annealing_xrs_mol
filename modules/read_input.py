@@ -332,6 +332,38 @@ class Input_to_params:
             self.sa_mode_range = np.array(mol["sa_mode_range"])
             self.ga_mode_range = np.array(mol["ga_mode_range"])
             self.bond_ignore_array = np.array(mol["bond_ignore_array"])
+            # #region agent log
+            try:
+                import json as _json
+                import os as _os
+                from time import time as _time
+                _raw = mol["bond_ignore_array"]
+                _logp = _os.path.join(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+                    "debug-3d2523.log",
+                )
+                with open(_logp, "a", encoding="utf-8") as _lf:
+                    _lf.write(_json.dumps({
+                        "sessionId": "3d2523",
+                        "hypothesisId": "A",
+                        "location": "read_input.py:bond_ignore",
+                        "message": "bond_ignore after TOML+overrides",
+                        "data": {
+                            "raw": _raw if isinstance(_raw, list) else str(_raw),
+                            "array": np.asarray(self.bond_ignore_array).tolist(),
+                            "size": int(np.asarray(self.bond_ignore_array).size),
+                            "shape": list(np.asarray(self.bond_ignore_array).shape),
+                        },
+                        "timestamp": int(_time() * 1000),
+                    }) + "\n")
+                print(
+                    "[BOND-IGNORE] parsed=%s shape=%s"
+                    % (np.asarray(self.bond_ignore_array).tolist(),
+                       tuple(np.asarray(self.bond_ignore_array).shape))
+                )
+            except Exception:
+                pass
+            # #endregion
             self.angle_ignore_array = np.array(mol["angle_ignore_array"])
             self.torsion_ignore_array = np.array(mol["torsion_ignore_array"])
             self.rmsd_indices = np.array(mol["rmsd_indices"])

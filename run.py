@@ -273,6 +273,30 @@ for action in parser._actions:
                 # For other actions, override if value is not None
                 overrides[action.dest] = value
 
+# #region agent log
+try:
+    import os as _os
+    from time import time as _time
+    _bi = overrides.get("molecule_params.bond_ignore_array", "<MISSING>")
+    _logp = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "debug-3d2523.log")
+    with open(_logp, "a", encoding="utf-8") as _lf:
+        _lf.write(json.dumps({
+            "sessionId": "3d2523",
+            "hypothesisId": "A",
+            "location": "run.py:overrides",
+            "message": "CLI overrides after argparse",
+            "data": {
+                "argv": list(__import__("sys").argv),
+                "bond_ignore_in_overrides": _bi,
+                "bond_ignore_missing": _bi == "<MISSING>",
+            },
+            "timestamp": int(_time() * 1000),
+        }) + "\n")
+    print("[BOND-IGNORE] argv flag in overrides=%r" % (_bi,))
+except Exception:
+    pass
+# #endregion
+
 # create class objects
 m = mol.Xyz()
 w = wrap.Wrapper()

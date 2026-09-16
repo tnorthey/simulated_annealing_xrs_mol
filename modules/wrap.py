@@ -603,6 +603,19 @@ class Wrapper:
             n_before = len(bond_param_array)
             mask = np.ones(n_before, dtype=bool)
             ignored_bonds = set()
+            def _pair_kr(arr, a, b):
+                if arr is None or len(arr) == 0:
+                    return None
+                hit = (
+                    ((arr[:, 0] == a) & (arr[:, 1] == b))
+                    | ((arr[:, 0] == b) & (arr[:, 1] == a))
+                )
+                rows = arr[hit]
+                if len(rows) == 0:
+                    return None
+                return [float(rows[0, 2]), float(rows[0, 3])]
+            _c16_before = _pair_kr(bond_param_array, 0, 5)
+            _ignore_hits = []
             for i, j in p.bond_ignore_array:
                 ii, jj = int(i), int(j)
                 ignored_bonds.add((min(ii, jj), max(ii, jj)))
@@ -610,11 +623,14 @@ class Wrapper:
                     (bond_param_array[:, 0] == j) & (bond_param_array[:, 1] == i)
                 )
                 n_hit = int(np.sum(remove))
+                _ignore_hits.append({"pair": [ii, jj], "n_hit": n_hit})
                 if n_hit == 0:
                     print(f"  WARNING: bond_ignore [{ii}, {jj}] matched 0 rows in param array")
                 mask &= ~remove
             bond_param_array = bond_param_array[mask]
             n_removed = n_before - len(bond_param_array)
+            _nbonds_before = n_before
+            _nbonds_after = len(bond_param_array)
             if len(p.bond_ignore_array) > 0:
                 print(f"  Bonds: {n_before} -> {len(bond_param_array)} ({n_removed} removed by ignore list)")
 
@@ -702,6 +718,52 @@ class Wrapper:
                     h_scale,
                 )
             )
+            # #region agent log
+            try:
+                import json as _json
+                from time import time as _time
+                _c16_after = _pair_kr(bond_param_array, 0, 5)
+                _logp = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                    "debug-3d2523.log",
+                )
+                _payload = {
+                    "sessionId": "3d2523",
+                    "hypothesisId": "B-C",
+                    "location": "wrap.py:_postprocess_param_arrays",
+                    "message": "MM ignore applied",
+                    "data": {
+                        "mm_method": str(getattr(p, "mm_param_method", "")),
+                        "bond_ignore": np.asarray(p.bond_ignore_array).tolist(),
+                        "ignore_hits": _ignore_hits,
+                        "n_bonds_before": int(_nbonds_before),
+                        "n_bonds_after": int(len(bond_param_array)),
+                        "n_angles": int(len(angle_param_array)),
+                        "n_torsions": int(len(torsion_param_array)),
+                        "c16_r0_k_before": _c16_before,
+                        "c16_r0_k_after": _c16_after,
+                        "c16_still_present": _c16_after is not None,
+                    },
+                    "timestamp": int(_time() * 1000),
+                }
+                with open(_logp, "a", encoding="utf-8") as _lf:
+                    _lf.write(_json.dumps(_payload) + "\n")
+                print(
+                    "[BOND-IGNORE] hits=%s bonds %d->%d angles=%d torsions=%d "
+                    "C1-C6 before=%s after=%s"
+                    % (
+                        _ignore_hits,
+                        int(_nbonds_before),
+                        int(len(bond_param_array)),
+                        int(len(angle_param_array)),
+                        int(len(torsion_param_array)),
+                        _c16_before,
+                        _c16_after,
+                    )
+                )
+            except Exception:
+                pass
+            # #endregion
             return bond_param_array, angle_param_array, torsion_param_array
 
         if mm_method == "basic":
@@ -1627,6 +1689,43 @@ class Wrapper:
                     else:
                         continue
                 # Run simulated annealing
+                # #region agent log
+                if i == 0:
+                    try:
+                        import json as _json
+                        from time import time as _time
+                        _bpa = np.asarray(bond_param_array)
+                        _hit = False
+                        _c16 = None
+                        if _bpa.ndim == 2 and _bpa.shape[0] > 0:
+                            _m = (
+                                ((_bpa[:, 0] == 0) & (_bpa[:, 1] == 5))
+                                | ((_bpa[:, 0] == 5) & (_bpa[:, 1] == 0))
+                            )
+                            _hit = bool(np.any(_m))
+                            if _hit:
+                                _c16 = [float(_bpa[_m][0, 2]), float(_bpa[_m][0, 3])]
+                        _logp = os.path.join(
+                            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "debug-3d2523.log",
+                        )
+                        with open(_logp, "a", encoding="utf-8") as _lf:
+                            _lf.write(_json.dumps({
+                                "sessionId": "3d2523",
+                                "hypothesisId": "D",
+                                "location": "wrap.py:sa_call",
+                                "message": "bond array passed into SA",
+                                "data": {
+                                    "n_bonds": int(_bpa.shape[0]) if _bpa.ndim == 2 else -1,
+                                    "c16_in_sa_bonds": _hit,
+                                    "c16_r0_k": _c16,
+                                    "bond_ignore": np.asarray(p.bond_ignore_array).tolist(),
+                                },
+                                "timestamp": int(_time() * 1000),
+                            }) + "\n")
+                    except Exception:
+                        pass
+                # #endregion
                 (
                     f_best,
                     f_xray_best,
