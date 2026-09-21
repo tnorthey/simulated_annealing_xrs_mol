@@ -4,7 +4,8 @@ Summarize geometry and Kabsch RMSD over a list of XYZ structures.
 
 Reads XYZ files from a bash-expanded list (or an unexpanded glob), computes
 chosen bond lengths, dihedrals, and Kabsch RMSD versus a target XYZ, then
-writes stats.dat and prints a table with mean, median, and range.
+writes stats.dat, a one-row LaTeX table ``<results_dir>_table.tex``, and prints
+mean, median, and range.
 
 Dihedral summary statistics are circular (angles wrap at ±180°).
 
@@ -24,6 +25,7 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import re
 import sys
 from typing import List, Sequence
 
@@ -35,6 +37,11 @@ if REPO_ROOT not in sys.path:
 
 import modules.analysis as analysis  # noqa: E402
 from modules.mol import Xyz  # noqa: E402
+
+# CHD paper-table geometry: C1-C6, φ(C1C2C5C6), φ(C2C3C4C5).
+TEX_BOND = (0, 5)
+TEX_DIHEDRAL_C1C2C5C6 = (0, 1, 4, 5)
+TEX_DIHEDRAL_C2C3C4C5 = (1, 2, 3, 4)
 
 
 def expand_xyz_paths(paths: Sequence[str]) -> List[str]:
@@ -213,11 +220,117 @@ def kabsch_rmsd(moving: np.ndarray, target: np.ndarray, indices: Sequence[int]) 
     return float(rmsd)
 
 
-def default_output_path(xyz_files: Sequence[str]) -> str:
+def common_results_dir(xyz_files: Sequence[str]) -> str:
     dirs = {os.path.dirname(os.path.abspath(p)) or "." for p in xyz_files}
     if len(dirs) == 1:
-        return os.path.join(next(iter(dirs)), "stats.dat")
-    return os.path.abspath("stats.dat")
+        return next(iter(dirs))
+    return os.path.abspath(".")
+
+
+def default_output_path(xyz_files: Sequence[str]) -> str:
+    return os.path.join(common_results_dir(xyz_files), "stats.dat")
+
+
+def default_tex_path(xyz_files: Sequence[str]) -> str:
+    results_dir = common_results_dir(xyz_files)
+    return os.path.join(results_dir, f"{os.path.basename(results_dir)}_table.tex")
+
+
+def infer_qmax(name: str) -> int | None:
+    m = re.search(r"qmax(\d+)", name, re.I)
+    return int(m.group(1)) if m else None
+
+
+def open_bonds_tex(spec: str) -> str:
+    v = spec.strip().lower().replace("_", "-")
+    if v in ("c1c6", "c1-c6", "open"):
+        return r"\ce{C1-C6}"
+    if v in ("none", "closed", "no"):
+        return "None"
+    raise ValueError(f"Unknown open-bonds spec: {spec!r}")
+
+
+def infer_open_bonds_tex(name: str) -> str:
+    lower = name.lower()
+    if "closed" in lower:
+        return "None"
+    if "open" in lower:
+        return r"\ce{C1-C6}"
+    return "None"
+
+
+def fmt2(x: float) -> str:
+    return f"{float(x):.2f}"
+
+
+def fmt1(x: float) -> str:
+    return f"{float(x):.1f}"
+
+
+def fmt_int(x: float) -> str:
+    return str(int(round(float(x))))
+
+
+def write_table_tex(
+    path: str,
+    *,
+    qmax: int | str,
+    open_bonds: str,
+    rmsd_median: float,
+    rmsd_min: float,
+    rmsd_max: float,
+    bond_median: float,
+    bond_min: float,
+    bond_max: float,
+    dih0145_median: float,
+    dih0145_min: float,
+    dih0145_max: float,
+    dih1234_median: float,
+    dih1234_min: float,
+    dih1234_max: float,
+    target_bond: float,
+    target_dih0145: float,
+    target_dih1234: float,
+) -> None:
+    caption = (
+        r"The median and range of the RMSD$(\bfR_j \in \mathcal{S}, \bfR_\mathrm{target})$, "
+        r"\ce{C1-C6} distance, and torsion angles $\phi_{\ce{C1C2C5C6}}$ and "
+        r"$\phi_{\ce{C2C3C4C5}}$ for each structure with $\chi^2 < 10^{-3}$, corresponding "
+        r"to results shown in \cref{fig:rmsd_scatterplots_single_target_20}. The \ce{C1-C6} "
+        rf"distance of $\bfR_\mathrm{{target}}$ is {fmt2(target_bond)} \AA, and its torsions "
+        rf"are $\phi_{{\ce{{C1C2C5C6}}}}=\SI{{{fmt1(target_dih0145)}}}{{\degree}}$, and "
+        rf"$\phi_{{\ce{{C2C3C4C5}}}}=\SI{{{fmt1(target_dih1234)}}}{{\degree}}$."
+    )
+    text = f"""\\begin{{table}}[htbp]
+\\centering
+\\caption{{{caption}}}
+\\label{{tab:isotropic_median_rmsd_c1c6_dihedral}}
+\\setlength{{\\tabcolsep}}{{4pt}}
+\\renewcommand{{\\arraystretch}}{{0.95}}
+{{\\small
+\\begin{{tabular}}{{@{{}}cl S[table-format=1.2] S[table-format=1.2] S[table-format=2.1, round-mode=places, round-precision=0] S[table-format=2.1, round-mode=places, round-precision=0]@{{}}}}
+\\toprule
+\\multicolumn{{1}}{{c}}{{$\\qmax$}} & Open &
+\\multicolumn{{1}}{{c}}{{RMSD}} &
+\\multicolumn{{1}}{{c}}{{\\ce{{C1-C6}}}} &
+\\multicolumn{{1}}{{c}}{{$\\phi_{{\\ce{{C1C2C5C6}}}}$}} &
+\\multicolumn{{1}}{{c}}{{$\\phi_{{\\ce{{C2C3C4C5}}}}$}} \\\\
+\\multicolumn{{1}}{{c}}{{(\\si{{\\per\\angstrom}})}} &
+\\multicolumn{{1}}{{c}}{{bonds}} &
+\\multicolumn{{1}}{{c}}{{(\\si{{\\angstrom}})}} &
+\\multicolumn{{1}}{{c}}{{(\\si{{\\angstrom}})}} &
+\\multicolumn{{1}}{{c}}{{(\\si{{\\degree}})}} &
+\\multicolumn{{1}}{{c}}{{(\\si{{\\degree}})}} \\\\
+\\midrule
+{qmax} & {open_bonds} & {fmt2(rmsd_median)} & {fmt2(bond_median)} & {fmt2(dih0145_median)} & {fmt2(dih1234_median)}\\\\
+  &             & \\footnotesize({fmt2(rmsd_min)}, {fmt2(rmsd_max)}) & \\footnotesize({fmt2(bond_min)}, {fmt2(bond_max)}) & \\footnotesize({fmt_int(dih0145_min)}, {fmt_int(dih0145_max)}) & \\footnotesize({fmt_int(dih1234_min)}, {fmt_int(dih1234_max)})\\\\
+\\bottomrule
+\\end{{tabular}}
+}}
+\\end{{table}}
+"""
+    with open(path, "w") as f:
+        f.write(text)
 
 
 def file_label(path: str, xyz_files: Sequence[str]) -> str:
@@ -302,6 +415,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="",
         help="Output stats.dat path (default: <xyz-dir>/stats.dat)",
     )
+    parser.add_argument(
+        "--tex-output",
+        default="",
+        help="Output LaTeX table path (default: <xyz-dir>/<dir>_table.tex)",
+    )
+    parser.add_argument(
+        "--qmax",
+        default="",
+        help="qmax value for the LaTeX table (default: inferred from the results directory name)",
+    )
+    parser.add_argument(
+        "--open-bonds",
+        default="auto",
+        help='Open-bonds column: auto, none, or c1c6 (default: auto from directory name)',
+    )
     args = parser.parse_args(argv)
 
     bonds: List[List[int]] = [list(b) for b in (args.bond or [])]
@@ -356,6 +484,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     per_file: List[List[float]] = []
     names: List[str] = []
+    tex_bond: List[float] = []
+    tex_dih0145: List[float] = []
+    tex_dih1234: List[float] = []
+    tex_rmsd: List[float] = []
+    can_write_tex = n_target > max(
+        max(TEX_BOND), max(TEX_DIHEDRAL_C1C2C5C6), max(TEX_DIHEDRAL_C2C3C4C5)
+    )
     for path in xyz_files:
         n_atoms, atoms, coords = read_xyz(path)
         if n_atoms != n_target:
@@ -368,6 +503,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         rmsd = kabsch_rmsd(coords, coords_target, rmsd_indices)
         per_file.append(geom + [rmsd])
         names.append(file_label(path, xyz_files))
+        if can_write_tex:
+            tex_bond.append(
+                float(analysis.calculate_bond_length(coords, TEX_BOND[0], TEX_BOND[1]))
+            )
+            tex_dih0145.append(
+                float(
+                    analysis.calculate_dihedral(
+                        coords, *TEX_DIHEDRAL_C1C2C5C6
+                    )
+                )
+            )
+            tex_dih1234.append(
+                float(
+                    analysis.calculate_dihedral(
+                        coords, *TEX_DIHEDRAL_C2C3C4C5
+                    )
+                )
+            )
+            tex_rmsd.append(rmsd)
 
     data = np.asarray(per_file, dtype=float)
     target_geom = compute_geometry(coords_target, bonds, dihedrals)
@@ -419,6 +573,55 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Target: {target_path}")
     print(f"RMSD indices: {','.join(str(i) for i in rmsd_indices)}")
     print(f"Wrote {out_path}")
+
+    if can_write_tex:
+        results_dir = common_results_dir(xyz_files)
+        dir_name = os.path.basename(results_dir)
+        qmax: int | str
+        if args.qmax.strip():
+            qmax = args.qmax.strip()
+        else:
+            inferred = infer_qmax(dir_name)
+            qmax = inferred if inferred is not None else ""
+        if args.open_bonds.strip().lower() == "auto":
+            open_bonds = infer_open_bonds_tex(dir_name)
+        else:
+            try:
+                open_bonds = open_bonds_tex(args.open_bonds)
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
+        _mean, rmsd_med, rmsd_min, rmsd_max, _r = linear_stats(np.asarray(tex_rmsd))
+        _mean, bond_med, bond_min, bond_max, _r = linear_stats(np.asarray(tex_bond))
+        _mean, d1_med, d1_min, d1_max, _r = dihedral_stats(np.asarray(tex_dih0145))
+        _mean, d2_med, d2_min, d2_max, _r = dihedral_stats(np.asarray(tex_dih1234))
+        target_bond, target_d1, target_d2 = compute_geometry(
+            coords_target,
+            [TEX_BOND],
+            [TEX_DIHEDRAL_C1C2C5C6, TEX_DIHEDRAL_C2C3C4C5],
+        )
+        tex_path = args.tex_output.strip() or default_tex_path(xyz_files)
+        write_table_tex(
+            tex_path,
+            qmax=qmax,
+            open_bonds=open_bonds,
+            rmsd_median=rmsd_med,
+            rmsd_min=rmsd_min,
+            rmsd_max=rmsd_max,
+            bond_median=bond_med,
+            bond_min=bond_min,
+            bond_max=bond_max,
+            dih0145_median=d1_med,
+            dih0145_min=d1_min,
+            dih0145_max=d1_max,
+            dih1234_median=d2_med,
+            dih1234_min=d2_min,
+            dih1234_max=d2_max,
+            target_bond=target_bond,
+            target_dih0145=target_d1,
+            target_dih1234=target_d2,
+        )
+        print(f"Wrote {tex_path}")
+
     print()
     print(format_table(file_headers, file_rows))
     print()
