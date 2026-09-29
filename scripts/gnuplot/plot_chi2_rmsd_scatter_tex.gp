@@ -5,7 +5,8 @@
 # Default: one series from ./chi2_rmsd.dat (repo root when run from there).
 # Optional series via RESULTS_DIR_1B, RESULTS_DIR_2A, and RESULTS_DIR_2B.
 # Series 1 (open) is open circles with a center dot. Series 2 (closed) is crosses.
-# A uses a thinner stroke; B uses a larger point and a thicker stroke.
+# Point size is the same for A and B. A uses a thinner stroke than B.
+# Open strokes are 4x the forcefield-default strokes.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
 # Example (from repo root):
@@ -54,11 +55,11 @@ if (!exists("PT1B")) PT1B = 6
 if (!exists("PT2")) PT2 = 2
 if (!exists("PT2B")) PT2B = 2
 if (!exists("PS1")) PS1 = 1.2
-if (!exists("PS1B")) PS1B = 1.8
+if (!exists("PS1B")) PS1B = 1.2
 if (!exists("PS2")) PS2 = 1.0
-if (!exists("PS2B")) PS2B = 1.6
-if (!exists("LW1")) LW1 = 0.6
-if (!exists("LW1B")) LW1B = 1.8
+if (!exists("PS2B")) PS2B = 1.0
+if (!exists("LW1")) LW1 = 2.4
+if (!exists("LW1B")) LW1B = 7.2
 if (!exists("LW2")) LW2 = 0.6
 if (!exists("LW2B")) LW2B = 1.8
 PT1 = PT1 + 0
