@@ -225,7 +225,7 @@ xbox(arr, obj, xmin, q1, med, q3, xmax, yc, col, lw) = \
         arr+1, xmin, yc-BOX_H, xmin, yc+BOX_H, col, lw) \
     . sprintf("; set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
         arr+2, xmax, yc-BOX_H, xmax, yc+BOX_H, col, lw) \
-    . sprintf("; set object %d rectangle from first %.8g, graph %.4f to first %.8g, graph %.4f fs empty border lc rgb '%s' lw %.4g front", \
+    . sprintf("; set object %d rectangle from first %.8g, graph %.4f to first %.8g, graph %.4f fs empty border lc rgb '%s' lw %.4g noclip front", \
         obj, q1, yc-BOX_H, q3, yc+BOX_H, col, lw) \
     . sprintf("; set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '#000000' lw %.4g front", \
         arr+3, med, yc-BOX_H, med, yc+BOX_H, 1.6)
@@ -233,6 +233,20 @@ if (N1A > 0) eval xbox(11, 11, MIN1A, Q11A, MED1A, Q31A, MAX1A, YC1A, COL1, LW1A
 if (N1B > 0) eval xbox(21, 21, MIN1B, Q11B, MED1B, Q31B, MAX1B, YC1B, COL1, LW1B)
 if (N2A > 0) eval xbox(31, 31, MIN2A, Q12A, MED2A, Q32A, MAX2A, YC2A, COL2, LW2A)
 if (N2B > 0) eval xbox(41, 41, MIN2B, Q12B, MED2B, Q32B, MAX2B, YC2B, COL2, LW2B)
+
+# One frame around every RMSD summary. Object 1 is drawn before the boxes.
+BOX_XMIN = 1e99
+BOX_XMAX = -1e99
+BOX_YLO = 1e99
+BOX_YHI = -1e99
+HAS_BOX = 0
+if (N1A > 0) { BOX_XMIN = (MIN1A < BOX_XMIN ? MIN1A : BOX_XMIN); BOX_XMAX = (MAX1A > BOX_XMAX ? MAX1A : BOX_XMAX); BOX_YLO = (YC1A-BOX_H < BOX_YLO ? YC1A-BOX_H : BOX_YLO); BOX_YHI = (YC1A+BOX_H > BOX_YHI ? YC1A+BOX_H : BOX_YHI); HAS_BOX = 1 }
+if (N1B > 0) { BOX_XMIN = (MIN1B < BOX_XMIN ? MIN1B : BOX_XMIN); BOX_XMAX = (MAX1B > BOX_XMAX ? MAX1B : BOX_XMAX); BOX_YLO = (YC1B-BOX_H < BOX_YLO ? YC1B-BOX_H : BOX_YLO); BOX_YHI = (YC1B+BOX_H > BOX_YHI ? YC1B+BOX_H : BOX_YHI); HAS_BOX = 1 }
+if (N2A > 0) { BOX_XMIN = (MIN2A < BOX_XMIN ? MIN2A : BOX_XMIN); BOX_XMAX = (MAX2A > BOX_XMAX ? MAX2A : BOX_XMAX); BOX_YLO = (YC2A-BOX_H < BOX_YLO ? YC2A-BOX_H : BOX_YLO); BOX_YHI = (YC2A+BOX_H > BOX_YHI ? YC2A+BOX_H : BOX_YHI); HAS_BOX = 1 }
+if (N2B > 0) { BOX_XMIN = (MIN2B < BOX_XMIN ? MIN2B : BOX_XMIN); BOX_XMAX = (MAX2B > BOX_XMAX ? MAX2B : BOX_XMAX); BOX_YLO = (YC2B-BOX_H < BOX_YLO ? YC2B-BOX_H : BOX_YLO); BOX_YHI = (YC2B+BOX_H > BOX_YHI ? YC2B+BOX_H : BOX_YHI); HAS_BOX = 1 }
+BOX_PAD_X = 0.02
+BOX_PAD_Y = 0.016
+if (HAS_BOX) set object 1 rectangle from first (BOX_XMIN-BOX_PAD_X), graph (BOX_YLO-BOX_PAD_Y) to first (BOX_XMAX+BOX_PAD_X), graph (BOX_YHI+BOX_PAD_Y) fs empty border lc rgb '#000000' lw 1.2 noclip front
 
 eval "plot ".PLOT_CMD
 
