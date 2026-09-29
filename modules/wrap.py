@@ -1672,40 +1672,71 @@ class Wrapper:
                         return np.asarray(arr)
 
                     xyz_all = _to_host(multi_chain_state["xyz_best_all"])
+                    f_all = _to_host(multi_chain_state["f_best_all"])
                     fx_all = _to_host(multi_chain_state["f_xray_best_all"])
                     pred_all = _to_host(multi_chain_state["predicted_best_all"])
                     restart_ratio = float(getattr(p, "restart_ratio", 1.0))
+                    adaptive_restart = bool(
+                        getattr(p, "adaptive_restart_bool", False)
+                    )
                     fx_all = np.asarray(fx_all, dtype=np.float64).reshape(-1)
                     fx_min_prev = float(np.min(fx_all)) if fx_all.size else 1e10
-                    # Tile only chains that are at least 2× better than the
-                    # median χ². A flat bad population keeps every geometry.
-                    # Total f stays at 1e10; the χ² of the assigned geometry
-                    # is the bar the next phase has to beat.
-                    (
-                        gpu_start_batch,
-                        f_xray_start,
-                        predicted_start,
-                        restart_k,
-                        n_pass,
-                        median_fx,
-                        cutoff_fx,
-                        reseed_mode,
-                    ) = select_adaptive_restart_batch(
-                        xyz_all,
-                        fx_all,
-                        pred_all,
-                        restart_ratio,
-                    )
-                    n_c = int(gpu_start_batch.shape[0])
-                    f_start = np.full(n_c, 1e10, dtype=np.float64)
+                    if adaptive_restart:
+                        # Copy a chain onto worse chains only when its χ² is
+                        # at most half the median. Total f stays unset.
+                        (
+                            gpu_start_batch,
+                            f_xray_start,
+                            predicted_start,
+                            restart_k,
+                            n_pass,
+                            median_fx,
+                            cutoff_fx,
+                            reseed_mode,
+                        ) = select_adaptive_restart_batch(
+                            xyz_all,
+                            fx_all,
+                            pred_all,
+                            restart_ratio,
+                        )
+                        n_c = int(gpu_start_batch.shape[0])
+                        f_start = np.full(n_c, 1e10, dtype=np.float64)
+                        f_start_reset = True
+                        print(
+                            f"[GPU] reseed phase {i}: mode={reseed_mode} "
+                            f"k={restart_k}/{n_gpu_chains} n_pass={n_pass} "
+                            f"median_fx={median_fx:.4g} cutoff={cutoff_fx:.4g} "
+                            f"prev_fx_min={fx_min_prev:.4g} "
+                            f"(total f reset to 1e10; χ² bar carried)."
+                        )
+                    else:
+                        # Best restart_ratio fraction, tiled onto every chain,
+                        # with that geometry's scores carried forward.
+                        (
+                            gpu_start_batch,
+                            f_start,
+                            f_xray_start,
+                            predicted_start,
+                            restart_k,
+                        ) = select_restart_batch(
+                            xyz_all,
+                            f_all,
+                            fx_all,
+                            pred_all,
+                            restart_ratio,
+                        )
+                        reseed_mode = "restart_ratio"
+                        n_pass = int(restart_k)
+                        median_fx = float(np.median(fx_all)) if fx_all.size else 1e10
+                        cutoff_fx = None
+                        f_start_reset = False
+                        print(
+                            f"[GPU] reseed phase {i}: mode={reseed_mode} "
+                            f"k={restart_k}/{n_gpu_chains} "
+                            f"prev_fx_min={fx_min_prev:.4g} "
+                            f"(best restart_ratio tiled; scores carried)."
+                        )
                     xyz_start = gpu_start_batch[0].copy()
-                    print(
-                        f"[GPU] reseed phase {i}: mode={reseed_mode} "
-                        f"k={restart_k}/{n_gpu_chains} n_pass={n_pass} "
-                        f"median_fx={median_fx:.4g} cutoff={cutoff_fx:.4g} "
-                        f"prev_fx_min={fx_min_prev:.4g} "
-                        f"(total f reset to 1e10; χ² bar carried)."
-                    )
                     # #region agent log
                     try:
                         import json as _json
@@ -1730,12 +1761,15 @@ class Wrapper:
                                     "reseed_mode": reseed_mode,
                                     "restart_ratio": float(restart_ratio),
                                     "restart_k": int(restart_k),
+                                    "adaptive_restart": bool(adaptive_restart),
                                     "n_pass": int(n_pass),
                                     "median_fx": float(median_fx),
-                                    "cutoff_fx": float(cutoff_fx),
+                                    "cutoff_fx": (
+                                        None if cutoff_fx is None else float(cutoff_fx)
+                                    ),
                                     "n_chains": int(n_gpu_chains),
                                     "prev_fx_min": fx_min_prev,
-                                    "f_start_reset": True,
+                                    "f_start_reset": bool(f_start_reset),
                                     "fx_pool_min": float(np.min(f_xray_start)),
                                     "fx_pool_median": float(np.median(f_xray_start)),
                                     "fx_pool_max": float(np.max(f_xray_start)),

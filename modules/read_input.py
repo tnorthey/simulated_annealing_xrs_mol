@@ -135,6 +135,11 @@ class Input_to_params:
         self.restart_ratio = float(
             data.get("options", {}).get("restart_ratio", 1.0)
         )
+        # False: tile the best restart_ratio fraction onto every chain.
+        # True: only chains at most half the median χ² are copied onto worse chains.
+        self.adaptive_restart_bool = bool(
+            data.get("options", {}).get("adaptive_restart_bool", False)
+        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")

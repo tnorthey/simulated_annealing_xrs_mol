@@ -115,9 +115,13 @@ def create_parser():
                               help='Number of independent GPU chains to run in parallel')
     options_group.add_argument('--restart-ratio', type=float,
                               dest='options.restart_ratio',
-                              help='Fraction of previous-phase bests (by total f) '
+                              help='Fraction of previous-phase bests (by χ²) '
                                    'to reseed GPU chains after each SA/GA phase '
                                    '(in (0, 1]; default 1.0)')
+    options_group.add_argument('--adaptive-restart', action='store_true',
+                              dest='options.adaptive_restart_bool',
+                              help='Reseed only chains at most half the median χ²; '
+                                   'otherwise tile the best restart_ratio fraction')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')

@@ -25,6 +25,7 @@ class TestInputToParams:
         assert p.ion_mode is False
         assert p.gpu_chains == 1
         assert p.restart_ratio == 1.0
+        assert p.adaptive_restart_bool is False
         assert p.qmin == 0.1
         assert p.qmax == 10.0
         assert p.qlen == 50
@@ -58,6 +59,7 @@ class TestInputToParams:
             "simulated_annealing_params.sa_nsteps": 5000,
             "options.gpu_chains": 4,
             "options.restart_ratio": 0.1,
+            "options.adaptive_restart_bool": True,
         }
         
         p = Input_to_params(sample_toml_file, overrides=overrides)
@@ -66,6 +68,7 @@ class TestInputToParams:
         assert p.sa_nsteps == 5000
         assert p.gpu_chains == 4
         assert p.restart_ratio == 0.1
+        assert p.adaptive_restart_bool is True
         # Other parameters should remain unchanged
         assert p.mode == "test"
 

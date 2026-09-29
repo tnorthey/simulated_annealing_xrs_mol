@@ -53,11 +53,15 @@ gpu_backend = "cuda"
 gpu_emulation_bool = false
 # Number of independent chains to run in parallel on GPU backend
 gpu_chains = 128
-# Fraction of previous-phase per-chain bests (ranked by ascending total f)
-# used to reseed all GPU chains after each SA phase and into GA.
-#   1.0 → use all previous bests (≡ today’s per-chain default)
-#   0.1 → use lowest-f top 10%, tile onto all chains (shared score bars)
+# Fraction of previous-phase per-chain bests (ranked by ascending χ²)
+# tiled onto all GPU chains after each SA phase and into GA.
+#   1.0 → use all previous bests
+#   0.5 → best 50%, tiled onto every chain
 restart_ratio = 0.2
+# Adaptive reseed: copy a chain onto worse chains only when its χ² is at
+# most half the population median. restart_ratio then caps that pool.
+# false → always tile the best restart_ratio fraction (scores carried).
+adaptive_restart_bool = false
 
 # ============================================================================
 # SAMPLING PARAMETERS
