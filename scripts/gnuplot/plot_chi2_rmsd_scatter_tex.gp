@@ -7,6 +7,7 @@
 # Series 1 (open) is open circles with a center dot. Series 2 (closed) is crosses.
 # Point size is the same for A and B. A uses a thinner stroke than B.
 # Open strokes are 4x the forcefield-default strokes.
+# Each series also gets an RMSD box (min, Q1, median, Q3, max) along the bottom.
 # Override per series with PS1A PS1B PS2A PS2B and LW1A LW1B LW2A LW2B.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
@@ -166,18 +167,72 @@ if (HAS_2A) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2A, STYLE2A, "t '" . NAME2 
 # Both columns, matching the plot. A one-column "using RMSD" makes the row
 # index the x value, so a tight xrange reports every point out of range and
 # leaves STATS_records undefined.
-if (HAS_1B) stats DATA_1B using RMSD_COL:CHI2_COL nooutput
-N1B = (HAS_1B && exists("STATS_records")) ? STATS_records : 0
+# RMSD five-number summary (min, Q1, median, Q3, max) for the in-range points.
+if (HAS_1B) {
+    stats DATA_1B using RMSD_COL:CHI2_COL nooutput
+    N1B = exists("STATS_records") ? STATS_records : 0
+    if (N1B > 0) {
+        MIN1B = STATS_min_x; Q11B = STATS_lo_quartile_x; MED1B = STATS_median_x
+        Q31B = STATS_up_quartile_x; MAX1B = STATS_max_x
+    }
+} else {
+    N1B = 0
+}
 if (HAS_1B) print sprintf("Series 1B: %s (%d points in range)", DATA_1B, N1B)
 stats DATA_1A using RMSD_COL:CHI2_COL nooutput
 N1A = exists("STATS_records") ? STATS_records : 0
+if (N1A > 0) {
+    MIN1A = STATS_min_x; Q11A = STATS_lo_quartile_x; MED1A = STATS_median_x
+    Q31A = STATS_up_quartile_x; MAX1A = STATS_max_x
+}
 print sprintf("Series 1A: %s (%d points in range)", DATA_1A, N1A)
-if (HAS_2B) stats DATA_2B using RMSD_COL:CHI2_COL nooutput
-N2B = (HAS_2B && exists("STATS_records")) ? STATS_records : 0
+if (HAS_2B) {
+    stats DATA_2B using RMSD_COL:CHI2_COL nooutput
+    N2B = exists("STATS_records") ? STATS_records : 0
+    if (N2B > 0) {
+        MIN2B = STATS_min_x; Q12B = STATS_lo_quartile_x; MED2B = STATS_median_x
+        Q32B = STATS_up_quartile_x; MAX2B = STATS_max_x
+    }
+} else {
+    N2B = 0
+}
 if (HAS_2B) print sprintf("Series 2B: %s (%d points in range)", DATA_2B, N2B)
-if (HAS_2A) stats DATA_2A using RMSD_COL:CHI2_COL nooutput
-N2A = (HAS_2A && exists("STATS_records")) ? STATS_records : 0
+if (HAS_2A) {
+    stats DATA_2A using RMSD_COL:CHI2_COL nooutput
+    N2A = exists("STATS_records") ? STATS_records : 0
+    if (N2A > 0) {
+        MIN2A = STATS_min_x; Q12A = STATS_lo_quartile_x; MED2A = STATS_median_x
+        Q32A = STATS_up_quartile_x; MAX2A = STATS_max_x
+    }
+} else {
+    N2A = 0
+}
 if (HAS_2A) print sprintf("Series 2A: %s (%d points in range)", DATA_2A, N2A)
+
+# Horizontal RMSD boxes along the bottom of the axes. x is RMSD; y is a
+# graph coordinate so the four summaries stay stacked at the bottom.
+# Whisker = full range, box = interquartile range, black tick = median.
+BOX_H = 0.012
+YC1A = 0.045
+YC1B = 0.090
+YC2A = 0.135
+YC2B = 0.180
+xbox(arr, obj, xmin, q1, med, q3, xmax, yc, col, lw) = \
+    sprintf("set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
+        arr, xmin, yc, xmax, yc, col, lw) \
+    . sprintf("; set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
+        arr+1, xmin, yc-BOX_H, xmin, yc+BOX_H, col, lw) \
+    . sprintf("; set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
+        arr+2, xmax, yc-BOX_H, xmax, yc+BOX_H, col, lw) \
+    . sprintf("; set object %d rectangle from first %.8g, graph %.4f to first %.8g, graph %.4f fs empty border lc rgb '%s' lw %.4g front", \
+        obj, q1, yc-BOX_H, q3, yc+BOX_H, col, lw) \
+    . sprintf("; set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '#000000' lw %.4g front", \
+        arr+3, med, yc-BOX_H, med, yc+BOX_H, 1.6)
+if (N1A > 0) eval xbox(11, 11, MIN1A, Q11A, MED1A, Q31A, MAX1A, YC1A, COL1, LW1A)
+if (N1B > 0) eval xbox(21, 21, MIN1B, Q11B, MED1B, Q31B, MAX1B, YC1B, COL1, LW1B)
+if (N2A > 0) eval xbox(31, 31, MIN2A, Q12A, MED2A, Q32A, MAX2A, YC2A, COL2, LW2A)
+if (N2B > 0) eval xbox(41, 41, MIN2B, Q12B, MED2B, Q32B, MAX2B, YC2B, COL2, LW2B)
+
 eval "plot ".PLOT_CMD
 
 print sprintf("Wrote %s.tex (compile: pdflatex %s.tex).", OUTBASE, OUTBASE)
