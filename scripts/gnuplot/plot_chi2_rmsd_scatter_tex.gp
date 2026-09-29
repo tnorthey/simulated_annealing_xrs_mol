@@ -137,7 +137,7 @@ set ytics ("" 10, "" 1, "" 0.1, "$10^{-2}$" 0.01, "$10^{-3}$" 0.001, "$10^{-4}$"
 set mytics 10 
 set ylabel "$\\chi^2$" offset 1.0,-3
 
-if (SHOW_KEY) set key bottom right opaque nobox spacing 1.8 font ',10'
+if (SHOW_KEY) set key bottom right opaque nobox spacing 3.0 font ',10'
 if (!SHOW_KEY) unset key
 
 # Fixed ranges only when passed via -e (e.g. XMIN=0;XMAX=0.44;YMIN=5e-5;YMAX=5).
