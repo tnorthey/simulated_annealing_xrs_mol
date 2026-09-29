@@ -7,7 +7,7 @@
 # Series 1 (open) is open circles with a center dot. Series 2 (closed) is crosses.
 # Point size is the same for A and B. A uses a thinner stroke than B.
 # Open strokes are 4x the forcefield-default strokes.
-# Each series also gets an RMSD box (min, Q1, median, Q3, max) along the bottom.
+# Each series also gets an RMSD box (min, Q1, median, Q3, max) along the top.
 # Override per series with PS1A PS1B PS2A PS2B and LW1A LW1B LW2A LW2B.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
@@ -157,12 +157,12 @@ STYLE2A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2, PS2A, COL2, LW2A)
 STYLE2B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2B, PS2B, COL2, LW2B)
 clause(data, style, title) = "'" . data . "' u " . USING . " " . style . " " . title
 
-# B before the matching A series so the larger markers sit behind.
+# B first so the legend, which follows plot order, shows the thicker B markers.
 PLOT_CMD = ""
-if (HAS_1B) PLOT_CMD = clause(DATA_1B, STYLE1B, "notitle")
-PLOT_CMD = PLOT_CMD . (PLOT_CMD eq "" ? "" : ", ") . clause(DATA_1A, STYLE1A, "t '" . NAME1 . "'")
-if (HAS_2B) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2B, STYLE2B, "notitle")
-if (HAS_2A) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2A, STYLE2A, "t '" . NAME2 . "'")
+if (HAS_1B) PLOT_CMD = clause(DATA_1B, STYLE1B, "t '" . NAME1 . "'")
+if (HAS_2B) PLOT_CMD = PLOT_CMD . (PLOT_CMD eq "" ? "" : ", ") . clause(DATA_2B, STYLE2B, "t '" . NAME2 . "'")
+PLOT_CMD = PLOT_CMD . (PLOT_CMD eq "" ? "" : ", ") . clause(DATA_1A, STYLE1A, HAS_1B ? "notitle" : ("t '" . NAME1 . "'"))
+if (HAS_2A) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2A, STYLE2A, HAS_2B ? "notitle" : ("t '" . NAME2 . "'"))
 
 # Both columns, matching the plot. A one-column "using RMSD" makes the row
 # index the x value, so a tight xrange reports every point out of range and
@@ -209,14 +209,14 @@ if (HAS_2A) {
 }
 if (HAS_2A) print sprintf("Series 2A: %s (%d points in range)", DATA_2A, N2A)
 
-# Horizontal RMSD boxes along the bottom of the axes. x is RMSD; y is a
-# graph coordinate so the four summaries stay stacked at the bottom.
+# Horizontal RMSD boxes along the top of the axes. x is RMSD; y is a
+# graph coordinate so the four summaries stay stacked at the top left.
 # Whisker = full range, box = interquartile range, black tick = median.
 BOX_H = 0.012
-YC1A = 0.045
-YC1B = 0.090
-YC2A = 0.135
-YC2B = 0.180
+YC1A = 0.955
+YC1B = 0.910
+YC2A = 0.865
+YC2B = 0.820
 xbox(arr, obj, xmin, q1, med, q3, xmax, yc, col, lw) = \
     sprintf("set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
         arr, xmin, yc, xmax, yc, col, lw) \
