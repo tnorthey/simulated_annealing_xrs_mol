@@ -1594,33 +1594,24 @@ class Wrapper:
                     restart_ratio = float(getattr(p, "restart_ratio", 1.0))
                     fx_all = np.asarray(fx_all, dtype=np.float64).reshape(-1)
                     fx_min_prev = float(np.min(fx_all)) if fx_all.size else 1e10
-                    # CPU is one walker: the next phase starts from that walker's
-                    # xyz_best. GPU used to tile the lowest-χ² elite and *carry*
-                    # their total-f score bar. After high-T SA that elite is the
-                    # closed-ring basin (χ² ~ 2–5, low MM). Carrying f≈4 then
-                    # rejects ring-opening because open-ring MM makes f_ ≫ 4.
-                    # If nobody has a real fit yet, keep every chain's geometry
-                    # (128 independent walkers) and drop the score bar.
-                    _keep_all = fx_min_prev > 0.1
-                    if _keep_all:
-                        gpu_start_batch = np.asarray(xyz_all, dtype=np.float64)
-                        restart_k = int(gpu_start_batch.shape[0])
-                        reseed_mode = "keep_all_reset_scores"
-                    else:
-                        (
-                            gpu_start_batch,
-                            _f_unused,
-                            _fx_unused,
-                            _pred_unused,
-                            restart_k,
-                        ) = select_restart_batch(
-                            xyz_all,
-                            f_all,
-                            fx_all,
-                            pred_all,
-                            restart_ratio,
-                        )
-                        reseed_mode = "elite_f_xray_reset_scores"
+                    # Rank previous-phase bests by χ² and tile the top
+                    # restart_ratio fraction onto every chain. Scores stay
+                    # reset so a low total-f from a closed basin cannot
+                    # reject later ring-opening moves.
+                    (
+                        gpu_start_batch,
+                        _f_unused,
+                        _fx_unused,
+                        _pred_unused,
+                        restart_k,
+                    ) = select_restart_batch(
+                        xyz_all,
+                        f_all,
+                        fx_all,
+                        pred_all,
+                        restart_ratio,
+                    )
+                    reseed_mode = "elite_f_xray_reset_scores"
                     n_c = int(gpu_start_batch.shape[0])
                     f_start = np.full(n_c, 1e10, dtype=np.float64)
                     f_xray_start = np.full(n_c, 1e10, dtype=np.float64)
