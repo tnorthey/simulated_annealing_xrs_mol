@@ -127,7 +127,7 @@ set style line 102 lc rgb '#808080' lt 0 lw 3
 set grid back ls 102
 
 set size 0.8, 0.8   # Scale up the plot instead
-set tmargin 7       # room above the axes for the RMSD boxes
+set tmargin 4       # room above the axes for the RMSD boxes
 
 set output OUTBASE . ".tex"
 
