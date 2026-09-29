@@ -7,6 +7,7 @@
 # Series 1 (open) is open circles with a center dot. Series 2 (closed) is crosses.
 # Point size is the same for A and B. A uses a thinner stroke than B.
 # Open strokes are 4x the forcefield-default strokes.
+# Override per series with PS1A PS1B PS2A PS2B and LW1A LW1B LW2A LW2B.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
 # Example (from repo root):
@@ -54,25 +55,25 @@ if (!exists("PT1")) PT1 = 6
 if (!exists("PT1B")) PT1B = 6
 if (!exists("PT2")) PT2 = 2
 if (!exists("PT2B")) PT2B = 2
-if (!exists("PS1")) PS1 = 1.2
+if (!exists("PS1A")) PS1A = exists("PS1") ? PS1 : 1.2
 if (!exists("PS1B")) PS1B = 1.2
-if (!exists("PS2")) PS2 = 1.0
+if (!exists("PS2A")) PS2A = exists("PS2") ? PS2 : 1.0
 if (!exists("PS2B")) PS2B = 1.0
-if (!exists("LW1")) LW1 = 2.4
+if (!exists("LW1A")) LW1A = exists("LW1") ? LW1 : 2.4
 if (!exists("LW1B")) LW1B = 7.2
-if (!exists("LW2")) LW2 = 0.6
+if (!exists("LW2A")) LW2A = exists("LW2") ? LW2 : 0.6
 if (!exists("LW2B")) LW2B = 1.8
 PT1 = PT1 + 0
 PT2 = PT2 + 0
 PT1B = PT1B + 0
 PT2B = PT2B + 0
-PS1 = PS1 + 0
+PS1A = PS1A + 0
 PS1B = PS1B + 0
-PS2 = PS2 + 0
+PS2A = PS2A + 0
 PS2B = PS2B + 0
-LW1 = LW1 + 0
+LW1A = LW1A + 0
 LW1B = LW1B + 0
-LW2 = LW2 + 0
+LW2A = LW2A + 0
 LW2B = LW2B + 0
 
 # extract_chi2_rmsd.sh: col1 = chi^2, col2 = RMSD
@@ -149,9 +150,9 @@ if (exists("YMIN") && exists("YMAX")) set yrange [YMIN+0.0 : YMAX+0.0]
 set logscale y 10
 
 USING = sprintf("%d:%d", RMSD_COL, CHI2_COL)
-STYLE1A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT1, PS1, COL1, LW1)
+STYLE1A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT1, PS1A, COL1, LW1A)
 STYLE1B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT1B, PS1B, COL1, LW1B)
-STYLE2A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2, PS2, COL2, LW2)
+STYLE2A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2, PS2A, COL2, LW2A)
 STYLE2B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2B, PS2B, COL2, LW2B)
 clause(data, style, title) = "'" . data . "' u " . USING . " " . style . " " . title
 
