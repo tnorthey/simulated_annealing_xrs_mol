@@ -4,8 +4,9 @@
 #
 # Default: one series from ./chi2_rmsd.dat (repo root when run from there).
 # Optional series via RESULTS_DIR_1B, RESULTS_DIR_2A, and RESULTS_DIR_2B.
-# 1A/1B share one style; 2A/2B share another. B uses a larger point and a
-# slightly thicker stroke. Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
+# 1A/2A are thin open circles with a center dot. 1B/2B are thicker crosses.
+# Colors still separate open (series 1) from closed (series 2).
+# Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
 # Example (from repo root):
 #   scripts/bash/extract_chi2_rmsd.sh results_chd_ewald_smoke
@@ -43,22 +44,27 @@ if (!exists("DATA_2B")) DATA_2B = (RESULTS_DIR_2B ne "") ? RESULTS_DIR_2B . "/ch
 
 if (!exists("OUTBASE") && ((RESULTS_DIR_1A eq ".") || (RESULTS_DIR_1A eq "./") || (RESULTS_DIR_1A eq ""))) OUTBASE = "figure_chi2_rmsd"
 if (!exists("OUTBASE")) OUTBASE = "figure_" . system(sprintf("bash -lc \"printf '%%s' $(basename '%s')\"", RESULTS_DIR_1A))
-if (!exists("NAME1")) NAME1 = "C1-C6 open"
-if (!exists("NAME2")) NAME2 = "C1-C6 closed"
+if (!exists("NAME1")) NAME1 = "$C_1$-$C_6$ open"
+if (!exists("NAME2")) NAME2 = "Forcefield default"
 if (!exists("COL1")) COL1 = "#a2142f"
 if (!exists("COL2")) COL2 = "#0072bd"
-if (!exists("PT1")) PT1 = 7
-if (!exists("PT2")) PT2 = 5
+# pt 6: open circle with a center dot. pt 2: cross.
+if (!exists("PT1")) PT1 = 6
+if (!exists("PT2")) PT2 = 6
+if (!exists("PT1B")) PT1B = 2
+if (!exists("PT2B")) PT2B = 2
 if (!exists("PS1")) PS1 = 1.2
 if (!exists("PS1B")) PS1B = 1.8
 if (!exists("PS2")) PS2 = 1.0
 if (!exists("PS2B")) PS2B = 1.6
-if (!exists("LW1")) LW1 = 0
-if (!exists("LW1B")) LW1B = 1.2
-if (!exists("LW2")) LW2 = 0
-if (!exists("LW2B")) LW2B = 1.2
+if (!exists("LW1")) LW1 = 0.6
+if (!exists("LW1B")) LW1B = 1.8
+if (!exists("LW2")) LW2 = 0.6
+if (!exists("LW2B")) LW2B = 1.8
 PT1 = PT1 + 0
 PT2 = PT2 + 0
+PT1B = PT1B + 0
+PT2B = PT2B + 0
 PS1 = PS1 + 0
 PS1B = PS1B + 0
 PS2 = PS2 + 0
@@ -143,9 +149,9 @@ set logscale y 10
 
 USING = sprintf("%d:%d", RMSD_COL, CHI2_COL)
 STYLE1A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT1, PS1, COL1, LW1)
-STYLE1B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT1, PS1B, COL1, LW1B)
+STYLE1B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT1B, PS1B, COL1, LW1B)
 STYLE2A = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2, PS2, COL2, LW2)
-STYLE2B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2, PS2B, COL2, LW2B)
+STYLE2B = sprintf("w p pt %d ps %g lc rgb '%s' lw %g", PT2B, PS2B, COL2, LW2B)
 clause(data, style, title) = "'" . data . "' u " . USING . " " . style . " " . title
 
 # B before the matching A series so the larger markers sit behind.
