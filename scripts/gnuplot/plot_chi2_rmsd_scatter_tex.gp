@@ -4,8 +4,8 @@
 #
 # Default: one series from ./chi2_rmsd.dat (repo root when run from there).
 # Optional series via RESULTS_DIR_1B, RESULTS_DIR_2A, and RESULTS_DIR_2B.
-# 1A/2A are thin open circles with a center dot. 1B/2B are thicker crosses.
-# Colors still separate open (series 1) from closed (series 2).
+# Series 1 (open) is open circles with a center dot. Series 2 (closed) is crosses.
+# A uses a thinner stroke; B uses a larger point and a thicker stroke.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
 # Example (from repo root):
@@ -50,8 +50,8 @@ if (!exists("COL1")) COL1 = "#a2142f"
 if (!exists("COL2")) COL2 = "#0072bd"
 # pt 6: open circle with a center dot. pt 2: cross.
 if (!exists("PT1")) PT1 = 6
-if (!exists("PT2")) PT2 = 6
-if (!exists("PT1B")) PT1B = 2
+if (!exists("PT1B")) PT1B = 6
+if (!exists("PT2")) PT2 = 2
 if (!exists("PT2B")) PT2B = 2
 if (!exists("PS1")) PS1 = 1.2
 if (!exists("PS1B")) PS1B = 1.8
