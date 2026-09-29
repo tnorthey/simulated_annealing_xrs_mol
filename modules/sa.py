@@ -909,7 +909,9 @@ class Annealing:
                     improve[:, xp.newaxis, xp.newaxis], xyz_trial, xyz
                 )
 
-                is_new_best = xp.logical_and(improve, f < f_best)
+                # Beat the carried χ², not total f. Total f lets a closed
+                # low-MM basin lock xyz_best; χ² lets a better fit replace it.
+                is_new_best = xp.logical_and(improve, xray_contrib < f_xray_best)
                 f_best = xp.where(is_new_best, f, f_best)
                 f_xray_best = xp.where(is_new_best, xray_contrib, f_xray_best)
                 xyz_best = xp.where(

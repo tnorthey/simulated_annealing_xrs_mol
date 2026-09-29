@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from modules.wrap import select_restart_batch
+from modules.wrap import select_adaptive_restart_batch, select_restart_batch
 
 
 def _fake_phase(n_chains=100, natoms=3, qlen=8):
@@ -119,3 +119,85 @@ def test_restart_ratio_rejects_invalid():
         select_restart_batch(xyz, f, fx, pred, 0.0)
     with pytest.raises(ValueError, match="restart_ratio"):
         select_restart_batch(xyz, f, fx, pred, 1.5)
+
+
+def _adaptive(xyz, fx, pred, ratio):
+    return select_adaptive_restart_batch(xyz, fx, pred, ratio)
+
+
+@pytest.mark.unit
+def test_adaptive_flat_chi2_keeps_every_chain():
+    """A flat bad population must not be collapsed onto its least-bad members."""
+    n = 32
+    xyz, _f, fx, pred = _fake_phase(n_chains=n)
+    fx = np.full(n, 5.0, dtype=np.float64)
+    xyz_b, fx_b, pred_b, k, n_pass, median_fx, cutoff, mode = _adaptive(
+        xyz, fx, pred, 0.2
+    )
+    assert mode == "keep_all_no_separation"
+    assert n_pass == 0
+    assert k == n
+    assert median_fx == pytest.approx(5.0)
+    assert cutoff == pytest.approx(2.5)
+    np.testing.assert_allclose(xyz_b, xyz)
+    np.testing.assert_allclose(fx_b, fx)
+    np.testing.assert_allclose(pred_b, pred)
+
+
+@pytest.mark.unit
+def test_adaptive_near_miss_does_not_use_absolute_cutoff():
+    """χ² of 5.3 with a median near 6 is not a separated elite."""
+    n = 20
+    xyz, _f, _fx, pred = _fake_phase(n_chains=n)
+    fx = np.linspace(5.3, 8.0, n)
+    xyz_b, fx_b, _pred_b, k, n_pass, _median, cutoff, mode = _adaptive(
+        xyz, fx, pred, 0.2
+    )
+    assert mode == "keep_all_no_separation"
+    assert n_pass == 0
+    assert k == n
+    assert float(np.min(fx)) > cutoff
+    np.testing.assert_allclose(xyz_b, xyz)
+    np.testing.assert_allclose(fx_b, fx)
+
+
+@pytest.mark.unit
+def test_adaptive_low_minority_is_capped_and_passers_keep_geometry():
+    """0.2 passes against a bulk near 5, and extra passers are not overwritten."""
+    n = 10
+    natoms = 3
+    qlen = 8
+    xyz = np.zeros((n, natoms, 3), dtype=np.float64)
+    for i in range(n):
+        xyz[i, 0, 0] = float(i + 1)
+    fx = np.array([0.1, 0.2, 0.3, 5, 5, 5, 5, 5, 5, 5], dtype=np.float64)
+    pred = np.arange(n, dtype=np.float64)[:, None] + np.linspace(0.0, 1.0, qlen)
+    xyz_b, fx_b, pred_b, k, n_pass, median_fx, cutoff, mode = _adaptive(
+        xyz, fx, pred, 0.2
+    )
+    assert mode == "adaptive"
+    assert median_fx == pytest.approx(5.0)
+    assert cutoff == pytest.approx(2.5)
+    assert n_pass == 3
+    assert k == 2  # ceil(0.2 * 10), not all three passers
+    # Passers keep themselves, including the one outside the tiling pool.
+    for i in (0, 1, 2):
+        np.testing.assert_allclose(xyz_b[i], xyz[i])
+        assert fx_b[i] == pytest.approx(fx[i])
+        np.testing.assert_allclose(pred_b[i], pred[i])
+    # Failures are tiled from the best two passers: pool = chains 0, 1.
+    pool = (0, 1)
+    for i in range(3, n):
+        src = pool[i % k]
+        np.testing.assert_allclose(xyz_b[i], xyz[src])
+        assert fx_b[i] == pytest.approx(fx[src])
+        np.testing.assert_allclose(pred_b[i], pred[src])
+
+
+@pytest.mark.unit
+def test_adaptive_restart_ratio_rejects_invalid():
+    xyz, _f, fx, pred = _fake_phase(n_chains=4)
+    with pytest.raises(ValueError, match="restart_ratio"):
+        select_adaptive_restart_batch(xyz, fx, pred, 0.0)
+    with pytest.raises(ValueError, match="restart_ratio"):
+        select_adaptive_restart_batch(xyz, fx, pred, 1.5)

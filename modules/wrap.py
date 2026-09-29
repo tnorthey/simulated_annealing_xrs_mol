@@ -202,6 +202,90 @@ def select_restart_batch(
     return xyz_batch, f_start, f_xray_start, predicted_start, k
 
 
+def select_adaptive_restart_batch(
+    xyz_best_all: np.ndarray,
+    f_xray_best_all: np.ndarray,
+    predicted_best_all: np.ndarray,
+    restart_ratio: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int, float, float, str]:
+    """
+    Reseed from chains whose χ² is at least 2× better than the population median.
+
+    No absolute χ² cutoff. A chain passes when ``f_xray <= median(f_xray) / 2``.
+    The pool is the best ``min(n_pass, ceil(ratio * N))`` passers. Passers keep
+    their own geometry. Chains that miss the cut are tiled from that pool.
+    If nobody passes, every chain keeps its own geometry.
+
+    Total ``f`` is not returned. Callers should leave that bar unset so a
+    low-MM basin cannot lock the next phase. ``f_xray`` and ``predicted``
+    are carried with the assigned geometry.
+
+    Returns
+    -------
+    xyz_batch, f_xray_start, predicted_start, K, n_pass, median_fx, cutoff, mode
+    """
+    xyz_best_all = np.asarray(xyz_best_all, dtype=np.float64)
+    f_xray_best_all = np.asarray(f_xray_best_all, dtype=np.float64).reshape(-1)
+    predicted_best_all = np.asarray(predicted_best_all, dtype=np.float64)
+
+    if xyz_best_all.ndim != 3:
+        raise ValueError(
+            f"xyz_best_all must have shape (n_chains, natoms, 3), "
+            f"got {xyz_best_all.shape}"
+        )
+    n_chains = int(xyz_best_all.shape[0])
+    if n_chains < 1:
+        raise ValueError("n_chains must be >= 1")
+    if f_xray_best_all.shape[0] != n_chains:
+        raise ValueError(
+            f"f_xray_best_all length {f_xray_best_all.shape[0]} != n_chains {n_chains}"
+        )
+    if predicted_best_all.shape[0] != n_chains:
+        raise ValueError(
+            f"predicted_best_all leading dim {predicted_best_all.shape[0]} "
+            f"!= n_chains {n_chains}"
+        )
+
+    ratio = float(restart_ratio)
+    if not (ratio > 0.0 and ratio <= 1.0):
+        raise ValueError(
+            f"restart_ratio must be in (0, 1], got {restart_ratio}"
+        )
+
+    median_fx = float(np.median(f_xray_best_all))
+    cutoff = median_fx / 2.0
+    order = np.argsort(f_xray_best_all, kind="mergesort")
+    pass_sorted = order[f_xray_best_all[order] <= cutoff]
+    n_pass = int(pass_sorted.size)
+
+    assign = np.arange(n_chains, dtype=np.int64)
+    if n_pass == 0:
+        k = n_chains
+        mode = "keep_all_no_separation"
+    else:
+        k_max = max(1, int(np.ceil(ratio * n_chains)))
+        pool = pass_sorted[: min(n_pass, k_max)]
+        k = int(pool.size)
+        fail_idx = np.flatnonzero(f_xray_best_all > cutoff)
+        if fail_idx.size:
+            assign[fail_idx] = pool[fail_idx % k]
+        mode = "adaptive"
+
+    xyz_batch = xyz_best_all[assign]
+    f_xray_start = f_xray_best_all[assign]
+    predicted_start = predicted_best_all[assign]
+    return (
+        xyz_batch,
+        f_xray_start,
+        predicted_start,
+        k,
+        n_pass,
+        median_fx,
+        cutoff,
+        mode,
+    )
+
+
 def build_gpu_per_chain_start_batch(
     pool_file: str,
     n_chains: int,
@@ -1588,41 +1672,39 @@ class Wrapper:
                         return np.asarray(arr)
 
                     xyz_all = _to_host(multi_chain_state["xyz_best_all"])
-                    f_all = _to_host(multi_chain_state["f_best_all"])
                     fx_all = _to_host(multi_chain_state["f_xray_best_all"])
                     pred_all = _to_host(multi_chain_state["predicted_best_all"])
                     restart_ratio = float(getattr(p, "restart_ratio", 1.0))
                     fx_all = np.asarray(fx_all, dtype=np.float64).reshape(-1)
                     fx_min_prev = float(np.min(fx_all)) if fx_all.size else 1e10
-                    # Rank previous-phase bests by χ² and tile the top
-                    # restart_ratio fraction onto every chain. Scores stay
-                    # reset so a low total-f from a closed basin cannot
-                    # reject later ring-opening moves.
+                    # Tile only chains that are at least 2× better than the
+                    # median χ². A flat bad population keeps every geometry.
+                    # Total f stays at 1e10; the χ² of the assigned geometry
+                    # is the bar the next phase has to beat.
                     (
                         gpu_start_batch,
-                        _f_unused,
-                        _fx_unused,
-                        _pred_unused,
+                        f_xray_start,
+                        predicted_start,
                         restart_k,
-                    ) = select_restart_batch(
+                        n_pass,
+                        median_fx,
+                        cutoff_fx,
+                        reseed_mode,
+                    ) = select_adaptive_restart_batch(
                         xyz_all,
-                        f_all,
                         fx_all,
                         pred_all,
                         restart_ratio,
                     )
-                    reseed_mode = "elite_f_xray_reset_scores"
                     n_c = int(gpu_start_batch.shape[0])
                     f_start = np.full(n_c, 1e10, dtype=np.float64)
-                    f_xray_start = np.full(n_c, 1e10, dtype=np.float64)
-                    predicted_start = np.zeros(
-                        np.asarray(pred_all).shape[1:], dtype=np.float64
-                    )
                     xyz_start = gpu_start_batch[0].copy()
                     print(
                         f"[GPU] reseed phase {i}: mode={reseed_mode} "
-                        f"k={restart_k}/{n_gpu_chains} prev_fx_min={fx_min_prev:.4g} "
-                        f"(scores reset to 1e10; not carrying closed-basin f)."
+                        f"k={restart_k}/{n_gpu_chains} n_pass={n_pass} "
+                        f"median_fx={median_fx:.4g} cutoff={cutoff_fx:.4g} "
+                        f"prev_fx_min={fx_min_prev:.4g} "
+                        f"(total f reset to 1e10; χ² bar carried)."
                     )
                     # #region agent log
                     try:
@@ -1648,6 +1730,9 @@ class Wrapper:
                                     "reseed_mode": reseed_mode,
                                     "restart_ratio": float(restart_ratio),
                                     "restart_k": int(restart_k),
+                                    "n_pass": int(n_pass),
+                                    "median_fx": float(median_fx),
+                                    "cutoff_fx": float(cutoff_fx),
                                     "n_chains": int(n_gpu_chains),
                                     "prev_fx_min": fx_min_prev,
                                     "f_start_reset": True,
