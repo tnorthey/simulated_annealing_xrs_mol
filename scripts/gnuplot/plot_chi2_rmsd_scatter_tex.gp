@@ -46,7 +46,7 @@ if (!exists("DATA_2B")) DATA_2B = (RESULTS_DIR_2B ne "") ? RESULTS_DIR_2B . "/ch
 
 if (!exists("OUTBASE") && ((RESULTS_DIR_1A eq ".") || (RESULTS_DIR_1A eq "./") || (RESULTS_DIR_1A eq ""))) OUTBASE = "figure_chi2_rmsd"
 if (!exists("OUTBASE")) OUTBASE = "figure_" . system(sprintf("bash -lc \"printf '%%s' $(basename '%s')\"", RESULTS_DIR_1A))
-if (!exists("NAME1")) NAME1 = "$C_1$-$C_6$ open"
+if (!exists("NAME1")) NAME1 = 'C$_1-$C$_6$ open'
 if (!exists("NAME2")) NAME2 = "Forcefield default"
 if (!exists("COL1")) COL1 = "#a2142f"
 if (!exists("COL2")) COL2 = "#0072bd"
@@ -137,7 +137,7 @@ set ytics ("" 10, "" 1, "" 0.1, "$10^{-2}$" 0.01, "$10^{-3}$" 0.001, "$10^{-4}$"
 set mytics 10 
 set ylabel "$\\chi^2$" offset 1.0,-3
 
-if (SHOW_KEY) set key bottom right opaque box lw 0.8 spacing 1.1 font ',10'
+if (SHOW_KEY) set key bottom right opaque nobox spacing 1.8 font ',10'
 if (!SHOW_KEY) unset key
 
 # Fixed ranges only when passed via -e (e.g. XMIN=0;XMAX=0.44;YMIN=5e-5;YMAX=5).
