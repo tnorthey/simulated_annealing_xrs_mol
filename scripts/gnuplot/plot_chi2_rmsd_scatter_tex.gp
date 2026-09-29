@@ -155,14 +155,21 @@ PLOT_CMD = PLOT_CMD . (PLOT_CMD eq "" ? "" : ", ") . clause(DATA_1A, STYLE1A, "t
 if (HAS_2B) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2B, STYLE2B, "notitle")
 if (HAS_2A) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2A, STYLE2A, "t '" . NAME2 . "'")
 
-if (HAS_1B) stats DATA_1B using RMSD_COL nooutput
-if (HAS_1B) print sprintf("Series 1B: %s (%d points)", DATA_1B, STATS_records)
-stats DATA_1A using RMSD_COL nooutput
-print sprintf("Series 1A: %s (%d points)", DATA_1A, STATS_records)
-if (HAS_2B) stats DATA_2B using RMSD_COL nooutput
-if (HAS_2B) print sprintf("Series 2B: %s (%d points)", DATA_2B, STATS_records)
-if (HAS_2A) stats DATA_2A using RMSD_COL nooutput
-if (HAS_2A) print sprintf("Series 2A: %s (%d points)", DATA_2A, STATS_records)
+# Both columns, matching the plot. A one-column "using RMSD" makes the row
+# index the x value, so a tight xrange reports every point out of range and
+# leaves STATS_records undefined.
+if (HAS_1B) stats DATA_1B using RMSD_COL:CHI2_COL nooutput
+N1B = (HAS_1B && exists("STATS_records")) ? STATS_records : 0
+if (HAS_1B) print sprintf("Series 1B: %s (%d points in range)", DATA_1B, N1B)
+stats DATA_1A using RMSD_COL:CHI2_COL nooutput
+N1A = exists("STATS_records") ? STATS_records : 0
+print sprintf("Series 1A: %s (%d points in range)", DATA_1A, N1A)
+if (HAS_2B) stats DATA_2B using RMSD_COL:CHI2_COL nooutput
+N2B = (HAS_2B && exists("STATS_records")) ? STATS_records : 0
+if (HAS_2B) print sprintf("Series 2B: %s (%d points in range)", DATA_2B, N2B)
+if (HAS_2A) stats DATA_2A using RMSD_COL:CHI2_COL nooutput
+N2A = (HAS_2A && exists("STATS_records")) ? STATS_records : 0
+if (HAS_2A) print sprintf("Series 2A: %s (%d points in range)", DATA_2A, N2A)
 eval "plot ".PLOT_CMD
 
 print sprintf("Wrote %s.tex (compile: pdflatex %s.tex).", OUTBASE, OUTBASE)
