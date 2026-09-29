@@ -7,7 +7,7 @@
 # Series 1 (open) is open circles with a center dot. Series 2 (closed) is crosses.
 # Point size is the same for A and B. A uses a thinner stroke than B.
 # Open strokes are 4x the forcefield-default strokes.
-# Each series also gets an RMSD box (min, Q1, median, Q3, max) along the top.
+# Each series also gets an RMSD box (min, Q1, median, Q3, max) above the axes.
 # Override per series with PS1A PS1B PS2A PS2B and LW1A LW1B LW2A LW2B.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
@@ -127,6 +127,7 @@ set style line 102 lc rgb '#808080' lt 0 lw 3
 set grid back ls 102
 
 set size 0.8, 0.8   # Scale up the plot instead
+set tmargin 7       # room above the axes for the RMSD boxes
 
 set output OUTBASE . ".tex"
 
@@ -209,14 +210,14 @@ if (HAS_2A) {
 }
 if (HAS_2A) print sprintf("Series 2A: %s (%d points in range)", DATA_2A, N2A)
 
-# Horizontal RMSD boxes along the top of the axes. x is RMSD; y is a
-# graph coordinate so the four summaries stay stacked at the top left.
+# Horizontal RMSD boxes above the axes. x is RMSD; graph y > 1 is outside
+# the plot, stacked upward from the top border.
 # Whisker = full range, box = interquartile range, black tick = median.
 BOX_H = 0.012
-YC1A = 0.955
-YC1B = 0.910
-YC2A = 0.865
-YC2B = 0.820
+YC2B = 1.045
+YC2A = 1.095
+YC1B = 1.145
+YC1A = 1.195
 xbox(arr, obj, xmin, q1, med, q3, xmax, yc, col, lw) = \
     sprintf("set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
         arr, xmin, yc, xmax, yc, col, lw) \
