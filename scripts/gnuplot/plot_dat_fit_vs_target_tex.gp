@@ -46,11 +46,13 @@ if (!exists("XTIC_STEP")) set xtics 1
 # KEY_LEFT=1 places the qmax 4 legend at the top left, shifted right. Default is top right.
 if (!exists("KEY_LEFT")) KEY_LEFT = 0
 KEY_LEFT = KEY_LEFT + 0
-if (KEY_LEFT) set key top left offset 10, 0 opaque nobox spacing 2.2 font ',10'
-if (!KEY_LEFT) set key top right opaque nobox spacing 2.2 font ',10'
+if (KEY_LEFT) set key top left offset 6, 0 opaque nobox spacing 2.6 font ',10'
+if (!KEY_LEFT) set key top right opaque nobox spacing 2.6 font ',10'
 
+if (!exists("YMIN")) YMIN = -16
+if (!exists("YMAX")) YMAX = 12
 if (exists("XMIN") && exists("XMAX")) set xrange [XMIN+0.0 : XMAX+0.0]
-if (exists("YMIN") && exists("YMAX")) set yrange [YMIN+0.0 : YMAX+0.0]
+set yrange [YMIN+0.0 : YMAX+0.0]
 
 plot TARGET using 1:2 with linespoints ls 1 title "$I_\\mathrm{target}(q)$", \
      FIT using 1:2 with linespoints ls 2 title "$\\chi^2 = 10^{-3}$ fit"
