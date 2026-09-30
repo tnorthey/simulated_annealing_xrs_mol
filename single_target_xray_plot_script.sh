@@ -57,7 +57,7 @@ PY
   chi2=$(printf '%s\n' "$picked" | sed -n '2p')
   echo "${dir}: ${fit} (chi2=${chi2}, target=${CHI2_TARGET})"
 
-  # qmax 4: integer ticks, legend top left. qmax 8: even ticks only, legend top right.
+  # qmax 4: integer ticks, legend near the top left. qmax 8: even ticks, legend bottom right.
   if [[ "$qmax" == 4 ]]; then
     xtic=1
     key_left=1

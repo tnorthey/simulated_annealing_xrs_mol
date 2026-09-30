@@ -43,11 +43,11 @@ set ytics 10
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics 1
 
-# KEY_LEFT=1 places the qmax 4 legend at the top left, shifted right. Default is top right.
+# KEY_LEFT=1 places the qmax 4 legend near the top left. Default (qmax 8) is bottom right.
 if (!exists("KEY_LEFT")) KEY_LEFT = 0
 KEY_LEFT = KEY_LEFT + 0
-if (KEY_LEFT) set key top left offset 6, 0 opaque nobox spacing 2.6 font ',10'
-if (!KEY_LEFT) set key top right opaque nobox spacing 2.6 font ',10'
+if (KEY_LEFT) set key top left offset 5, 0 opaque nobox spacing 2.6 font ',10'
+if (!KEY_LEFT) set key bottom right opaque nobox spacing 2.6 font ',10'
 
 if (!exists("YMIN")) YMIN = -16
 if (!exists("YMAX")) YMAX = 12
