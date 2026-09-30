@@ -8,6 +8,10 @@
 # Point size is the same for A and B. A uses a thinner stroke than B.
 # Open strokes are 4x the forcefield-default strokes.
 # Each series also gets an RMSD box (min, Q1, median, Q3, max) above the axes.
+# CHI2_RATIO selects which points enter the boxes (the scatter still shows all):
+#   1    every in-range point (default)
+#   0.5  chi^2 at or below the median (STATS_median)
+#   0.25 chi^2 at or below the lower quartile (STATS_lo_quartile)
 # Override per series with PS1A PS1B PS2A PS2B and LW1A LW1B LW2A LW2B.
 # Output: figure_<RESULTS_DIR_1A>.tex (override with OUTBASE).
 #
@@ -100,6 +104,17 @@ if (DATA_2B ne "" && !HAS_2B) exit
 if (!exists("SHOW_KEY")) SHOW_KEY = (HAS_1B || HAS_2A || HAS_2B)
 SHOW_KEY = SHOW_KEY + 0
 
+# 1: every in-range point. 0.5: chi^2 <= median. 0.25: chi^2 <= lower quartile.
+if (!exists("CHI2_RATIO")) CHI2_RATIO = 1
+CHI2_RATIO = CHI2_RATIO + 0
+FILTER_Q1 = (abs(CHI2_RATIO - 0.25) < 1e-6)
+FILTER_MED = (abs(CHI2_RATIO - 0.5) < 1e-6)
+FILTER_CHI2 = FILTER_Q1 || FILTER_MED
+if (!(FILTER_CHI2 || abs(CHI2_RATIO - 1) < 1e-6)) {
+    print "ERROR: CHI2_RATIO must be 1 (all points), 0.5 (chi^2 <= median), or 0.25 (chi^2 <= lower quartile)"
+    exit
+}
+
 reset
 
 # latex .eps output
@@ -168,47 +183,67 @@ if (HAS_2A) PLOT_CMD = PLOT_CMD . ", " . clause(DATA_2A, STYLE2A, HAS_2B ? "noti
 # Both columns, matching the plot. A one-column "using RMSD" makes the row
 # index the x value, so a tight xrange reports every point out of range and
 # leaves STATS_records undefined.
-# RMSD five-number summary (min, Q1, median, Q3, max) for the in-range points.
+# RMSD five-number summary (min, Q1, median, Q3, max).
+# CHI2_RATIO 0.5 / 0.25 keeps points with chi^2 at or below stats' median
+# or lower quartile. The scatter itself still includes every point.
+
+# BOX_DATA is the series file. Sets NBOX, NTOT, BOX_CUT, and the five-number
+# summary BOX_MIN BOX_Q1 BOX_MED BOX_Q3 BOX_MAX when NBOX > 0.
+rmsd_box_stats = "stats BOX_DATA using RMSD_COL:CHI2_COL nooutput; " \
+    . "NBOX = exists('STATS_records') ? STATS_records : 0; NTOT = NBOX; BOX_CUT = 0; " \
+    . "if (NBOX > 0 && FILTER_CHI2) { " \
+    . "BOX_CUT = FILTER_Q1 ? STATS_lo_quartile_y : STATS_median_y; " \
+    . "stats BOX_DATA using (column(CHI2_COL) <= BOX_CUT ? column(RMSD_COL) : 1/0):(column(CHI2_COL) <= BOX_CUT ? column(CHI2_COL) : 1/0) nooutput; " \
+    . "NBOX = exists('STATS_records') ? STATS_records : 0; " \
+    . "}; " \
+    . "if (NBOX > 0) { " \
+    . "BOX_MIN = STATS_min_x; BOX_Q1 = STATS_lo_quartile_x; BOX_MED = STATS_median_x; " \
+    . "BOX_Q3 = STATS_up_quartile_x; BOX_MAX = STATS_max_x; " \
+    . "}"
+series_note(n, ntot, cut) = FILTER_CHI2 \
+    ? sprintf(" (%d of %d points, chi^2 <= %s %.4g)", n, ntot, FILTER_Q1 ? "lower quartile" : "median", cut) \
+    : sprintf(" (%d points in range)", n)
+
 if (HAS_1B) {
-    stats DATA_1B using RMSD_COL:CHI2_COL nooutput
-    N1B = exists("STATS_records") ? STATS_records : 0
+    BOX_DATA = DATA_1B
+    eval rmsd_box_stats
+    N1B = NBOX
     if (N1B > 0) {
-        MIN1B = STATS_min_x; Q11B = STATS_lo_quartile_x; MED1B = STATS_median_x
-        Q31B = STATS_up_quartile_x; MAX1B = STATS_max_x
+        MIN1B = BOX_MIN; Q11B = BOX_Q1; MED1B = BOX_MED; Q31B = BOX_Q3; MAX1B = BOX_MAX
     }
+    print "Series 1B: " . DATA_1B . series_note(N1B, NTOT, BOX_CUT)
 } else {
     N1B = 0
 }
-if (HAS_1B) print sprintf("Series 1B: %s (%d points in range)", DATA_1B, N1B)
-stats DATA_1A using RMSD_COL:CHI2_COL nooutput
-N1A = exists("STATS_records") ? STATS_records : 0
+BOX_DATA = DATA_1A
+eval rmsd_box_stats
+N1A = NBOX
 if (N1A > 0) {
-    MIN1A = STATS_min_x; Q11A = STATS_lo_quartile_x; MED1A = STATS_median_x
-    Q31A = STATS_up_quartile_x; MAX1A = STATS_max_x
+    MIN1A = BOX_MIN; Q11A = BOX_Q1; MED1A = BOX_MED; Q31A = BOX_Q3; MAX1A = BOX_MAX
 }
-print sprintf("Series 1A: %s (%d points in range)", DATA_1A, N1A)
+print "Series 1A: " . DATA_1A . series_note(N1A, NTOT, BOX_CUT)
 if (HAS_2B) {
-    stats DATA_2B using RMSD_COL:CHI2_COL nooutput
-    N2B = exists("STATS_records") ? STATS_records : 0
+    BOX_DATA = DATA_2B
+    eval rmsd_box_stats
+    N2B = NBOX
     if (N2B > 0) {
-        MIN2B = STATS_min_x; Q12B = STATS_lo_quartile_x; MED2B = STATS_median_x
-        Q32B = STATS_up_quartile_x; MAX2B = STATS_max_x
+        MIN2B = BOX_MIN; Q12B = BOX_Q1; MED2B = BOX_MED; Q32B = BOX_Q3; MAX2B = BOX_MAX
     }
+    print "Series 2B: " . DATA_2B . series_note(N2B, NTOT, BOX_CUT)
 } else {
     N2B = 0
 }
-if (HAS_2B) print sprintf("Series 2B: %s (%d points in range)", DATA_2B, N2B)
 if (HAS_2A) {
-    stats DATA_2A using RMSD_COL:CHI2_COL nooutput
-    N2A = exists("STATS_records") ? STATS_records : 0
+    BOX_DATA = DATA_2A
+    eval rmsd_box_stats
+    N2A = NBOX
     if (N2A > 0) {
-        MIN2A = STATS_min_x; Q12A = STATS_lo_quartile_x; MED2A = STATS_median_x
-        Q32A = STATS_up_quartile_x; MAX2A = STATS_max_x
+        MIN2A = BOX_MIN; Q12A = BOX_Q1; MED2A = BOX_MED; Q32A = BOX_Q3; MAX2A = BOX_MAX
     }
+    print "Series 2A: " . DATA_2A . series_note(N2A, NTOT, BOX_CUT)
 } else {
     N2A = 0
 }
-if (HAS_2A) print sprintf("Series 2A: %s (%d points in range)", DATA_2A, N2A)
 
 # Horizontal RMSD boxes above the axes. x is RMSD; graph y > 1 is outside
 # the plot, stacked upward from the top border.

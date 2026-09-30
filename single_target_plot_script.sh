@@ -33,7 +33,9 @@ LW1A=2.4
 LW2A=0.6
 
 NAME1='C$_1-$C$_6$ open'
-style="PS1A=$PS1A;PS2A=$PS2A;LW1A=$LW1A;LW2A=$LW2A;NAME1='$NAME1'"
+# RMSD boxes: 1 = every point, 0.5 = chi^2 at or below the median, 0.25 = lower quartile.
+CHI2_RATIO=0.25
+style="PS1A=$PS1A;PS2A=$PS2A;LW1A=$LW1A;LW2A=$LW2A;NAME1='$NAME1';CHI2_RATIO=$CHI2_RATIO"
 
 gnuplot -e "XMIN=0.00;XMAX=0.95;YMIN=2e-6;YMAX=0.1;$style;RESULTS_DIR_1A='results_fig3_qmax4_open_"$comment_a"';RESULTS_DIR_2A='results_fig3_qmax4_closed_"$comment_a"'" \
   ./scripts/gnuplot/plot_chi2_rmsd_scatter_tex.gp
