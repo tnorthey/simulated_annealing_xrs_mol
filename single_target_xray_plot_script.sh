@@ -57,7 +57,16 @@ PY
   chi2=$(printf '%s\n' "$picked" | sed -n '2p')
   echo "${dir}: ${fit} (chi2=${chi2}, target=${CHI2_TARGET})"
 
-  gnuplot -e "XMIN=0;XMAX=${qmax};TARGET='${target}';FIT='${fit}';CHI2=${chi2};OUTBASE='${outbase}'" \
+  # qmax 4: integer ticks, legend top left. qmax 8: even ticks only, legend top right.
+  if [[ "$qmax" == 4 ]]; then
+    xtic=1
+    key_left=1
+  else
+    xtic=2
+    key_left=0
+  fi
+
+  gnuplot -e "XMIN=0;XMAX=${qmax};XTIC_STEP=${xtic};KEY_LEFT=${key_left};TARGET='${target}';FIT='${fit}';OUTBASE='${outbase}'" \
     ./scripts/gnuplot/plot_dat_fit_vs_target_tex.gp
 done
 
