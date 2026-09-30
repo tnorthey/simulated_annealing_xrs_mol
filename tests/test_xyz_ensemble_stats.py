@@ -1,6 +1,7 @@
 """Tests for scripts/python/xyz_ensemble_stats.py"""
 import os
 import numpy as np
+import pytest
 
 import xyz_ensemble_stats as ens
 
@@ -160,3 +161,96 @@ def test_write_table_tex_one_row(tmp_path):
     assert tex.count(r"\midrule") == 1
     # One experimental row pair only (median + range), not the 4-condition table.
     assert tex.split(r"\midrule", 1)[1].count("&") == 10
+
+
+def _chain(bond_0_5: float) -> np.ndarray:
+    coords = np.zeros((6, 3))
+    coords[:, 0] = np.arange(6, dtype=float)
+    coords[5, 0] = bond_0_5
+    return coords
+
+
+def test_chi2_ratio_lower_quartile_prints_tex_rows(tmp_path, capsys):
+    target = _chain(5.0)
+    structures = [
+        ("low.xyz", 1.0, 5.2),
+        ("mid_a.xyz", 2.0, 6.0),
+        ("mid_b.xyz", 3.0, 7.0),
+        ("high.xyz", 4.0, 8.0),
+    ]
+    target_path = str(tmp_path / "mol_target.xyz")
+    _write_xyz(target_path, target, comment="0.0 0.0")
+    paths = []
+    for name, chi2, bond in structures:
+        path = str(tmp_path / name)
+        _write_xyz(path, _chain(bond), comment=f"{chi2:.1f} 0.1")
+        paths.append(path)
+
+    out = str(tmp_path / "stats.dat")
+    rc = ens.main(
+        paths
+        + [
+            target_path,
+            "--target",
+            target_path,
+            "--rmsd-indices",
+            "0,1,2,3,4,5",
+            "--chi2-ratio",
+            "0.25",
+            "--print-tex-rows",
+            "--qmax",
+            "4",
+            "--open-bonds",
+            "none",
+            "-o",
+            out,
+        ]
+    )
+    assert rc == 0
+    printed = capsys.readouterr().out.strip().splitlines()
+    assert len(printed) == 2
+    assert printed[0].startswith(r"4 & None &")
+    assert "5.20" in printed[0]
+    assert r"\footnotesize" in printed[1]
+    assert printed[0].endswith(r"\\")
+    assert printed[1].endswith(r"\\")
+
+    stats = open(out).read()
+    assert "low.xyz" in stats
+    assert "mid_a.xyz" not in stats.split("# SUMMARY")[0]
+    assert "high.xyz" not in stats.split("# SUMMARY")[0]
+    assert "chi2_ratio = 0.25" in stats
+
+    tex_path = os.path.join(str(tmp_path), f"{os.path.basename(str(tmp_path))}_table.tex")
+    tex = open(tex_path).read()
+    assert r"lower quartile" in tex
+    assert r"\chi^2 < 10^{-3}" not in tex
+
+    rc = ens.main(
+        paths
+        + [
+            target_path,
+            "--target",
+            target_path,
+            "--rmsd-indices",
+            "0,1,2,3,4,5",
+            "--chi2-ratio",
+            "0.25",
+            "--print-tex-rows",
+            "--qmax",
+            "8",
+            "--open-bonds",
+            "c1c6",
+            "-o",
+            out,
+        ]
+    )
+    assert rc == 0
+    printed = capsys.readouterr().out.strip().splitlines()
+    assert printed[0].startswith(r"8 & \ce{C1-C6} &")
+    assert r"\footnotesize" in printed[1]
+
+
+def test_chi2_ratio_rejects_other_values():
+    with pytest.raises(SystemExit, match="chi2-ratio"):
+        ens.main(["missing.xyz", "--chi2-ratio", "0.1"])

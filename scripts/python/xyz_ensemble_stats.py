@@ -5,7 +5,9 @@ Summarize geometry and Kabsch RMSD over a list of XYZ structures.
 Reads XYZ files from a bash-expanded list (or an unexpanded glob), computes
 chosen bond lengths, dihedrals, and Kabsch RMSD versus a target XYZ, then
 writes stats.dat, a one-row LaTeX table ``<results_dir>_table.tex``, and prints
-mean, median, and range.
+mean, median, and range. ``--chi2-ratio 0.25`` or ``0.5`` keeps structures whose
+comment-line chi^2 is at or below that quantile before the summary. ``--print-tex-rows``
+prints only the two-line LaTeX body.
 
 Dihedral summary statistics are circular (angles wrap at ±180°).
 
@@ -271,6 +273,90 @@ def fmt_int(x: float) -> str:
     return str(int(round(float(x))))
 
 
+def parse_chi2_ratio(text: str) -> float:
+    """Return 1, 0.5, or 0.25. Any other value is an error."""
+    try:
+        ratio = float(text)
+    except ValueError as exc:
+        raise SystemExit(
+            "ERROR: --chi2-ratio must be 1 (all structures), "
+            "0.5 (chi^2 <= median), or 0.25 (chi^2 <= lower quartile)"
+        ) from exc
+    for allowed in (1.0, 0.5, 0.25):
+        if abs(ratio - allowed) < 1e-6:
+            return allowed
+    raise SystemExit(
+        "ERROR: --chi2-ratio must be 1 (all structures), "
+        "0.5 (chi^2 <= median), or 0.25 (chi^2 <= lower quartile)"
+    )
+
+
+def comment_chi2(path: str) -> float:
+    """Chi^2 is field 1 of the XYZ comment line, matching extract_chi2_rmsd.sh."""
+    with open(path) as f:
+        f.readline()
+        comment = f.readline()
+    fields = comment.split()
+    if not fields:
+        raise SystemExit(f"No chi^2 on the comment line of {path}")
+    try:
+        return float(fields[0])
+    except ValueError as exc:
+        raise SystemExit(f"Chi^2 is not a number in {path}: {fields[0]!r}") from exc
+
+
+def filter_by_chi2_ratio(xyz_files: Sequence[str], ratio: float) -> tuple[List[str], float | None]:
+    """Keep structures with chi^2 <= the requested quantile. Ratio 1 keeps all."""
+    if abs(ratio - 1.0) < 1e-6:
+        return list(xyz_files), None
+    chi2 = np.asarray([comment_chi2(p) for p in xyz_files], dtype=float)
+    cutoff = float(np.quantile(chi2, ratio))
+    kept = [path for path, value in zip(xyz_files, chi2) if value <= cutoff]
+    if not kept:
+        raise SystemExit(
+            f"No structures with chi^2 <= {cutoff:.6g} (--chi2-ratio {ratio:g})"
+        )
+    return kept, cutoff
+
+
+def chi2_subset_clause(ratio: float) -> str:
+    if abs(ratio - 0.25) < 1e-6:
+        return r"$\chi^2$ at or below the lower quartile"
+    if abs(ratio - 0.5) < 1e-6:
+        return r"$\chi^2$ at or below the median"
+    return r"$\chi^2 < 10^{-3}$"
+
+
+def tex_body_rows(
+    *,
+    qmax: int | str,
+    open_bonds: str,
+    rmsd_median: float,
+    rmsd_min: float,
+    rmsd_max: float,
+    bond_median: float,
+    bond_min: float,
+    bond_max: float,
+    dih0145_median: float,
+    dih0145_min: float,
+    dih0145_max: float,
+    dih1234_median: float,
+    dih1234_min: float,
+    dih1234_max: float,
+) -> str:
+    median_line = (
+        f"{qmax} & {open_bonds} & {fmt2(rmsd_median)} & {fmt2(bond_median)} "
+        f"& {fmt2(dih0145_median)} & {fmt2(dih1234_median)}\\\\"
+    )
+    range_line = (
+        f"  &             & \\footnotesize({fmt2(rmsd_min)}, {fmt2(rmsd_max)}) "
+        f"& \\footnotesize({fmt2(bond_min)}, {fmt2(bond_max)}) "
+        f"& \\footnotesize({fmt_int(dih0145_min)}, {fmt_int(dih0145_max)}) "
+        f"& \\footnotesize({fmt_int(dih1234_min)}, {fmt_int(dih1234_max)})\\\\"
+    )
+    return median_line + "\n" + range_line
+
+
 def write_table_tex(
     path: str,
     *,
@@ -291,11 +377,29 @@ def write_table_tex(
     target_bond: float,
     target_dih0145: float,
     target_dih1234: float,
-) -> None:
+    chi2_ratio: float = 1.0,
+) -> str:
+    rows = tex_body_rows(
+        qmax=qmax,
+        open_bonds=open_bonds,
+        rmsd_median=rmsd_median,
+        rmsd_min=rmsd_min,
+        rmsd_max=rmsd_max,
+        bond_median=bond_median,
+        bond_min=bond_min,
+        bond_max=bond_max,
+        dih0145_median=dih0145_median,
+        dih0145_min=dih0145_min,
+        dih0145_max=dih0145_max,
+        dih1234_median=dih1234_median,
+        dih1234_min=dih1234_min,
+        dih1234_max=dih1234_max,
+    )
+    subset = chi2_subset_clause(chi2_ratio)
     caption = (
         r"The median and range of the RMSD$(\bfR_j \in \mathcal{S}, \bfR_\mathrm{target})$, "
         r"\ce{C1-C6} distance, and torsion angles $\phi_{\ce{C1C2C5C6}}$ and "
-        r"$\phi_{\ce{C2C3C4C5}}$ for each structure with $\chi^2 < 10^{-3}$, corresponding "
+        rf"$\phi_{{\ce{{C2C3C4C5}}}}$ for each structure with {subset}, corresponding "
         r"to results shown in \cref{fig:rmsd_scatterplots_single_target_20}. The \ce{C1-C6} "
         rf"distance of $\bfR_\mathrm{{target}}$ is {fmt2(target_bond)} \AA, and its torsions "
         rf"are $\phi_{{\ce{{C1C2C5C6}}}}=\SI{{{fmt1(target_dih0145)}}}{{\degree}}$, and "
@@ -322,8 +426,7 @@ def write_table_tex(
 \\multicolumn{{1}}{{c}}{{(\\si{{\\degree}})}} &
 \\multicolumn{{1}}{{c}}{{(\\si{{\\degree}})}} \\\\
 \\midrule
-{qmax} & {open_bonds} & {fmt2(rmsd_median)} & {fmt2(bond_median)} & {fmt2(dih0145_median)} & {fmt2(dih1234_median)}\\\\
-  &             & \\footnotesize({fmt2(rmsd_min)}, {fmt2(rmsd_max)}) & \\footnotesize({fmt2(bond_min)}, {fmt2(bond_max)}) & \\footnotesize({fmt_int(dih0145_min)}, {fmt_int(dih0145_max)}) & \\footnotesize({fmt_int(dih1234_min)}, {fmt_int(dih1234_max)})\\\\
+{rows}
 \\bottomrule
 \\end{{tabular}}
 }}
@@ -331,6 +434,7 @@ def write_table_tex(
 """
     with open(path, "w") as f:
         f.write(text)
+    return rows
 
 
 def file_label(path: str, xyz_files: Sequence[str]) -> str:
@@ -350,12 +454,18 @@ def write_stats_dat(
     file_rows: Sequence[Sequence[str]],
     summary_headers: Sequence[str],
     summary_rows: Sequence[Sequence[str]],
+    chi2_ratio: float = 1.0,
+    chi2_cutoff: float | None = None,
 ) -> None:
     with open(path, "w") as f:
         f.write("# xyz_ensemble_stats\n")
         f.write(f"# n_files = {n_files}\n")
         f.write(f"# target = {target_path}\n")
         f.write("# rmsd_indices = " + ",".join(str(i) for i in rmsd_indices) + "\n")
+        if chi2_cutoff is not None:
+            f.write(f"# chi2_ratio = {chi2_ratio:g}\n")
+            f.write(f"# chi2_cutoff = {chi2_cutoff:.8g}\n")
+            f.write("# structures kept have comment-line chi^2 <= chi2_cutoff\n")
         f.write("# dihedral mean/median/range are circular\n")
         f.write("# " + "  ".join(headers) + "\n")
         for row in file_rows:
@@ -430,7 +540,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         default="auto",
         help='Open-bonds column: auto, none, or c1c6 (default: auto from directory name)',
     )
+    parser.add_argument(
+        "--chi2-ratio",
+        default="1",
+        help=(
+            "Keep structures with comment-line chi^2 at or below this quantile: "
+            "1 (all), 0.5 (median), or 0.25 (lower quartile). Default: 1."
+        ),
+    )
+    parser.add_argument(
+        "--print-tex-rows",
+        action="store_true",
+        help="Print only the two-line LaTeX table body to stdout.",
+    )
     args = parser.parse_args(argv)
+    chi2_ratio = parse_chi2_ratio(args.chi2_ratio)
 
     bonds: List[List[int]] = [list(b) for b in (args.bond or [])]
     dihedrals: List[List[int]] = [list(d) for d in (args.dihedral or [])]
@@ -448,6 +572,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     xyz_files = exclude_target(xyz_files, target_path)
     if not xyz_files:
         raise SystemExit("No XYZ files left after excluding the target")
+    xyz_files, chi2_cutoff = filter_by_chi2_ratio(xyz_files, chi2_ratio)
 
     n_target, atoms_target, coords_target = read_xyz(target_path)
     if args.rmsd_indices.strip():
@@ -567,12 +692,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         file_rows=file_rows,
         summary_headers=summary_headers,
         summary_rows=summary_rows,
+        chi2_ratio=chi2_ratio,
+        chi2_cutoff=chi2_cutoff,
     )
 
-    print(f"N structures: {len(xyz_files)}")
-    print(f"Target: {target_path}")
-    print(f"RMSD indices: {','.join(str(i) for i in rmsd_indices)}")
-    print(f"Wrote {out_path}")
+    if not args.print_tex_rows:
+        print(f"N structures: {len(xyz_files)}")
+        print(f"Target: {target_path}")
+        print(f"RMSD indices: {','.join(str(i) for i in rmsd_indices)}")
+        if chi2_cutoff is not None:
+            print(f"chi^2 cutoff ({chi2_ratio:g}): {chi2_cutoff:.8g}")
+        print(f"Wrote {out_path}")
 
     if can_write_tex:
         results_dir = common_results_dir(xyz_files)
@@ -600,7 +730,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             [TEX_DIHEDRAL_C1C2C5C6, TEX_DIHEDRAL_C2C3C4C5],
         )
         tex_path = args.tex_output.strip() or default_tex_path(xyz_files)
-        write_table_tex(
+        rows = write_table_tex(
             tex_path,
             qmax=qmax,
             open_bonds=open_bonds,
@@ -619,13 +749,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             target_bond=target_bond,
             target_dih0145=target_d1,
             target_dih1234=target_d2,
+            chi2_ratio=chi2_ratio,
         )
-        print(f"Wrote {tex_path}")
+        if args.print_tex_rows:
+            print(rows)
+        else:
+            print(f"Wrote {tex_path}")
+    elif args.print_tex_rows:
+        raise SystemExit(
+            "Cannot print LaTeX rows: the molecule has too few atoms for the C1-C6 table"
+        )
 
-    print()
-    print(format_table(file_headers, file_rows))
-    print()
-    print(format_table(summary_headers, summary_rows))
+    if not args.print_tex_rows:
+        print()
+        print(format_table(file_headers, file_rows))
+        print()
+        print(format_table(summary_headers, summary_rows))
     return 0
 
 

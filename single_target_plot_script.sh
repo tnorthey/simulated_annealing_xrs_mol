@@ -41,3 +41,16 @@ gnuplot -e "XMIN=0.00;XMAX=0.95;YMIN=2e-6;YMAX=0.1;$style;RESULTS_DIR_1A='result
   ./scripts/gnuplot/plot_chi2_rmsd_scatter_tex.gp
 gnuplot -e "XMIN=0.00;XMAX=0.95;YMIN=2e-5;YMAX=0.1;$style;RESULTS_DIR_1A='results_fig3_qmax8_open_"$comment_a"';RESULTS_DIR_2A='results_fig3_qmax8_closed_"$comment_a"'" \
   ./scripts/gnuplot/plot_chi2_rmsd_scatter_tex.gp
+
+for dir in \
+  results_fig3_qmax4_closed_"$comment_a" \
+  results_fig3_qmax4_open_"$comment_a" \
+  results_fig3_qmax8_closed_"$comment_a" \
+  results_fig3_qmax8_open_"$comment_a"
+do
+  python3 scripts/python/xyz_ensemble_stats.py \
+    "$dir"/*.xyz \
+    --rmsd-indices 0,1,2,3,4,5 \
+    --chi2-ratio "$CHI2_RATIO" \
+    --print-tex-rows
+done
