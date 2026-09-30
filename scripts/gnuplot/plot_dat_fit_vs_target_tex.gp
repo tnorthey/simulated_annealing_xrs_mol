@@ -18,9 +18,9 @@ if (!exists("OUTBASE")) OUTBASE = "figure_xray_fit"
 
 reset
 
-# Same width as the previous 0.8-scaled default canvas. Height is 0.9 of 1.85 in.
+# Same width as the previous 0.8-scaled default canvas. Height is 0.8 of 1.665 in.
 set terminal epslatex standalone color colortext 10 font "Helvetica,12" \
-    header "\\usepackage{amsmath}" size 4.0, 1.665
+    header "\\usepackage{amsmath}" size 4.0, 1.332
 
 # pt 6: open circle. pt 2: cross. Target is black and solid; fit is grey and dashed.
 PS_TARGET = 1.05
@@ -43,7 +43,7 @@ set ytics 10
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics 1
 
-set key bottom right opaque nobox spacing 2.6 font ',10'
+set key bottom right opaque nobox spacing 2.6 font ',9'
 
 if (!exists("YMIN")) YMIN = -16
 if (!exists("YMAX")) YMAX = 12
