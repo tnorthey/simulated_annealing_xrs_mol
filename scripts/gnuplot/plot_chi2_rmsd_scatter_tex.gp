@@ -152,7 +152,7 @@ set mxtics 2
 
 set ytics ("" 10, "" 1, "" 0.1, "$10^{-2}$" 0.01, "$10^{-3}$" 0.001, "$10^{-4}$" 0.0001, "$10^{-5}$" 0.00001, "$10^{-6}$" 0.000001)
 set mytics 10 
-set ylabel "$\\chi^2$" offset 1.0,-3
+set ylabel "$\\chi^2$" offset 1.0,-1.5
 
 if (SHOW_KEY) set key bottom right opaque nobox spacing 3.0 font ',10'
 if (!SHOW_KEY) unset key
