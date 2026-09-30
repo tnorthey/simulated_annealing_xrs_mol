@@ -213,11 +213,16 @@ if (HAS_2A) print sprintf("Series 2A: %s (%d points in range)", DATA_2A, N2A)
 # Horizontal RMSD boxes above the axes. x is RMSD; graph y > 1 is outside
 # the plot, stacked upward from the top border.
 # Whisker = full range, box = interquartile range, black tick = median.
+# Present series only, bottom to top: 2B, 2A, 1B, 1A. Four series keep the
+# previous centers; fewer series pack together with no empty slot.
 BOX_H = 0.012
-YC2B = 1.045
-YC2A = 1.095
-YC1B = 1.145
-YC1A = 1.195
+BOX_STEP = 0.050
+BOX_BASE = 1.045
+BOX_SLOT = 0
+if (N2B > 0) { YC2B = BOX_BASE + BOX_SLOT * BOX_STEP; BOX_SLOT = BOX_SLOT + 1 }
+if (N2A > 0) { YC2A = BOX_BASE + BOX_SLOT * BOX_STEP; BOX_SLOT = BOX_SLOT + 1 }
+if (N1B > 0) { YC1B = BOX_BASE + BOX_SLOT * BOX_STEP; BOX_SLOT = BOX_SLOT + 1 }
+if (N1A > 0) { YC1A = BOX_BASE + BOX_SLOT * BOX_STEP; BOX_SLOT = BOX_SLOT + 1 }
 xbox(arr, obj, xmin, q1, med, q3, xmax, yc, col, lw) = \
     sprintf("set arrow %d from first %.8g, graph %.4f to first %.8g, graph %.4f nohead lc rgb '%s' lw %.4g front", \
         arr, xmin, yc, xmax, yc, col, lw) \
