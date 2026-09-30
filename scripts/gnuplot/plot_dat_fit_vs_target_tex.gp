@@ -23,8 +23,8 @@ set terminal epslatex standalone color colortext 10 font "Helvetica,12" \
     header "\\usepackage{amsmath}" size 4.0, 1.85
 
 # pt 6: open circle. pt 2: cross. Target line is solid; fit line is dashed.
-PS_TARGET = 0.70
-PS_FIT = 0.75
+PS_TARGET = 1.05
+PS_FIT = 1.125
 LW_PT = 1.6
 
 set style line 1 pt 6 ps PS_TARGET lw LW_PT lc rgb '#a2142f' dt 1
@@ -36,16 +36,17 @@ set grid back ls 102
 set output OUTBASE . ".tex"
 
 set xlabel "q (\\AA$^{-1}$)" offset 0,0.4
-set ylabel "$\\%\\Delta I(q)$" offset 0,0
+set ylabel "$\\%\\Delta I(q)$" offset 1,0
 set mxtics 2
-set mytics 2
+unset mytics
+set ytics 10
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics 1
 
-# KEY_LEFT=1 puts the legend at the top left (qmax 4). Default is top right.
+# KEY_LEFT=1 places the qmax 4 legend at the top left, shifted right. Default is top right.
 if (!exists("KEY_LEFT")) KEY_LEFT = 0
 KEY_LEFT = KEY_LEFT + 0
-if (KEY_LEFT) set key top left opaque nobox spacing 2.2 font ',10'
+if (KEY_LEFT) set key top left offset 10, 0 opaque nobox spacing 2.2 font ',10'
 if (!KEY_LEFT) set key top right opaque nobox spacing 2.2 font ',10'
 
 if (exists("XMIN") && exists("XMAX")) set xrange [XMIN+0.0 : XMAX+0.0]
