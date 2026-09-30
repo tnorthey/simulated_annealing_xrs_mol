@@ -18,9 +18,9 @@ if (!exists("OUTBASE")) OUTBASE = "figure_xray_fit"
 
 reset
 
-# Same width as the previous 0.8-scaled default canvas. Height is 0.8 of 1.665 in.
+# Same width as the previous 0.8-scaled default canvas. Height is 1.1 times 1.332 in.
 set terminal epslatex standalone color colortext 10 font "Helvetica,12" \
-    header "\\usepackage{amsmath}" size 4.0, 1.332
+    header "\\usepackage{amsmath}" size 4.0, 1.465
 
 # pt 6: open circle. pt 2: cross. Target is black and solid; fit is grey and dashed.
 PS_TARGET = 1.05
