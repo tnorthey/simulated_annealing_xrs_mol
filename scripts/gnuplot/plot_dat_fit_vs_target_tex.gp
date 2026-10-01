@@ -22,12 +22,12 @@ reset
 set terminal epslatex standalone color colortext 10 font "Helvetica,12" \
     header "\\usepackage{amsmath}" size 4.0, 1.465
 
-# pt 6: open circle. pt 2: cross. Target is black and solid; fit is grey and dashed.
+# pt 4: open square. pt 2: cross. Target is black and solid; fit is grey and dashed.
 PS_TARGET = 1.05
 PS_FIT = 1.125
 LW_PT = 1.6
 
-set style line 1 pt 6 ps PS_TARGET lw LW_PT lc rgb '#000000' dt 1
+set style line 1 pt 4 ps PS_TARGET lw LW_PT lc rgb '#000000' dt 1
 set style line 2 pt 2 ps PS_FIT lw LW_PT lc rgb '#666666' dt 2
 
 set style line 102 lc rgb '#808080' lt 0 lw 2
@@ -50,5 +50,5 @@ if (!exists("YMAX")) YMAX = 12
 if (exists("XMIN") && exists("XMAX")) set xrange [XMIN+0.0 : XMAX+0.0]
 set yrange [YMIN+0.0 : YMAX+0.0]
 
-plot TARGET using 1:2 with linespoints ls 1 title "$I_\\mathrm{target}(q)$", \
-     FIT using 1:2 with linespoints ls 2 title "$\\chi^2 = 10^{-3}$ fit"
+plot TARGET using 1:2 with linespoints ls 1 title "Target", \
+     FIT using 1:2 with linespoints ls 2 title "Fit ($\\chi^2 = 10^{-3}$)"
