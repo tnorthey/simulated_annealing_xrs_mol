@@ -43,7 +43,7 @@ set ytics 10
 if (exists("XTIC_STEP")) set xtics XTIC_STEP
 if (!exists("XTIC_STEP")) set xtics 1
 
-set key bottom right opaque nobox spacing 2.6 font ',9'
+set key bottom right opaque nobox spacing 2.6 font ',8'
 
 if (!exists("YMIN")) YMIN = -16
 if (!exists("YMAX")) YMAX = 12
