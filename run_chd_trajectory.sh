@@ -7,8 +7,9 @@
 #
 # The first frame of the first phi starts from STARTING_XYZ via run_gpu_start.sh.
 # Every other launch uses run_gpu_from_previous_timestep.sh with
-# START_FROM_TRADIUS_RANDOM=1 and TRADIUS_N=2 (each CUDA chain draws a real
-# low-f structure from timesteps t+/-1..t+/-N).
+# START_FROM_TRADIUS_RANDOM=1. The first phi uses TRADIUS_FIRST (default 1);
+# every later phi uses TRADIUS_LATER (default 4). Each CUDA chain draws a real
+# low-f structure from timesteps t+/-1..t+/-N.
 #
 # Usage:
 #   ./run_chd_trajectory.sh [--phi 0.5,0.4,0.3] [description]
@@ -26,7 +27,8 @@
 #   STEP_START=0
 #   STEP_END=75
 #   TOP_N=200
-#   TRADIUS_N=2
+#   TRADIUS_FIRST=1                       radius for the first phi pass
+#   TRADIUS_LATER=4                       radius for every later phi pass
 #   GPU_CHAINS=512
 #   C_TUNING_INITIAL=0.1                  passed as --c-tuning-initial
 #   STARTING_XYZ=xyz/start.xyz            first frame of the first phi only
@@ -41,7 +43,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-    sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -102,7 +104,8 @@ QMAX="${QMAX:-8}"
 STEP_START="${STEP_START:-0}"
 STEP_END="${STEP_END:-75}"
 TOP_N="${TOP_N:-200}"
-TRADIUS_N="${TRADIUS_N:-2}"
+TRADIUS_FIRST="${TRADIUS_FIRST:-1}"
+TRADIUS_LATER="${TRADIUS_LATER:-4}"
 GPU_CHAINS="${GPU_CHAINS:-512}"
 C_TUNING_INITIAL="${C_TUNING_INITIAL:-0.1}"
 STARTING_XYZ="${STARTING_XYZ:-xyz/start.xyz}"
@@ -125,8 +128,12 @@ if [[ "$STEP_START" -gt "$STEP_END" ]]; then
     echo "ERROR: STEP_START ($STEP_START) is greater than STEP_END ($STEP_END)" >&2
     exit 1
 fi
-if [[ ! "$TRADIUS_N" =~ ^[0-9]+$ || "$TRADIUS_N" -lt 1 ]]; then
-    echo "ERROR: TRADIUS_N must be an integer >= 1 (got $TRADIUS_N)" >&2
+if [[ ! "$TRADIUS_FIRST" =~ ^[0-9]+$ || "$TRADIUS_FIRST" -lt 1 ]]; then
+    echo "ERROR: TRADIUS_FIRST must be an integer >= 1 (got $TRADIUS_FIRST)" >&2
+    exit 1
+fi
+if [[ ! "$TRADIUS_LATER" =~ ^[0-9]+$ || "$TRADIUS_LATER" -lt 1 ]]; then
+    echo "ERROR: TRADIUS_LATER must be an integer >= 1 (got $TRADIUS_LATER)" >&2
     exit 1
 fi
 if [[ ! -f "$STARTING_XYZ" ]]; then
@@ -158,7 +165,7 @@ echo "  qmax/qlen:   $QMAX / $QLEN"
 echo "  c_tuning:    $C_TUNING_INITIAL"
 echo "  GPU_CHAINS:  $GPU_CHAINS"
 echo "  TOP_N:       $TOP_N"
-echo "  TRADIUS_N:   $TRADIUS_N  (START_FROM_TRADIUS_RANDOM)"
+echo "  tradius:     first phi=$TRADIUS_FIRST  later phi=$TRADIUS_LATER  (START_FROM_TRADIUS_RANDOM)"
 echo "  first start: $STARTING_XYZ  (phi=$first_phi frame=$first_step only)"
 echo "  config:      $CONFIG"
 echo "  extra args:  $EXTRA_RUN_PY_ARGS"
@@ -172,21 +179,28 @@ for step in $(seq "$STEP_START" "$STEP_END"); do
     fi
 done
 
+phi_index=0
 for phi in "${PHI_LIST[@]}"; do
-    echo "=== phi (tuning_ratio_target)=$phi ==="
+    if [[ "$phi_index" -eq 0 ]]; then
+        radius="$TRADIUS_FIRST"
+    else
+        radius="$TRADIUS_LATER"
+    fi
+    echo "=== phi (tuning_ratio_target)=$phi  TRADIUS_N=$radius ==="
     for step in $(seq "$STEP_START" "$STEP_END"); do
         ts=$(printf '%02d' "$((10#$step))")
         target="xyz/target_traj${TRAJ}/target_${ts}.xyz"
-        if [[ "$phi" == "$first_phi" && "$ts" == "$first_step" ]]; then
+        if [[ "$phi_index" -eq 0 && "$ts" == "$first_step" ]]; then
             echo "--- phi=$phi frame=$ts  run_gpu_start.sh  STARTING_XYZ=$STARTING_XYZ ---"
             STARTING_XYZ="$STARTING_XYZ" TARGET_FILE="$target" \
                 "$REPO_ROOT/scripts/bash/run_gpu_start.sh" "$ts" "$EXCITATION" "$phi"
         else
-            echo "--- phi=$phi frame=$ts  run_gpu_from_previous_timestep.sh  TRADIUS_N=$TRADIUS_N ---"
+            echo "--- phi=$phi frame=$ts  run_gpu_from_previous_timestep.sh  TRADIUS_N=$radius ---"
             # Clear STARTING_XYZ so the helper does not ignore the tradius pool.
-            STARTING_XYZ="" START_FROM_TRADIUS_RANDOM=1 TRADIUS_N="$TRADIUS_N" \
+            STARTING_XYZ="" START_FROM_TRADIUS_RANDOM=1 TRADIUS_N="$radius" \
                 TOP_N="$TOP_N" TARGET_FILE="$target" \
                 "$REPO_ROOT/scripts/bash/run_gpu_from_previous_timestep.sh" "$ts" "$EXCITATION" "$phi"
         fi
     done
+    phi_index=$((phi_index + 1))
 done
