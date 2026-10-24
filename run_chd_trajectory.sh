@@ -11,12 +11,16 @@
 # low-f structure from timesteps t+/-1..t+/-N).
 #
 # Usage:
-#   ./run_chd_trajectory.sh [description]
+#   ./run_chd_trajectory.sh [--phi 0.5,0.4,0.3] [description]
 #   ./run_chd_trajectory.sh --help
+#
+# Options:
+#   --phi LIST    tuning_ratio_target values, comma- or space-separated.
+#                 Overrides PHI_VALUES. Default: 0.5 0.45 0.4 0.35 0.3
 #
 # Environment (defaults shown):
 #   TRAJ=094
-#   PHI_VALUES="0.5 0.45 0.4 0.35 0.3"   space- or comma-separated, decreasing
+#   PHI_VALUES="0.5 0.45 0.4 0.35 0.3"   used when --phi is omitted
 #   EXCITATION=1.0
 #   QMAX=8                                qlen = int(10*QMAX+1)
 #   STEP_START=0
@@ -37,16 +41,62 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
-[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && usage
-
-DESCRIPTION="${1:-}"
+DESCRIPTION=""
+PHI_FROM_CLI=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --phi)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --phi requires a value (e.g. --phi 0.5,0.4,0.3)" >&2
+                exit 1
+            fi
+            PHI_VALUES="$2"
+            PHI_FROM_CLI=1
+            shift 2
+            ;;
+        --phi=*)
+            PHI_VALUES="${1#--phi=}"
+            PHI_FROM_CLI=1
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            echo "ERROR: unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            if [[ -n "$DESCRIPTION" ]]; then
+                echo "ERROR: unexpected argument: $1" >&2
+                exit 1
+            fi
+            DESCRIPTION="$1"
+            shift
+            ;;
+    esac
+done
+# A positional description may follow --.
+if [[ $# -gt 0 ]]; then
+    if [[ -n "$DESCRIPTION" || $# -gt 1 ]]; then
+        echo "ERROR: unexpected argument: $1" >&2
+        exit 1
+    fi
+    DESCRIPTION="$1"
+fi
 
 TRAJ="${TRAJ:-094}"
-PHI_VALUES="${PHI_VALUES:-0.5 0.45 0.4 0.35 0.3}"
+if [[ "$PHI_FROM_CLI" -eq 0 ]]; then
+    PHI_VALUES="${PHI_VALUES:-0.5 0.45 0.4 0.35 0.3}"
+fi
 EXCITATION="${EXCITATION:-1.0}"
 QMAX="${QMAX:-8}"
 STEP_START="${STEP_START:-0}"
