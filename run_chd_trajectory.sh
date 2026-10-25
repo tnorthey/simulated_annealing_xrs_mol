@@ -174,6 +174,20 @@ fi
 first_phi="${PHI_LIST[0]}"
 first_step=$(printf '%02d' "$((10#$STEP_START))")
 
+RUN_STARTED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
+SECONDS=0
+finish_timer() {
+    local status=$?
+    local elapsed=$SECONDS
+    local h=$((elapsed / 3600))
+    local m=$(((elapsed % 3600) / 60))
+    local s=$((elapsed % 60))
+    printf '=== full run time: %dh %02dm %02ds (started %s) ===\n' \
+        "$h" "$m" "$s" "$RUN_STARTED_AT"
+    exit "$status"
+}
+trap finish_timer EXIT
+
 echo "=== CHD trajectory minimisation (GPU) ==="
 echo "  results:     $RESULTS_DIR"
 echo "  traj:        $TRAJ  frames ${first_step}..$(printf '%02d' "$((10#$STEP_END))")"
@@ -190,6 +204,7 @@ echo "  tradius:     first phi=$TRADIUS_FIRST  later phi=$TRADIUS_LATER  (START_
 echo "  first start: $STARTING_XYZ  (phi=$first_phi frame=$first_step only)"
 echo "  config:      $CONFIG"
 echo "  extra args:  $EXTRA_RUN_PY_ARGS"
+echo "  started:     $RUN_STARTED_AT"
 
 for step in $(seq "$STEP_START" "$STEP_END"); do
     ts=$(printf '%02d' "$((10#$step))")
