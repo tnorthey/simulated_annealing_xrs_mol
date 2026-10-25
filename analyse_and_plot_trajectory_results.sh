@@ -4,7 +4,11 @@
 #
 # Usage:
 #   ./analyse_and_plot_trajectory_results.sh <results_dir>
+#   ./analyse_and_plot_trajectory_results.sh <results_dir>.npz
 #   ./analyse_and_plot_trajectory_results.sh --help
+#
+# NPZ mode: pass the archive, or a results directory whose sibling .npz exists
+# and which has no per-chain xyz files. Geometry is read from the archive.
 #
 # Writes into <results_dir>/analysis/:
 #   topM_geometry_bond-0-5_topM-<N>.csv
@@ -29,7 +33,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { usage; exit 0; }
@@ -40,15 +44,29 @@ if [[ $# -ne 1 ]]; then
     exit 1
 fi
 
-if [[ ! -d "$1" ]]; then
-    echo "ERROR: results directory not found: $1" >&2
+PYTHON="${PYTHON:-python3}"
+ARCHIVE=""
+if [[ -f "$1" && "$1" == *.npz ]]; then
+    ARCHIVE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+    stem="$(basename "$ARCHIVE" .npz)"
+    parent="$(cd "$(dirname "$ARCHIVE")" && pwd)"
+    RESULTS_DIR="${parent}/${stem}"
+    mkdir -p "$RESULTS_DIR"
+elif [[ -d "$1" ]]; then
+    RESULTS_DIR="$(cd "$1" && pwd)"
+    if [[ -f "${RESULTS_DIR}.npz" ]]; then
+        chain_xyz="$("$PYTHON" "$REPO_ROOT/modules/trajectory_archive.py" count-chains --results-dir "$RESULTS_DIR")"
+        if [[ "$chain_xyz" == "0" ]]; then
+            ARCHIVE="${RESULTS_DIR}.npz"
+        fi
+    fi
+else
+    echo "ERROR: results directory or .npz archive not found: $1" >&2
     exit 1
 fi
-RESULTS_DIR="$(cd "$1" && pwd)"
 
 TOPM="${TOPM:-200}"
 TIME_FILE="${TIME_FILE:-chd_results/time.dat}"
-PYTHON="${PYTHON:-python3}"
 
 if [[ ! "$TOPM" =~ ^[0-9]+$ || "$TOPM" -lt 1 ]]; then
     echo "ERROR: TOPM must be an integer >= 1 (got $TOPM)" >&2
@@ -100,12 +118,22 @@ echo "  analysis: $ANALYSIS"
 echo "  traj:     $TRAJ"
 echo "  topM:     $TOPM"
 echo "  time:     $TIME_FILE"
+if [[ -n "$ARCHIVE" ]]; then
+    echo "  source:   $ARCHIVE"
+else
+    echo "  source:   xyz files in $RESULTS_DIR"
+fi
 
 run_geometry() {
+    local archive_args=()
+    if [[ -n "$ARCHIVE" ]]; then
+        archive_args+=(--archive "$ARCHIVE")
+    fi
     "$PYTHON" "$REPO_ROOT/scripts/python/topM_geometry_statistics.py" "$RESULTS_DIR" \
         --skip-closest --recompute --topM "$TOPM" \
         --time-units fs --time-origin 0 --time-file "$TIME_FILE" \
         --output-dir "$ANALYSIS" \
+        "${archive_args[@]}" \
         "$@"
 }
 

@@ -8,6 +8,10 @@ cd "$REPO_ROOT"
 
 PYTHON="${PYTHON:-python3}"
 RESULTS_DIR="${RESULTS_DIR:-results}"
+
+_archive_py() {
+    "$PYTHON" "$REPO_ROOT/modules/trajectory_archive.py" "$@"
+}
 TOP_N="${TOP_N:-250}"
 CONFIG="${CONFIG:-input.toml}"
 GPU_CHAINS="${GPU_CHAINS:-1024}"
@@ -68,6 +72,8 @@ Environment (defaults):
   TRADIUS_N=${TRADIUS_N}      For tradius modes: include t+/-1..t+/-N
   TARGET_FILE         If unset, chd+_data/eirik_data_<time_step>.dat
   CONFIG=${CONFIG}
+                          NPZ mode (options.npz_mode_bool): pool xyz is read from
+                          \${RESULTS_DIR}.npz and the scratch copy is deleted after the run
   GPU_CHAINS=${GPU_CHAINS}
   PREV_STEP           Override pool step for prev-random / default mean (default: t-1)
   PREV_DISTANCE       If PREV_STEP unset, prev-random pools from t-PREV_DISTANCE (default: 1)
@@ -173,9 +179,27 @@ resolve_next_random_pool_step() {
 
 mkdir -p "$RESULTS_DIR"
 
+NPZ_MODE="$(_archive_py npz-mode --config "$CONFIG" --results-dir "$RESULTS_DIR")"
+cleanup_npz_pool() {
+    if [[ "${NPZ_MODE:-0}" == "1" && -d "${RESULTS_DIR}/_npz_pool" ]]; then
+        rm -rf "${RESULTS_DIR}/_npz_pool"
+    fi
+}
+if [[ "$NPZ_MODE" == "1" ]]; then
+    trap cleanup_npz_pool EXIT
+fi
+
 # Populate TOP_FILES with up to TOP_N lowest-f(xray) paths for one timestep.
 collect_top_pool_for_step() {
     local pool_step="$1"
+    if [[ "${NPZ_MODE:-0}" == "1" ]]; then
+        mapfile -t TOP_FILES < <(_archive_py materialize \
+            --results-dir "$RESULTS_DIR" \
+            --step "$pool_step" \
+            --top-n "$TOP_N" \
+            --dest "${RESULTS_DIR}/_npz_pool")
+        return
+    fi
     mapfile -t TOP_FILES < <("$PYTHON" - "$RESULTS_DIR" "$pool_step" "$TOP_N" <<'PY'
 import glob, os, re, sys
 
@@ -265,6 +289,15 @@ collect_tradius_pool() {
     if [[ -z "$ts_int" ]]; then
         echo "ERROR: START_FROM_TRADIUS_RANDOM requires numeric time_step" >&2
         exit 1
+    fi
+    if [[ "${NPZ_MODE:-0}" == "1" ]]; then
+        mapfile -t TOP_FILES < <(_archive_py materialize-tradius \
+            --results-dir "$RESULTS_DIR" \
+            --timestep "$ts_padded" \
+            --radius "$TRADIUS_N" \
+            --top-n "$TOP_N" \
+            --dest "${RESULTS_DIR}/_npz_pool")
+        return
     fi
     mapfile -t TOP_FILES < <("$PYTHON" - "$RESULTS_DIR" "$ts_padded" "$TRADIUS_N" "$TOP_N" <<'PY'
 import glob, os, re, sys
@@ -456,6 +489,9 @@ GPU_POOL_FILE=""
 
 echo "=== GPU run from previous timestep ==="
 echo "  time_step (run-id)=$ts_padded  prev=$prev_step  TOP_N=$TOP_N  GPU_CHAINS=$GPU_CHAINS"
+if [[ "$NPZ_MODE" == "1" ]]; then
+    echo "  npz archive: ${RESULTS_DIR}.npz  (restart pool read from the archive)"
+fi
 
 # Ensure previous-step mean exists when pool is available (for tradius-mean and reuse).
 if [[ -n "$ts_int" ]]; then

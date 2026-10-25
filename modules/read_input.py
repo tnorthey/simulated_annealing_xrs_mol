@@ -140,6 +140,13 @@ class Input_to_params:
         self.adaptive_restart_bool = bool(
             data.get("options", {}).get("adaptive_restart_bool", False)
         )
+        # NPZ archive: one <results_dir>.npz of the lowest-f_xray structures per timestep.
+        self.npz_mode_bool = bool(
+            data.get("options", {}).get("npz_mode_bool", False)
+        )
+        self.archive_top_m = int(
+            data.get("options", {}).get("archive_top_m", 200)
+        )
         # Validate mm_param_method
         if self.mm_param_method not in ["sdf", "basic"]:
             print(f"\n{'='*60}")
@@ -179,6 +186,15 @@ class Input_to_params:
                 f"  Suggestion: Set restart_ratio = 1.0 (all previous bests) "
                 f"or e.g. 0.1 (top 10%)"
             )
+            print(f"{'='*60}\n")
+            sys.exit(1)
+        if self.archive_top_m < 1:
+            print(f"\n{'='*60}")
+            print("ERROR: Invalid archive_top_m value")
+            print(f"{'='*60}")
+            print(f"  Value: {self.archive_top_m}")
+            print(f"  Allowed values: integer >= 1")
+            print(f"  Suggestion: Set archive_top_m = 200 in [options]")
             print(f"{'='*60}\n")
             sys.exit(1)
         # sampling options

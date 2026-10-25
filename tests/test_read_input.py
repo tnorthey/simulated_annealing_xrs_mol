@@ -72,6 +72,32 @@ class TestInputToParams:
         # Other parameters should remain unchanged
         assert p.mode == "test"
 
+    def test_npz_mode_defaults(self, sample_toml_file):
+        """NPZ archive mode is off and keeps 200 structures unless configured."""
+        p = Input_to_params(sample_toml_file)
+        assert p.npz_mode_bool is False
+        assert p.archive_top_m == 200
+
+    def test_npz_mode_override(self, sample_toml_file):
+        """npz_mode_bool and archive_top_m can be set via overrides."""
+        p = Input_to_params(
+            sample_toml_file,
+            overrides={
+                "options.npz_mode_bool": True,
+                "options.archive_top_m": 50,
+            },
+        )
+        assert p.npz_mode_bool is True
+        assert p.archive_top_m == 50
+
+    def test_archive_top_m_invalid_raises(self, sample_toml_file):
+        """archive_top_m below 1 exits during parse."""
+        with pytest.raises(SystemExit):
+            Input_to_params(
+                sample_toml_file,
+                overrides={"options.archive_top_m": 0},
+            )
+
     def test_restart_ratio_invalid_raises(self, sample_toml_file):
         """restart_ratio outside (0, 1] exits during parse."""
         with pytest.raises(SystemExit):

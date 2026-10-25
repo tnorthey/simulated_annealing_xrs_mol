@@ -2,8 +2,8 @@
 # Full CHD trajectory minimisation on the GPU.
 #
 # One shared results directory. Outer loop is decreasing tuning_ratio_target
-# (phi); inner loop is trajectory frames. Later phi passes keep earlier .xyz
-# files and start from the best structures found so far.
+# (phi); inner loop is trajectory frames. Later phi passes keep earlier results
+# and start from the best structures found so far.
 #
 # The first frame of the first phi starts from STARTING_XYZ via run_gpu_start.sh.
 # Every other launch uses run_gpu_from_previous_timestep.sh with
@@ -35,6 +35,10 @@
 #   CONFIG=input.toml
 #   EXTRA_RUN_PY_ARGS                     appended after --qmax/--qlen/--c-tuning-initial
 #
+# NPZ mode (options.npz_mode_bool in CONFIG): chain xyz/dat files are not kept.
+# Structures go to ${RESULTS_DIR}.npz (archive_top_m lowest f_xray per frame).
+# TOP_N must be <= archive_top_m, because later frames restart from that archive.
+#
 # Results directory (phi is not part of the name):
 #   results_chd_traj_${TRAJ}_qmax${QMAX}[_${description}]
 set -euo pipefail
@@ -43,7 +47,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-    sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'
     exit 0
 }
 
@@ -153,6 +157,20 @@ else
 fi
 export RESULTS_DIR
 
+PYTHON="${PYTHON:-python3}"
+ARCHIVE_TOP_M="$("$PYTHON" "$REPO_ROOT/modules/trajectory_archive.py" archive-top-m --config "$CONFIG")"
+if [[ -n "$ARCHIVE_TOP_M" ]]; then
+    if [[ ! "$TOP_N" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: TOP_N must be an integer >= 1 when NPZ mode is on (got $TOP_N)" >&2
+        exit 1
+    fi
+    if [[ "$TOP_N" -gt "$ARCHIVE_TOP_M" ]]; then
+        echo "ERROR: TOP_N ($TOP_N) is larger than archive_top_m ($ARCHIVE_TOP_M) in $CONFIG." >&2
+        echo "       The NPZ archive drops structures outside archive_top_m, so a later frame cannot draw them." >&2
+        exit 1
+    fi
+fi
+
 first_phi="${PHI_LIST[0]}"
 first_step=$(printf '%02d' "$((10#$STEP_START))")
 
@@ -165,6 +183,9 @@ echo "  qmax/qlen:   $QMAX / $QLEN"
 echo "  c_tuning:    $C_TUNING_INITIAL"
 echo "  GPU_CHAINS:  $GPU_CHAINS"
 echo "  TOP_N:       $TOP_N"
+if [[ -n "$ARCHIVE_TOP_M" ]]; then
+    echo "  npz archive: ${RESULTS_DIR}.npz  (archive_top_m=$ARCHIVE_TOP_M)"
+fi
 echo "  tradius:     first phi=$TRADIUS_FIRST  later phi=$TRADIUS_LATER  (START_FROM_TRADIUS_RANDOM)"
 echo "  first start: $STARTING_XYZ  (phi=$first_phi frame=$first_step only)"
 echo "  config:      $CONFIG"

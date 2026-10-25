@@ -62,6 +62,10 @@ restart_ratio = 0.2
 # most half the population median. restart_ratio then caps that pool.
 # false → always tile the best restart_ratio fraction (scores carried).
 adaptive_restart_bool = false
+# false: one xyz (and optional dat) per chain
+# true: one <results_dir>.npz, only archive_top_m lowest-f_xray structures per timestep
+npz_mode_bool = false
+archive_top_m = 200
 
 # ============================================================================
 # SAMPLING PARAMETERS

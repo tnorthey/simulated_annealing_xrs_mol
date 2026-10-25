@@ -145,6 +145,25 @@ def build_time_axis(
     return np.arange(n, dtype=np.float64) * float(dt) + float(time_origin)
 
 
+def candidate_coords(candidate) -> np.ndarray:
+    """Coordinates from an in-memory archive record or from an xyz path."""
+    coords = candidate.get("coords")
+    if coords is not None:
+        return np.asarray(coords, dtype=np.float64)
+    return read_xyz_coords(candidate["xyz"])
+
+
+def candidate_frame(candidate):
+    """(natoms, comment, atoms, coords) from an archive record or an xyz file."""
+    coords = candidate.get("coords")
+    if coords is not None:
+        coords = np.asarray(coords, dtype=np.float64)
+        atoms = [str(atom) for atom in candidate["atoms"]]
+        comment = str(candidate.get("comment") or "")
+        return coords.shape[0], comment, atoms, coords
+    return read_xyz_frame(candidate["xyz"])
+
+
 def read_xyz_coords(path):
     with open(path, "r") as f:
         n = int(f.readline().strip())
@@ -253,7 +272,7 @@ def select_closest_to_mean(
     K = len(layer)
     if K <= 1:
         return 0
-    coords = [read_xyz_coords(c["xyz"]) for c in layer]
+    coords = [candidate_coords(c) for c in layer]
     mean_coords = np.mean(np.stack(coords, axis=0), axis=0)
     return select_closest_by_rmsd_to_reference(
         coords, mean_coords, use_kabsch=use_kabsch, rmsd_indices=rmsd_indices
@@ -303,6 +322,15 @@ def load_topM_candidates(directory, topM):
     return timesteps, layers
 
 
+def load_topM_candidates_from_archive(path, topM):
+    """Same layer layout as ``load_topM_candidates``, read from an NPZ archive."""
+    import modules.trajectory_archive as trajectory_archive
+
+    if not os.path.isfile(path):
+        raise RuntimeError(f"Archive not found: {path}")
+    return trajectory_archive.load_timestep_layers(path, top_m=topM)
+
+
 def compute_geometry_for_layer(
     layer: Sequence[dict],
     bond=None,
@@ -315,7 +343,7 @@ def compute_geometry_for_layer(
     """
     results = []
     for c in layer:
-        xyz = read_xyz_coords(c["xyz"])
+        xyz = candidate_coords(c)
         row: list[float] = []
         if bond is not None:
             row.append(analysis.calculate_bond_length(xyz, bond[0], bond[1]))
@@ -583,6 +611,15 @@ def main():
     parser.add_argument(
         "directory",
         help="Directory containing *.xyz files (named like 01_000.12345678.xyz)",
+    )
+    parser.add_argument(
+        "--archive",
+        type=str,
+        default=None,
+        help=(
+            "NPZ archive of xyz/signal/q/t (from npz_mode_bool). "
+            "When set, candidates are read from this file instead of *.xyz."
+        ),
     )
     parser.add_argument(
         "--topM",
@@ -863,6 +900,8 @@ def main():
         parser.error("--time-end is only valid with --time-basis plot-index")
     if args.time_file is not None and not os.path.isfile(args.time_file):
         parser.error(f"--time-file: not a readable file: {args.time_file!r}")
+    if args.archive is not None and not os.path.isfile(args.archive):
+        parser.error(f"--archive: not a readable file: {args.archive!r}")
 
     rmsd_indices: list[int] | None = None
     if args.rmsd_indices is not None:
@@ -980,8 +1019,14 @@ def main():
     timesteps: list[int] = []
 
     if not loaded_from_csv:
-        print(f"Loading candidates from {args.directory}...")
-        timesteps, layers = load_topM_candidates(args.directory, args.topM)
+        if args.archive:
+            print(f"Loading candidates from archive {args.archive}...")
+            timesteps, layers = load_topM_candidates_from_archive(
+                args.archive, args.topM
+            )
+        else:
+            print(f"Loading candidates from {args.directory}...")
+            timesteps, layers = load_topM_candidates(args.directory, args.topM)
 
         n_timesteps = len(timesteps)
         layer_sizes = [len(layer) for layer in layers]
@@ -1064,11 +1109,11 @@ def main():
                             "(required for --closest-selection target_rmsd)."
                         )
                     target_xyz = read_xyz_coords(target_path)
-                    coords = [read_xyz_coords(c["xyz"]) for c in layer]
+                    coords = [candidate_coords(c) for c in layer]
                     if int(coords[0].shape[0]) != int(target_xyz.shape[0]):
                         raise SystemExit(
                             f"Atom count mismatch: {target_path!r} has {target_xyz.shape[0]} atoms, "
-                            f"candidate {layer[0]['xyz']!r} has {coords[0].shape[0]} atoms."
+                            f"candidate at timestep {t_id} has {coords[0].shape[0]} atoms."
                         )
                     closest_idx = select_closest_by_rmsd_to_reference(
                         coords,
@@ -1164,11 +1209,12 @@ def main():
             closest_frames = []
             for ti, layer_i in enumerate(layers):
                 mi = closest_indices[ti]
-                xyz_path = layer_i[mi]["xyz"]
-                closest_dat_paths.append(
-                    os.path.abspath(os.path.splitext(xyz_path)[0] + ".dat")
-                )
-                n, comment, atoms, coords = read_xyz_frame(xyz_path)
+                xyz_path = layer_i[mi].get("xyz")
+                if xyz_path:
+                    closest_dat_paths.append(
+                        os.path.abspath(os.path.splitext(xyz_path)[0] + ".dat")
+                    )
+                n, comment, atoms, coords = candidate_frame(layer_i[mi])
                 if using_geometry_closest:
                     sel_tag = "closest-geometry-to-mean"
                 elif using_target_rmsd_closest:
@@ -1194,7 +1240,7 @@ def main():
             atoms_ref = None
             natoms_ref = None
             for c in layer_i:
-                n, _comment, atoms, coords = read_xyz_frame(c["xyz"])
+                n, _comment, atoms, coords = candidate_frame(c)
                 all_coords.append(coords)
                 if atoms_ref is None:
                     atoms_ref = atoms
@@ -1206,7 +1252,12 @@ def main():
         print(f"Mean trajectory written to: {mean_xyz_path}")
 
     if loaded_from_csv and args.time_basis == "filename-step":
-        t_ids = sorted_timestep_ids_from_directory(args.directory)
+        if args.archive:
+            t_ids, _archive_layers = load_topM_candidates_from_archive(
+                args.archive, None
+            )
+        else:
+            t_ids = sorted_timestep_ids_from_directory(args.directory)
         if len(t_ids) != n_timesteps:
             raise SystemExit(
                 f"--time-basis filename-step: found {len(t_ids)} timestep ids under "

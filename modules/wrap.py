@@ -19,6 +19,7 @@ import modules.mol as mol
 import modules.x as xray
 import modules.sa as sa
 import modules.analysis as analysis
+import modules.trajectory_archive as trajectory_archive
 
 # Optional heavy dependencies (OpenFF / sampling / PySCF wrapper)
 try:
@@ -649,6 +650,56 @@ def _safe_ab_initio_correction_ratio(
             "correction factor set to 1.0 at those points."
         )
     return ratio
+
+
+def _as_signal_batch(predicted, *, ewald_mode, th, ph) -> np.ndarray:
+    """Predicted I(q) as ``(n_chains, qlen)``, rotationally averaged in Ewald mode."""
+    arr = np.asarray(predicted, dtype=np.float64)
+    if arr.ndim == 1:
+        return arr.reshape(1, -1)
+    if ewald_mode and arr.ndim == 3:
+        averaged = np.asarray(x.spherical_rotavg(arr, th, ph), dtype=np.float64)
+        return averaged.reshape(1, -1)
+    if ewald_mode and arr.ndim == 4:
+        return np.stack(
+            [
+                np.asarray(x.spherical_rotavg(arr[i], th, ph), dtype=np.float64)
+                for i in range(arr.shape[0])
+            ],
+            axis=0,
+        )
+    return arr
+
+
+def _write_timestep_archive(p, run_id, atomlist, xyz_all, signal_all, f_xray_all) -> None:
+    """Merge this timestep into ``<results_dir>.npz`` and delete leftover chain files."""
+    xyz_all = np.asarray(xyz_all, dtype=np.float64)
+    if xyz_all.ndim == 2:
+        xyz_all = xyz_all.reshape(1, *xyz_all.shape)
+    f_xray_all = np.asarray(f_xray_all, dtype=np.float64).reshape(-1)
+    signal_all = np.asarray(signal_all, dtype=np.float64)
+    if signal_all.ndim == 1:
+        signal_all = signal_all.reshape(1, -1)
+    timestep = trajectory_archive.parse_timestep_id(run_id)
+    path = trajectory_archive.merge_and_prune(
+        p.results_dir,
+        timestep=timestep,
+        f_xray=f_xray_all,
+        xyz=xyz_all,
+        signal=signal_all,
+        q=np.asarray(p.qvector, dtype=np.float64),
+        atoms=np.asarray(list(atomlist)),
+        top_m=int(getattr(p, "archive_top_m", 200)),
+    )
+    removed = trajectory_archive.delete_chain_files(p.results_dir, timestep)
+    print(
+        f"NPZ archive: timestep {timestep} -> {path} "
+        f"(kept up to {int(getattr(p, 'archive_top_m', 200))} lowest f_xray)"
+    )
+    if removed:
+        print(
+            f"NPZ archive: removed {removed} chain file(s) for timestep {timestep}"
+        )
 
 
 #############################
@@ -2076,6 +2127,7 @@ class Wrapper:
                 and np.ndim(chain_results["xyz_best_all"]) == 3
                 and chain_results["xyz_best_all"].shape[0] > 1
             )
+            npz_mode = bool(getattr(p, "npz_mode_bool", False))
 
             def _assert_xyz_sane(xyz_arr: np.ndarray, label: str, max_abs_coord: float = 1e3):
                 xyz_arr = np.asarray(xyz_arr, dtype=np.float64)
@@ -2111,10 +2163,11 @@ class Wrapper:
                     f_xray_best_all = f_xray_best_all.get()
                 else:
                     f_xray_best_all = np.asarray(f_xray_best_all)
-                print(
-                    f"Writing outputs for {xyz_best_all.shape[0]} GPU chains "
-                    "(no chain IDs in filenames)"
-                )
+                if not npz_mode:
+                    print(
+                        f"Writing outputs for {xyz_best_all.shape[0]} GPU chains "
+                        "(no chain IDs in filenames)"
+                    )
                 diversity_stats = summarize_chain_diversity(
                     xyz_best_all,
                     rmsd_indices=p.rmsd_indices,
@@ -2132,88 +2185,116 @@ class Wrapper:
                 print_chain_diversity_summary(
                     diversity_stats, bond_label=bond_label
                 )
-                filename_counts = {}
-                for chain_idx in range(xyz_best_all.shape[0]):
-                    xyz_chain = xyz_best_all[chain_idx]
-                    f_xray_chain = float(f_xray_best_all[chain_idx])
-                    _assert_xyz_sane(xyz_chain, f"chain[{chain_idx}] before write_xyz")
-
-                    # bond-length of interest
-                    bond_distance_chain = np.linalg.norm(
-                        xyz_chain[p.bond_indices[0], :] - xyz_chain[p.bond_indices[1], :]
+                if npz_mode:
+                    print(
+                        f"Archiving outputs for {xyz_best_all.shape[0]} GPU chains "
+                        f"(top {int(getattr(p, 'archive_top_m', 200))} per timestep)"
                     )
-                    # angle of interest
-                    p0c = np.array(xyz_chain[p.angle_indices[0], :])
-                    p1c = np.array(xyz_chain[p.angle_indices[1], :])  # central point
-                    p2c = np.array(xyz_chain[p.angle_indices[2], :])
-                    angle_degrees_chain = analysis.directional_angle_3d(
-                        p0c, p1c, p2c, [0, 1, 0]
+                    for chain_idx in range(xyz_best_all.shape[0]):
+                        _assert_xyz_sane(
+                            xyz_best_all[chain_idx],
+                            f"chain[{chain_idx}] before archive",
+                        )
+                    signal_batch = _as_signal_batch(
+                        predicted_best_all,
+                        ewald_mode=bool(p.ewald_mode),
+                        th=p.th,
+                        ph=p.ph,
                     )
-                    # dihedral of interest
-                    p0c = np.array(xyz_chain[p.dihedral_indices[0], :])
-                    p1c = np.array(xyz_chain[p.dihedral_indices[1], :])
-                    p2c = np.array(xyz_chain[p.dihedral_indices[2], :])
-                    p3c = np.array(xyz_chain[p.dihedral_indices[3], :])
-                    dihedral_chain = analysis.new_dihedral((p0c, p1c, p2c, p3c))
-                    if rmsd_target_bool:
-                        rmsd_chain, _ = m.rmsd_kabsch(
-                            xyz_chain, target_xyz, p.rmsd_indices
-                        )
-                        mapd_chain = m.mapd_function(
-                            xyz_chain, target_xyz, p.rmsd_indices
-                        )
-                    else:
-                        rmsd_chain, mapd_chain = 0.0, 0.0
-                    e_mol_chain = 0.0  # per-chain HF not computed here
-
-                    header_str_chain = (
-                        "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f"
-                        % (
-                            f_xray_chain,
-                            rmsd_chain,
-                            bond_distance_chain,
-                            angle_degrees_chain,
-                            dihedral_chain,
-                            e_mol_chain,
-                            mapd_chain,
-                            p.tuning_ratio_target_input,
-                        )
-                    )
-                    f_chain_str = ("%10.8f" % f_xray_chain).zfill(12)
-                    base_stub = "%s_%s" % (run_id, f_chain_str)
-                    count = filename_counts.get(base_stub, 0)
-                    filename_counts[base_stub] = count + 1
-                    if count == 0:
-                        file_stub = base_stub
-                    else:
-                        file_stub = "%s_dup%d" % (base_stub, count)
-                    m.write_xyz(
-                        "%s/%s.xyz" % (p.results_dir, file_stub),
-                        header_str_chain,
+                    _write_timestep_archive(
+                        p,
+                        run_id,
                         atomlist,
-                        xyz_chain,
+                        xyz_best_all,
+                        signal_batch,
+                        f_xray_best_all,
                     )
-                    if p.write_dat_file_bool:
-                        predicted_chain = predicted_best_all[chain_idx]
-                        if p.ewald_mode:
-                            predicted_chain = x.spherical_rotavg(
-                                predicted_chain, p.th, p.ph
-                            )
-                        np.savetxt(
-                            "%s/%s.dat" % (p.results_dir, file_stub),
-                            np.column_stack((p.qvector, predicted_chain)),
+                else:
+                    filename_counts = {}
+                    for chain_idx in range(xyz_best_all.shape[0]):
+                        xyz_chain = xyz_best_all[chain_idx]
+                        f_xray_chain = float(f_xray_best_all[chain_idx])
+                        _assert_xyz_sane(xyz_chain, f"chain[{chain_idx}] before write_xyz")
+    
+                        # bond-length of interest
+                        bond_distance_chain = np.linalg.norm(
+                            xyz_chain[p.bond_indices[0], :] - xyz_chain[p.bond_indices[1], :]
                         )
+                        # angle of interest
+                        p0c = np.array(xyz_chain[p.angle_indices[0], :])
+                        p1c = np.array(xyz_chain[p.angle_indices[1], :])  # central point
+                        p2c = np.array(xyz_chain[p.angle_indices[2], :])
+                        angle_degrees_chain = analysis.directional_angle_3d(
+                            p0c, p1c, p2c, [0, 1, 0]
+                        )
+                        # dihedral of interest
+                        p0c = np.array(xyz_chain[p.dihedral_indices[0], :])
+                        p1c = np.array(xyz_chain[p.dihedral_indices[1], :])
+                        p2c = np.array(xyz_chain[p.dihedral_indices[2], :])
+                        p3c = np.array(xyz_chain[p.dihedral_indices[3], :])
+                        dihedral_chain = analysis.new_dihedral((p0c, p1c, p2c, p3c))
+                        if rmsd_target_bool:
+                            rmsd_chain, _ = m.rmsd_kabsch(
+                                xyz_chain, target_xyz, p.rmsd_indices
+                            )
+                            mapd_chain = m.mapd_function(
+                                xyz_chain, target_xyz, p.rmsd_indices
+                            )
+                        else:
+                            rmsd_chain, mapd_chain = 0.0, 0.0
+                        e_mol_chain = 0.0  # per-chain HF not computed here
+    
+                        header_str_chain = (
+                            "%12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f %12.8f"
+                            % (
+                                f_xray_chain,
+                                rmsd_chain,
+                                bond_distance_chain,
+                                angle_degrees_chain,
+                                dihedral_chain,
+                                e_mol_chain,
+                                mapd_chain,
+                                p.tuning_ratio_target_input,
+                            )
+                        )
+                        f_chain_str = ("%10.8f" % f_xray_chain).zfill(12)
+                        base_stub = "%s_%s" % (run_id, f_chain_str)
+                        count = filename_counts.get(base_stub, 0)
+                        filename_counts[base_stub] = count + 1
+                        if count == 0:
+                            file_stub = base_stub
+                        else:
+                            file_stub = "%s_dup%d" % (base_stub, count)
+                        m.write_xyz(
+                            "%s/%s.xyz" % (p.results_dir, file_stub),
+                            header_str_chain,
+                            atomlist,
+                            xyz_chain,
+                        )
+                        if p.write_dat_file_bool:
+                            predicted_chain = predicted_best_all[chain_idx]
+                            if p.ewald_mode:
+                                predicted_chain = x.spherical_rotavg(
+                                    predicted_chain, p.th, p.ph
+                                )
+                            np.savetxt(
+                                "%s/%s.dat" % (p.results_dir, file_stub),
+                                np.column_stack((p.qvector, predicted_chain)),
+                            )
             else:
                 ### write best structure to xyz file (single-chain/CPU behavior)
-                print("writing to xyz... (f: %10.8f)" % f_xray_best)
                 f_best_str = ("%10.8f" % f_xray_best).zfill(12)
                 _assert_xyz_sane(xyz_best, "best_structure before write_xyz")
-                m.write_xyz(
-                    "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
-                    header_str,
-                    atomlist,
-                    xyz_best,
-                )
+                if npz_mode:
+                    print("archiving best structure... (f: %10.8f)" % f_xray_best)
+                else:
+                    print("writing to xyz... (f: %10.8f)" % f_xray_best)
+                    m.write_xyz(
+                        "%s/%s_%s.xyz" % (p.results_dir, run_id, f_best_str),
+                        header_str,
+                        atomlist,
+                        xyz_best,
+                    )
             ### analysis values dictionary for final print out
             A = {
                 "f_xray_best": "%10.8f" % f_xray_best,
@@ -2238,8 +2319,23 @@ class Wrapper:
                     np.save("%s/predicted_function.npy" % p.results_dir, predicted_best)
                 predicted_best_r = x.spherical_rotavg(predicted_best, p.th, p.ph)
                 predicted_best = predicted_best_r
-            ### write predicted data to file
-            if p.write_dat_file_bool and not multi_chain_mode:
+            ### write predicted data to file, or into the NPZ archive
+            if npz_mode and not multi_chain_mode:
+                signal_batch = _as_signal_batch(
+                    predicted_best,
+                    ewald_mode=False,
+                    th=p.th,
+                    ph=p.ph,
+                )
+                _write_timestep_archive(
+                    p,
+                    run_id,
+                    atomlist,
+                    xyz_best,
+                    signal_batch,
+                    np.asarray([f_xray_best], dtype=np.float64),
+                )
+            elif p.write_dat_file_bool and not multi_chain_mode:
                 np.savetxt(
                     "%s/%s_%s.dat" % (p.results_dir, run_id, f_best_str),
                     np.column_stack((p.qvector, predicted_best)),

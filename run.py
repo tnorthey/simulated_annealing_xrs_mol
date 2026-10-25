@@ -122,6 +122,13 @@ def create_parser():
                               dest='options.adaptive_restart_bool',
                               help='Reseed only chains at most half the median χ²; '
                                    'otherwise tile the best restart_ratio fraction')
+    options_group.add_argument('--npz-mode', action='store_true',
+                              dest='options.npz_mode_bool',
+                              help='Store chain xyz and predicted signal in one NPZ archive '
+                                   '(top archive_top_m structures per timestep)')
+    options_group.add_argument('--archive-top-m', type=int,
+                              dest='options.archive_top_m',
+                              help='Structures kept per timestep in NPZ mode (lowest f_xray)')
     
     # Sampling
     sampling_group = parser.add_argument_group('sampling', 'Sampling parameters')
