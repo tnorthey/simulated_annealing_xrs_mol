@@ -80,7 +80,10 @@ def test_merge_keeps_lowest_fit_and_other_timesteps(tmp_path):
         top_m=2,
     )
 
-    data = arch._load(arch.archive_path(str(results)))
+    archive = arch.archive_path(str(results))
+    assert archive == os.path.join(str(results), "trajectory.npz")
+    assert os.path.isfile(archive)
+    data = arch._load(archive)
     t0 = np.sort(data["f_xray"][data["t"] == 0])
     t1 = np.sort(data["f_xray"][data["t"] == 1])
     assert t0.tolist() == pytest.approx([0.05, 0.10])

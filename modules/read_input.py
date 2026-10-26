@@ -140,7 +140,7 @@ class Input_to_params:
         self.adaptive_restart_bool = bool(
             data.get("options", {}).get("adaptive_restart_bool", False)
         )
-        # NPZ archive: one <results_dir>.npz of the lowest-f_xray structures per timestep.
+        # NPZ archive: <results_dir>/trajectory.npz of the lowest-f_xray structures per timestep.
         self.npz_mode_bool = bool(
             data.get("options", {}).get("npz_mode_bool", False)
         )

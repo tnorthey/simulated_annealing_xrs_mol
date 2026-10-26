@@ -4,11 +4,11 @@
 #
 # Usage:
 #   ./analyse_and_plot_trajectory_results.sh <results_dir>
-#   ./analyse_and_plot_trajectory_results.sh <results_dir>.npz
+#   ./analyse_and_plot_trajectory_results.sh <results_dir>/trajectory.npz
 #   ./analyse_and_plot_trajectory_results.sh --help
 #
-# NPZ mode: pass the archive, or a results directory whose sibling .npz exists
-# and which has no per-chain xyz files. Geometry is read from the archive.
+# NPZ mode: pass the results directory, or its trajectory.npz. Geometry is read
+# from the archive when it is present and the directory has no per-chain xyz.
 #
 # Writes into <results_dir>/analysis/:
 #   topM_geometry_bond-0-5_topM-<N>.csv
@@ -48,16 +48,13 @@ PYTHON="${PYTHON:-python3}"
 ARCHIVE=""
 if [[ -f "$1" && "$1" == *.npz ]]; then
     ARCHIVE="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
-    stem="$(basename "$ARCHIVE" .npz)"
-    parent="$(cd "$(dirname "$ARCHIVE")" && pwd)"
-    RESULTS_DIR="${parent}/${stem}"
-    mkdir -p "$RESULTS_DIR"
+    RESULTS_DIR="$(cd "$(dirname "$ARCHIVE")" && pwd)"
 elif [[ -d "$1" ]]; then
     RESULTS_DIR="$(cd "$1" && pwd)"
-    if [[ -f "${RESULTS_DIR}.npz" ]]; then
+    if [[ -f "${RESULTS_DIR}/trajectory.npz" ]]; then
         chain_xyz="$("$PYTHON" "$REPO_ROOT/modules/trajectory_archive.py" count-chains --results-dir "$RESULTS_DIR")"
         if [[ "$chain_xyz" == "0" ]]; then
-            ARCHIVE="${RESULTS_DIR}.npz"
+            ARCHIVE="${RESULTS_DIR}/trajectory.npz"
         fi
     fi
 else

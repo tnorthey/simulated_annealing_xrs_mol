@@ -36,7 +36,7 @@
 #   EXTRA_RUN_PY_ARGS                     appended after --qmax/--qlen/--c-tuning-initial
 #
 # NPZ mode (options.npz_mode_bool in CONFIG): chain xyz/dat files are not kept.
-# Structures go to ${RESULTS_DIR}.npz (archive_top_m lowest f_xray per frame).
+# Structures go to ${RESULTS_DIR}/trajectory.npz (archive_top_m lowest f_xray per frame).
 # TOP_N must be <= archive_top_m, because later frames restart from that archive.
 #
 # Results directory (phi is not part of the name):
@@ -198,7 +198,7 @@ echo "  c_tuning:    $C_TUNING_INITIAL"
 echo "  GPU_CHAINS:  $GPU_CHAINS"
 echo "  TOP_N:       $TOP_N"
 if [[ -n "$ARCHIVE_TOP_M" ]]; then
-    echo "  npz archive: ${RESULTS_DIR}.npz  (archive_top_m=$ARCHIVE_TOP_M)"
+    echo "  npz archive: ${RESULTS_DIR}/trajectory.npz  (archive_top_m=$ARCHIVE_TOP_M)"
 fi
 echo "  tradius:     first phi=$TRADIUS_FIRST  later phi=$TRADIUS_LATER  (START_FROM_TRADIUS_RANDOM)"
 echo "  first start: $STARTING_XYZ  (phi=$first_phi frame=$first_step only)"

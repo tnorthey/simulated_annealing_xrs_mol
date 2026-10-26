@@ -73,7 +73,7 @@ Environment (defaults):
   TARGET_FILE         If unset, chd+_data/eirik_data_<time_step>.dat
   CONFIG=${CONFIG}
                           NPZ mode (options.npz_mode_bool): pool xyz is read from
-                          \${RESULTS_DIR}.npz and the scratch copy is deleted after the run
+                          \${RESULTS_DIR}/trajectory.npz; the scratch copy is deleted after the run
   GPU_CHAINS=${GPU_CHAINS}
   PREV_STEP           Override pool step for prev-random / default mean (default: t-1)
   PREV_DISTANCE       If PREV_STEP unset, prev-random pools from t-PREV_DISTANCE (default: 1)
@@ -490,7 +490,7 @@ GPU_POOL_FILE=""
 echo "=== GPU run from previous timestep ==="
 echo "  time_step (run-id)=$ts_padded  prev=$prev_step  TOP_N=$TOP_N  GPU_CHAINS=$GPU_CHAINS"
 if [[ "$NPZ_MODE" == "1" ]]; then
-    echo "  npz archive: ${RESULTS_DIR}.npz  (restart pool read from the archive)"
+    echo "  npz archive: ${RESULTS_DIR}/trajectory.npz  (restart pool read from the archive)"
 fi
 
 # Ensure previous-step mean exists when pool is available (for tradius-mean and reuse).

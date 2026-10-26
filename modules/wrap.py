@@ -672,7 +672,7 @@ def _as_signal_batch(predicted, *, ewald_mode, th, ph) -> np.ndarray:
 
 
 def _write_timestep_archive(p, run_id, atomlist, xyz_all, signal_all, f_xray_all) -> None:
-    """Merge this timestep into ``<results_dir>.npz`` and delete leftover chain files."""
+    """Merge this timestep into ``<results_dir>/trajectory.npz`` and delete leftover chain files."""
     xyz_all = np.asarray(xyz_all, dtype=np.float64)
     if xyz_all.ndim == 2:
         xyz_all = xyz_all.reshape(1, *xyz_all.shape)

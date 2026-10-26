@@ -1,6 +1,6 @@
 """One NPZ archive of the top-M structures at each trajectory timestep.
 
-The file sits next to the results directory: ``results_foo/`` -> ``results_foo.npz``.
+The file lives in the results directory: ``results_foo/trajectory.npz``.
 Arrays:
 
 - ``q``       (qlen,) scattering-vector grid, stored once
@@ -37,14 +37,15 @@ _POOL_XYZ_RE = re.compile(
     r"^(?P<t>\d+)_(?P<fit>\d+\.\d+)(?P<dup>_dup\d+)?\.xyz$"
 )
 _ARCHIVE_KEYS = ("q", "t", "f_xray", "xyz", "signal", "atoms")
+ARCHIVE_NAME = "trajectory.npz"
 
 
 def archive_path(results_dir: str) -> str:
-    """``results_foo`` -> ``results_foo.npz`` (a sibling of the directory)."""
+    """``results_foo`` -> ``results_foo/trajectory.npz``."""
     path = os.path.normpath(results_dir)
     if path.lower().endswith(".npz"):
         return path
-    return path + ".npz"
+    return os.path.join(path, ARCHIVE_NAME)
 
 
 def parse_timestep_id(run_id) -> int:
