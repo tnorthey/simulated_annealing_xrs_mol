@@ -191,6 +191,62 @@ def test_materialize_writes_lowest_fit_first(tmp_path):
     assert second[1, 0] == pytest.approx(1.60)
 
 
+def test_coords_table_summarizes_topm_c1c6(tmp_path):
+    results = tmp_path / "results_run"
+    results.mkdir()
+    atoms = ["C", "C", "C", "C", "C", "C"]
+    q = np.linspace(0.1, 1.0, 4)
+
+    def structure(bond: float, twist: float) -> np.ndarray:
+        xyz = np.zeros((6, 3), dtype=np.float64)
+        xyz[1] = [1.0, 0.0, 0.0]
+        xyz[2] = [1.0, 1.0, 0.0]
+        xyz[3] = [0.0, 1.0, 0.0]
+        ang = np.deg2rad(twist)
+        xyz[4] = [0.0, 1.0 + np.cos(ang), np.sin(ang)]
+        xyz[5, 0] = bond
+        return xyz
+
+    frames = [(0.30, 1.50, 0.0), (0.10, 2.50, 90.0), (0.90, 9.00, 0.0)]
+    fits = np.array([fit for fit, _bond, _twist in frames], dtype=np.float64)
+    xyz = np.stack([structure(bond, twist) for _fit, bond, twist in frames], axis=0)
+    signal = fits[:, None] * q[None, :]
+    arch.merge_and_prune(
+        str(results),
+        timestep=3,
+        f_xray=fits,
+        xyz=xyz,
+        signal=signal,
+        q=q,
+        atoms=atoms,
+        top_m=3,
+    )
+    time_file = tmp_path / "time.dat"
+    time_file.write_text("12.5\n", encoding="utf-8")
+    out = tmp_path / "analysis"
+    written = geom.write_coords_tables(
+        directory=str(results),
+        archive=arch.archive_path(str(results)),
+        top_m=2,
+        time_file=str(time_file),
+        output_dir=str(out),
+    )
+    assert [os.path.basename(path) for path in written] == ["coords_table_03.dat"]
+    text = (out / "coords_table_03.dat").read_text(encoding="utf-8")
+    assert "# time_fs 12.5" in text
+    assert "# topM 2" in text
+    assert "# n 2" in text
+    assert "dihedral_0-1-4-5" in text
+    assert "dihedral_1-2-3-4" in text
+    bond_row = next(line for line in text.splitlines() if line.startswith("C1-C6 "))
+    median, mean, lo, hi, span = [float(value) for value in bond_row.split()[1:]]
+    assert median == pytest.approx(2.0)
+    assert mean == pytest.approx(2.0)
+    assert lo == pytest.approx(1.5)
+    assert hi == pytest.approx(2.5)
+    assert span == pytest.approx(1.0)
+
+
 def test_configured_archive_top_m(tmp_path):
     cfg = tmp_path / "input.toml"
     cfg.write_text(

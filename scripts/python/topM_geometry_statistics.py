@@ -322,6 +322,85 @@ def load_topM_candidates(directory, topM):
     return timesteps, layers
 
 
+def _linear_summary(values: np.ndarray) -> tuple[float, float, float, float, float]:
+    """Return median, mean, min, max, and max-min."""
+    v = np.asarray(values, dtype=np.float64).reshape(-1)
+    lo = float(np.min(v))
+    hi = float(np.max(v))
+    return float(np.median(v)), float(np.mean(v)), lo, hi, hi - lo
+
+
+def _dihedral_summary(values: np.ndarray) -> tuple[float, float, float, float, float]:
+    """Circular median and mean, with min, max, and max-min of the stored angles."""
+    v = np.asarray(values, dtype=np.float64).reshape(-1)
+    lo = float(np.min(v))
+    hi = float(np.max(v))
+    return circular_median_deg(v), circular_mean_deg(v), lo, hi, hi - lo
+
+
+def write_coords_tables(
+    *,
+    directory: str,
+    archive: str | None,
+    top_m: int,
+    time_file: str,
+    output_dir: str,
+) -> list[str]:
+    """Write one ``coords_table_<timestep>.dat`` per timestep.
+
+    Each file reports median, mean, min, max, and range (max-min) for the
+    C1-C6 bond (atoms 0-5, Angstrom) and the dihedrals 0-1-4-5 and 1-2-3-4
+    (degrees) of the top-M structures. Dihedral mean and median are circular.
+    """
+    if archive:
+        timesteps, layers = load_topM_candidates_from_archive(archive, top_m)
+    else:
+        timesteps, layers = load_topM_candidates(directory, top_m)
+    times = load_time_values_from_file(time_file)
+    if times.size != len(timesteps):
+        raise SystemExit(
+            f"--time-file: need {len(timesteps)} values (one per timestep), "
+            f"got {times.size} in {time_file!r}"
+        )
+    os.makedirs(output_dir, exist_ok=True)
+    written: list[str] = []
+    labels = (
+        ("C1-C6", "bond"),
+        ("dihedral_0-1-4-5", "dihedral"),
+        ("dihedral_1-2-3-4", "dihedral"),
+    )
+    for timestep, layer, time_fs in zip(timesteps, layers, times):
+        bond_vals = compute_geometry_for_layer(layer, bond=(0, 5)).reshape(-1)
+        dih1 = compute_geometry_for_layer(layer, dihedral=(0, 1, 4, 5)).reshape(-1)
+        dih2 = compute_geometry_for_layer(layer, dihedral=(1, 2, 3, 4)).reshape(-1)
+        summaries = (
+            _linear_summary(bond_vals),
+            _dihedral_summary(dih1),
+            _dihedral_summary(dih2),
+        )
+        path = os.path.join(output_dir, f"coords_table_{int(timestep):02d}.dat")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f"# timestep {int(timestep)}\n")
+            handle.write(f"# time_fs {float(time_fs):.10g}\n")
+            handle.write(f"# topM {int(top_m)}\n")
+            handle.write(f"# n {len(layer)}\n")
+            handle.write("# C1-C6 is atoms 0-5 in Angstrom.\n")
+            handle.write("# dihedral_0-1-4-5 is atoms 0-1-4-5 in degrees.\n")
+            handle.write("# dihedral_1-2-3-4 is atoms 1-2-3-4 in degrees.\n")
+            handle.write(
+                "# Dihedral median and mean are circular. range = max - min.\n"
+            )
+            handle.write("# quantity median mean min max range\n")
+            for (label, _kind), stats in zip(labels, summaries):
+                median, mean, lo, hi, span = stats
+                handle.write(
+                    f"{label} {median:.8f} {mean:.8f} {lo:.8f} {hi:.8f} {span:.8f}\n"
+                )
+        written.append(path)
+    print(f"Wrote {len(written)} coordinate tables in {output_dir}")
+    return written
+
+
 def load_topM_candidates_from_archive(path, topM):
     """Same layer layout as ``load_topM_candidates``, read from an NPZ archive."""
     import modules.trajectory_archive as trajectory_archive
@@ -370,6 +449,26 @@ def circular_mean_deg(angles_deg: np.ndarray) -> float:
     """Circular (directional) mean of angles in degrees, principal value in [-180, 180]."""
     rad = np.deg2rad(angles_deg)
     return float(np.rad2deg(np.arctan2(np.mean(np.sin(rad)), np.mean(np.cos(rad)))))
+
+
+def circular_median_deg(angles_deg: np.ndarray) -> float:
+    """Circular median in degrees, in [-180, 180].
+
+    Samples are ordered by signed offset from the circular mean. For an even
+    count the two central angles are combined with the circular mean.
+    """
+    ang = np.asarray(angles_deg, dtype=np.float64).reshape(-1)
+    if ang.size == 0:
+        raise ValueError("circular_median_deg requires at least one angle")
+    if ang.size == 1:
+        return float(ang[0])
+    center = circular_mean_deg(ang)
+    delta = (ang - center + 180.0) % 360.0 - 180.0
+    ordered = ang[np.argsort(delta, kind="mergesort")]
+    mid = ordered.size // 2
+    if ordered.size % 2 == 1:
+        return float(ordered[mid])
+    return circular_mean_deg(ordered[mid - 1 : mid + 1])
 
 
 def circular_std_deg(angles_deg: np.ndarray) -> float:

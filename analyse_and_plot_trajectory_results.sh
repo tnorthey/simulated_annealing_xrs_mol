@@ -17,6 +17,7 @@
 #   matching matplotlib PNGs
 #   figure.pdf
 #   figure_trajectory.tex, .aux, .log
+#   coords_table_<timestep>.dat   median, mean, min, max, range for C1-C6 and both dihedrals
 #
 # Environment (defaults shown):
 #   TOPM=200
@@ -33,7 +34,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-    sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { usage; exit 0; }
@@ -137,6 +138,24 @@ run_geometry() {
 run_geometry --bond 0 5
 run_geometry --dihedral 0 1 4 5
 run_geometry --dihedral 1 2 3 4
+
+"$PYTHON" - "$RESULTS_DIR" "$ARCHIVE" "$TOPM" "$TIME_FILE" "$ANALYSIS" "$REPO_ROOT" <<'PY'
+import os
+import sys
+
+results_dir, archive, top_m, time_file, output_dir, repo_root = sys.argv[1:7]
+sys.path.insert(0, repo_root)
+sys.path.insert(0, os.path.join(repo_root, "scripts", "python"))
+import topM_geometry_statistics as geom
+
+geom.write_coords_tables(
+    directory=results_dir,
+    archive=archive or None,
+    top_m=int(top_m),
+    time_file=time_file,
+    output_dir=output_dir,
+)
+PY
 
 traj_num=$((10#$TRAJ))
 case "$traj_num" in
