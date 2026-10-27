@@ -146,6 +146,12 @@ case "$traj_num" in
         Y3MIN=-80 Y3MAX=70
         YTIC_STEP1=1.5 YTIC_STEP2=100 YTIC_STEP3=50
         ;;
+    99)
+        Y1MIN=1.25 Y1MAX=4.25
+        Y2MIN=-15 Y2MAX=285
+        Y3MIN=-80 Y3MAX=70
+        YTIC_STEP1=1.5 YTIC_STEP2=100 YTIC_STEP3=50
+        ;;
     90)
         Y1MIN=1.25 Y1MAX=2.25
         Y2MIN=-15 Y2MAX=55
@@ -153,7 +159,7 @@ case "$traj_num" in
         YTIC_STEP1=0.5 YTIC_STEP2=50 YTIC_STEP3=50
         ;;
     *)
-        echo "ERROR: no plot limits for trajectory $TRAJ (expected 090 or 094)." >&2
+        echo "ERROR: no plot limits for trajectory $TRAJ (expected 090, 094, or 099)." >&2
         exit 1
         ;;
 esac
