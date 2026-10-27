@@ -56,6 +56,7 @@ Closest to target geometry (requires ``<run_id>_target.xyz`` next to TARGET_FUNC
 import argparse
 import glob
 import heapq
+import math
 import os
 import re
 import sys
@@ -208,22 +209,135 @@ def write_xyz_trajectory(frames: Sequence[tuple], path: str):
                 )
 
 
+def _dot3(a, b) -> float:
+    return float(a[0]) * float(b[0]) + float(a[1]) * float(b[1]) + float(a[2]) * float(b[2])
+
+
+def _det3(R: np.ndarray) -> float:
+    return float(
+        R[0, 0] * (R[1, 1] * R[2, 2] - R[1, 2] * R[2, 1])
+        - R[0, 1] * (R[1, 0] * R[2, 2] - R[1, 2] * R[2, 0])
+        + R[0, 2] * (R[1, 0] * R[2, 1] - R[1, 1] * R[2, 0])
+    )
+
+
+def _matmul3(A: np.ndarray, B: np.ndarray) -> np.ndarray:
+    out = np.zeros((3, 3), dtype=np.float64)
+    for i in range(3):
+        for j in range(3):
+            out[i, j] = (
+                float(A[i, 0]) * float(B[0, j])
+                + float(A[i, 1]) * float(B[1, j])
+                + float(A[i, 2]) * float(B[2, j])
+            )
+    return out
+
+
+def _covariance(P: np.ndarray, Q: np.ndarray) -> np.ndarray:
+    H = np.zeros((3, 3), dtype=np.float64)
+    for i in range(P.shape[0]):
+        px, py, pz = float(P[i, 0]), float(P[i, 1]), float(P[i, 2])
+        qx, qy, qz = float(Q[i, 0]), float(Q[i, 1]), float(Q[i, 2])
+        H[0, 0] += px * qx
+        H[0, 1] += px * qy
+        H[0, 2] += px * qz
+        H[1, 0] += py * qx
+        H[1, 1] += py * qy
+        H[1, 2] += py * qz
+        H[2, 0] += pz * qx
+        H[2, 1] += pz * qy
+        H[2, 2] += pz * qz
+    return H
+
+
+def _svd_3x3(H: np.ndarray):
+    """Singular vectors of a 3x3 matrix, singular values descending.
+
+    One-sided Jacobi, using only scalar arithmetic.
+    """
+    M = np.array(H, dtype=np.float64, copy=True)
+    V = np.eye(3, dtype=np.float64)
+    for _sweep in range(8):
+        for p, q in ((0, 1), (0, 2), (1, 2)):
+            app = _dot3(M[:, p], M[:, p])
+            aqq = _dot3(M[:, q], M[:, q])
+            apq = _dot3(M[:, p], M[:, q])
+            if abs(apq) <= 1e-15 * math.sqrt(app * aqq + 1e-30):
+                continue
+            tau = (aqq - app) / (2.0 * apq)
+            t = math.copysign(1.0 / (abs(tau) + math.sqrt(1.0 + tau * tau)), tau)
+            c = 1.0 / math.sqrt(1.0 + t * t)
+            s = t * c
+            for row in range(3):
+                mp = float(M[row, p])
+                mq = float(M[row, q])
+                M[row, p] = c * mp - s * mq
+                M[row, q] = s * mp + c * mq
+                vp = float(V[row, p])
+                vq = float(V[row, q])
+                V[row, p] = c * vp - s * vq
+                V[row, q] = s * vp + c * vq
+    S = np.array([math.sqrt(_dot3(M[:, i], M[:, i])) for i in range(3)])
+    order = [int(i) for i in np.argsort(-S)]
+    S = S[order]
+    V = V[:, order]
+    M = M[:, order]
+    U = np.zeros((3, 3), dtype=np.float64)
+    filled = []
+    for i in range(3):
+        if S[i] > 1e-15:
+            U[:, i] = M[:, i] / S[i]
+            filled.append(i)
+    for i in range(3):
+        if S[i] > 1e-15:
+            continue
+        axis = None
+        for basis in range(3):
+            trial = np.zeros(3, dtype=np.float64)
+            trial[basis] = 1.0
+            for j in filled:
+                trial = trial - _dot3(U[:, j], trial) * U[:, j]
+            norm = math.sqrt(_dot3(trial, trial))
+            if norm > 1e-12:
+                axis = trial / norm
+                break
+        if axis is None:
+            continue
+        U[:, i] = axis
+        filled.append(i)
+    return U, S, V.T
+
+
 def _kabsch_rmsd(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None = None) -> float:
     """Kabsch-aligned RMSD between two (N,3) coordinate arrays."""
     if indices is not None:
-        idx = np.asarray(indices, dtype=np.int64)
-        P, Q = P[idx], Q[idx]
+        idx = list(indices)
+        P = np.asarray(P, dtype=np.float64)[idx]
+        Q = np.asarray(Q, dtype=np.float64)[idx]
+    else:
+        P = np.asarray(P, dtype=np.float64)
+        Q = np.asarray(Q, dtype=np.float64)
     Pc = P - P.mean(axis=0, keepdims=True)
     Qc = Q - Q.mean(axis=0, keepdims=True)
-    H = Pc.T @ Qc
-    U, _S, Vt = np.linalg.svd(H)
-    R = Vt.T @ U.T
-    if np.linalg.det(R) < 0:
+    U, _S, Vt = _svd_3x3(_covariance(Pc, Qc))
+    # H = P^T Q = U S Vt, and the rotation with P @ R ~ Q is R = U Vt.
+    R = _matmul3(U, Vt)
+    if _det3(R) < 0.0:
+        Vt = np.array(Vt, dtype=np.float64, copy=True)
         Vt[-1, :] *= -1.0
-        R = Vt.T @ U.T
-    Pr = Pc @ R
-    d = Pr - Qc
-    return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
+        R = _matmul3(U, Vt)
+    n = Pc.shape[0]
+    total = 0.0
+    for i in range(n):
+        for a in range(3):
+            rotated = (
+                float(Pc[i, 0]) * float(R[0, a])
+                + float(Pc[i, 1]) * float(R[1, a])
+                + float(Pc[i, 2]) * float(R[2, a])
+            )
+            delta = rotated - float(Qc[i, a])
+            total += delta * delta
+    return float(math.sqrt(total / n))
 
 
 def _plain_rmsd(P: np.ndarray, Q: np.ndarray, indices: Sequence[int] | None = None) -> float:
@@ -338,6 +452,18 @@ def _dihedral_summary(values: np.ndarray) -> tuple[float, float, float, float, f
     return circular_median_deg(v), circular_mean_deg(v), lo, hi, hi - lo
 
 
+def _is_carbon(symbol: str) -> bool:
+    letters = "".join(ch for ch in str(symbol) if ch.isalpha())
+    return letters.upper() == "C"
+
+
+def _carbon_indices(atoms: Sequence[str]) -> list[int]:
+    indices = [i for i, symbol in enumerate(atoms) if _is_carbon(symbol)]
+    if not indices:
+        raise SystemExit("Target structure has no carbon atoms for Kabsch RMSD.")
+    return indices
+
+
 def write_coords_tables(
     *,
     directory: str,
@@ -345,12 +471,14 @@ def write_coords_tables(
     top_m: int,
     time_file: str,
     output_dir: str,
+    target_dir: str,
 ) -> list[str]:
     """Write one ``coords_table_<timestep>.dat`` per timestep.
 
     Each file reports median, mean, min, max, and range (max-min) for the
-    C1-C6 bond (atoms 0-5, Angstrom) and the dihedrals 0-1-4-5 and 1-2-3-4
-    (degrees) of the top-M structures. Dihedral mean and median are circular.
+    C1-C6 bond (atoms 0-5, Angstrom), the dihedrals 0-1-4-5 and 1-2-3-4
+    (degrees), and the Kabsch RMSD of the carbon atoms to
+    ``target_<timestep>.xyz``. Dihedral mean and median are circular.
     """
     if archive:
         timesteps, layers = load_topM_candidates_from_archive(archive, top_m)
@@ -373,25 +501,51 @@ def write_coords_tables(
         bond_vals = compute_geometry_for_layer(layer, bond=(0, 5)).reshape(-1)
         dih1 = compute_geometry_for_layer(layer, dihedral=(0, 1, 4, 5)).reshape(-1)
         dih2 = compute_geometry_for_layer(layer, dihedral=(1, 2, 3, 4)).reshape(-1)
+        run_id = f"{int(timestep):02d}"
+        target_path = os.path.join(target_dir, f"target_{run_id}.xyz")
+        if not os.path.isfile(target_path):
+            raise SystemExit(
+                f"Missing target xyz for timestep {int(timestep)}: expected {target_path!r}"
+            )
+        _n_target, _comment, target_atoms, target_xyz = read_xyz_frame(target_path)
+        carbon_idx = _carbon_indices(target_atoms)
+        rmsd_vals = np.array(
+            [
+                _kabsch_rmsd(candidate_coords(c), target_xyz, carbon_idx)
+                for c in layer
+            ],
+            dtype=np.float64,
+        )
         summaries = (
             _linear_summary(bond_vals),
             _dihedral_summary(dih1),
             _dihedral_summary(dih2),
+            _linear_summary(rmsd_vals),
         )
+        labels_here = labels + (("RMSD_carbons", "rmsd"),)
         path = os.path.join(output_dir, f"coords_table_{int(timestep):02d}.dat")
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(f"# timestep {int(timestep)}\n")
             handle.write(f"# time_fs {float(time_fs):.10g}\n")
             handle.write(f"# topM {int(top_m)}\n")
             handle.write(f"# n {len(layer)}\n")
+            handle.write(f"# target {target_path}\n")
+            handle.write(
+                "# carbon_indices "
+                + ",".join(str(i) for i in carbon_idx)
+                + "\n"
+            )
             handle.write("# C1-C6 is atoms 0-5 in Angstrom.\n")
             handle.write("# dihedral_0-1-4-5 is atoms 0-1-4-5 in degrees.\n")
             handle.write("# dihedral_1-2-3-4 is atoms 1-2-3-4 in degrees.\n")
             handle.write(
+                "# RMSD_carbons is the Kabsch RMSD (Angstrom) of carbon atoms to the target.\n"
+            )
+            handle.write(
                 "# Dihedral median and mean are circular. range = max - min.\n"
             )
             handle.write("# quantity median mean min max range\n")
-            for (label, _kind), stats in zip(labels, summaries):
+            for (label, _kind), stats in zip(labels_here, summaries):
                 median, mean, lo, hi, span = stats
                 handle.write(
                     f"{label} {median:.8f} {mean:.8f} {lo:.8f} {hi:.8f} {span:.8f}\n"

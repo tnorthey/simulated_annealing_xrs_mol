@@ -223,6 +223,11 @@ def test_coords_table_summarizes_topm_c1c6(tmp_path):
     )
     time_file = tmp_path / "time.dat"
     time_file.write_text("12.5\n", encoding="utf-8")
+    target_dir = tmp_path / "targets"
+    target_dir.mkdir()
+    target = structure(2.50, 90.0).copy()
+    target[:, 0] += 10.0
+    arch._write_xyz(str(target_dir / "target_03.xyz"), atoms, target, "target")
     out = tmp_path / "analysis"
     written = geom.write_coords_tables(
         directory=str(results),
@@ -230,6 +235,7 @@ def test_coords_table_summarizes_topm_c1c6(tmp_path):
         top_m=2,
         time_file=str(time_file),
         output_dir=str(out),
+        target_dir=str(target_dir),
     )
     assert [os.path.basename(path) for path in written] == ["coords_table_03.dat"]
     text = (out / "coords_table_03.dat").read_text(encoding="utf-8")
@@ -245,6 +251,15 @@ def test_coords_table_summarizes_topm_c1c6(tmp_path):
     assert lo == pytest.approx(1.5)
     assert hi == pytest.approx(2.5)
     assert span == pytest.approx(1.0)
+    rmsd_row = next(line for line in text.splitlines() if line.startswith("RMSD_carbons "))
+    _median, _mean, rmsd_min, rmsd_max, _rmsd_span = [
+        float(value) for value in rmsd_row.split()[1:]
+    ]
+    assert rmsd_min == pytest.approx(0.0, abs=1e-8)
+    assert rmsd_max > 0.1
+    src = structure(2.50, 90.0)
+    rotated = np.column_stack((-src[:, 1], src[:, 0], src[:, 2]))
+    assert geom._kabsch_rmsd(rotated, src) == pytest.approx(0.0, abs=1e-8)
 
 
 def test_configured_archive_top_m(tmp_path):
