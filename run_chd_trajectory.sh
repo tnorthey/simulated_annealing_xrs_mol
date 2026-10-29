@@ -5,19 +5,28 @@
 # (phi); inner loop is trajectory frames. Later phi passes keep earlier results
 # and start from the best structures found so far.
 #
-# The first frame of the first phi starts from STARTING_XYZ via run_gpu_start.sh.
-# Every other launch uses run_gpu_from_previous_timestep.sh with
-# START_FROM_TRADIUS_RANDOM=1. The first phi uses TRADIUS_FIRST (default 1);
-# every later phi uses TRADIUS_LATER (default 4). Each CUDA chain draws a real
-# low-f structure from timesteps t+/-1..t+/-N.
+# The first frame of the first phi starts from STARTING_XYZ via run_gpu_start.sh,
+# unless --start-from-tradius is set. Every other launch uses
+# run_gpu_from_previous_timestep.sh with START_FROM_TRADIUS_RANDOM=1.
+# The first phi uses TRADIUS_FIRST (default 1); every later phi uses
+# TRADIUS_LATER (default 4). Each CUDA chain draws a real low-f structure
+# from timesteps t+/-1..t+/-N.
+#
+# --start-from-tradius is for a rerun of an existing results directory: the
+# first frame also draws from the tradius pool already in RESULTS_DIR, and
+# STARTING_XYZ is not used.
 #
 # Usage:
-#   ./run_chd_trajectory.sh [--phi 0.5,0.4,0.3] [description]
+#   ./run_chd_trajectory.sh [--phi 0.5,0.4,0.3] [--start-from-tradius] [description]
 #   ./run_chd_trajectory.sh --help
 #
 # Options:
 #   --phi LIST    tuning_ratio_target values, comma- or space-separated.
 #                 Overrides PHI_VALUES. Default: 0.5 0.45 0.4 0.35 0.3
+#   --start-from-tradius
+#                 First frame of the first phi starts from the tradius pool
+#                 (same as later frames) instead of STARTING_XYZ. Use when
+#                 RESULTS_DIR already holds a previous dataset.
 #
 # Environment (defaults shown):
 #   TRAJ=094
@@ -31,7 +40,9 @@
 #   TRADIUS_LATER=4                       radius for every later phi pass
 #   GPU_CHAINS=512
 #   C_TUNING_INITIAL=0.1                  passed as --c-tuning-initial
+#   START_FROM_TRADIUS=0                  if 1, same as --start-from-tradius
 #   STARTING_XYZ=xyz/start.xyz            first frame of the first phi only
+#                                         (ignored when START_FROM_TRADIUS=1)
 #   CONFIG=input.toml
 #   EXTRA_RUN_PY_ARGS                     appended after --qmax/--qlen/--c-tuning-initial
 #
@@ -47,7 +58,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 usage() {
-    sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'
+    awk 'NR==1 {next} /^[^#]/ {exit} {sub(/^# ?/, ""); print}' "$0"
     exit 0
 }
 
@@ -70,6 +81,10 @@ while [[ $# -gt 0 ]]; do
         --phi=*)
             PHI_VALUES="${1#--phi=}"
             PHI_FROM_CLI=1
+            shift
+            ;;
+        --start-from-tradius)
+            START_FROM_TRADIUS=1
             shift
             ;;
         --)
@@ -112,6 +127,7 @@ TRADIUS_FIRST="${TRADIUS_FIRST:-1}"
 TRADIUS_LATER="${TRADIUS_LATER:-4}"
 GPU_CHAINS="${GPU_CHAINS:-512}"
 C_TUNING_INITIAL="${C_TUNING_INITIAL:-0.1}"
+START_FROM_TRADIUS="${START_FROM_TRADIUS:-0}"
 STARTING_XYZ="${STARTING_XYZ:-xyz/start.xyz}"
 CONFIG="${CONFIG:-input.toml}"
 USER_EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
@@ -140,7 +156,11 @@ if [[ ! "$TRADIUS_LATER" =~ ^[0-9]+$ || "$TRADIUS_LATER" -lt 1 ]]; then
     echo "ERROR: TRADIUS_LATER must be an integer >= 1 (got $TRADIUS_LATER)" >&2
     exit 1
 fi
-if [[ ! -f "$STARTING_XYZ" ]]; then
+if [[ "$START_FROM_TRADIUS" != "0" && "$START_FROM_TRADIUS" != "1" ]]; then
+    echo "ERROR: START_FROM_TRADIUS must be 0 or 1 (got $START_FROM_TRADIUS)" >&2
+    exit 1
+fi
+if [[ "$START_FROM_TRADIUS" != "1" && ! -f "$STARTING_XYZ" ]]; then
     echo "ERROR: STARTING_XYZ='$STARTING_XYZ' not found" >&2
     exit 1
 fi
@@ -201,7 +221,11 @@ if [[ -n "$ARCHIVE_TOP_M" ]]; then
     echo "  npz archive: ${RESULTS_DIR}/trajectory.npz  (archive_top_m=$ARCHIVE_TOP_M)"
 fi
 echo "  tradius:     first phi=$TRADIUS_FIRST  later phi=$TRADIUS_LATER  (START_FROM_TRADIUS_RANDOM)"
-echo "  first start: $STARTING_XYZ  (phi=$first_phi frame=$first_step only)"
+if [[ "$START_FROM_TRADIUS" == "1" ]]; then
+    echo "  first start: tradius pool N=$TRADIUS_FIRST  (phi=$first_phi frame=$first_step, previous dataset)"
+else
+    echo "  first start: $STARTING_XYZ  (phi=$first_phi frame=$first_step only)"
+fi
 echo "  config:      $CONFIG"
 echo "  extra args:  $EXTRA_RUN_PY_ARGS"
 echo "  started:     $RUN_STARTED_AT"
@@ -226,7 +250,7 @@ for phi in "${PHI_LIST[@]}"; do
     for step in $(seq "$STEP_START" "$STEP_END"); do
         ts=$(printf '%02d' "$((10#$step))")
         target="xyz/target_traj${TRAJ}/target_${ts}.xyz"
-        if [[ "$phi_index" -eq 0 && "$ts" == "$first_step" ]]; then
+        if [[ "$START_FROM_TRADIUS" != "1" && "$phi_index" -eq 0 && "$ts" == "$first_step" ]]; then
             echo "--- phi=$phi frame=$ts  run_gpu_start.sh  STARTING_XYZ=$STARTING_XYZ ---"
             STARTING_XYZ="$STARTING_XYZ" TARGET_FILE="$target" \
                 "$REPO_ROOT/scripts/bash/run_gpu_start.sh" "$ts" "$EXCITATION" "$phi"
