@@ -36,11 +36,16 @@
 #   TOP_M                                 used when --from-top-m is omitted; unset disables the pool
 #   STARTING_XYZ=xyz/start.xyz            ignored when --from-top-m / TOP_M is set
 #   TARGET_FILE                           default: xyz/target_traj${TRAJ}/target_${FRAME}.xyz
+#   RESULTS_DIR                           shared output directory. When unset, the name
+#                                         below is used (one directory per phi).
 #   EXTRA_RUN_PY_ARGS                     appended after the Ewald grid flags
 #
-# Results directory:
+# Results directory (only when RESULTS_DIR is unset):
 #   results_chd_ewald_traj_${TRAJ}_frame${FRAME}_qmax${QMAX}_phi${PHI}[_${description}]
 #   The dot in phi is written as p (0 -> phi0, 0.5 -> phi0p5).
+#   Set RESULTS_DIR to keep every phi in that directory:
+#     RESULTS_DIR=results_chd_ewald_traj_094_frame20_qmax4 ./run_chd_ewald.sh --phi 0
+#     RESULTS_DIR=results_chd_ewald_traj_094_frame20_qmax4 ./run_chd_ewald.sh --phi 0.5
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -209,10 +214,12 @@ else
     PHI_TAG="${PHI//./p}"
 fi
 
-if [[ -n "$DESCRIPTION" ]]; then
-    RESULTS_DIR="results_chd_ewald_traj_${TRAJ}_frame${FRAME_PADDED}_qmax${QMAX}_phi${PHI_TAG}_${DESCRIPTION}"
-else
-    RESULTS_DIR="results_chd_ewald_traj_${TRAJ}_frame${FRAME_PADDED}_qmax${QMAX}_phi${PHI_TAG}"
+if [[ -z "${RESULTS_DIR:-}" ]]; then
+    if [[ -n "$DESCRIPTION" ]]; then
+        RESULTS_DIR="results_chd_ewald_traj_${TRAJ}_frame${FRAME_PADDED}_qmax${QMAX}_phi${PHI_TAG}_${DESCRIPTION}"
+    else
+        RESULTS_DIR="results_chd_ewald_traj_${TRAJ}_frame${FRAME_PADDED}_qmax${QMAX}_phi${PHI_TAG}"
+    fi
 fi
 
 GRID_ARGS=(
