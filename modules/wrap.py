@@ -1,5 +1,6 @@
 import os
 import random
+import shutil
 import sys
 import pprint
 import numpy as np
@@ -1136,6 +1137,13 @@ class Wrapper:
 
         # Create results directory if it doesn't exist
         os.makedirs(p.results_dir, exist_ok=True)
+        # Keep a copy of the target geometry beside the run outputs from the start.
+        # Later analysis may rewrite it; readers should not have to wait for that.
+        if str(target_file).lower().endswith(".xyz"):
+            target_copy = os.path.join(p.results_dir, f"{run_id}_target.xyz")
+            if os.path.abspath(target_file) != os.path.abspath(target_copy):
+                shutil.copy2(target_file, target_copy)
+                print(f"Copied target xyz to {target_copy}")
 
         def xyz2iam(xyz, atomic_numbers, compton_array, ewald_mode, qvector=None):
             """Convert xyz to IAM signal. If qvector is None, use p.qvector (compton_array must match)."""

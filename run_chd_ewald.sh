@@ -7,7 +7,8 @@
 #
 # Workers are independent run.py processes via run_cpu_parallel.sh. Every
 # worker starts from STARTING_XYZ. There is no phi sweep and no restart from
-# a previous frame.
+# a previous frame. The target geometry is copied to
+# ${RESULTS_DIR}/${FRAME}_target.xyz before the workers start.
 #
 # Usage:
 #   ./run_chd_ewald.sh [--phi 0.5] [description]
@@ -245,5 +246,10 @@ echo "  grid:        q($QMAX, $QLEN) theta(0-pi, 21) phi(0-2pi, 21)"
 echo "  workers:     $N_WORKERS"
 echo "  extra args:  $EXTRA_RUN_PY_ARGS"
 echo "  started:     $RUN_STARTED_AT"
+
+mkdir -p "$RESULTS_DIR"
+TARGET_COPY="${RESULTS_DIR}/${FRAME_PADDED}_target.xyz"
+cp -f "$TARGET_FILE" "$TARGET_COPY"
+echo "  target copy: $TARGET_COPY"
 
 "$REPO_ROOT/scripts/bash/run_cpu_parallel.sh" "$FRAME_PADDED" "$EXCITATION" "$PHI"
