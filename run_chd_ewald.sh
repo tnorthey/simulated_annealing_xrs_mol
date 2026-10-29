@@ -5,18 +5,24 @@
 # (c_tuning 0, no bond/angle/torsion terms). --phi sets a single value in
 # (0, 1]; that run keeps geometry terms and uses C_TUNING_INITIAL (default 0.1).
 #
-# Workers are independent run.py processes via run_cpu_parallel.sh. Every
-# worker starts from STARTING_XYZ. There is no phi sweep and no restart from
-# a previous frame. The target geometry is copied to
-# ${RESULTS_DIR}/${FRAME}_target.xyz before the workers start.
+# Workers are independent run.py processes via run_cpu_parallel.sh. By default
+# every worker starts from STARTING_XYZ. --from-top-m M instead draws each
+# worker uniformly from the M lowest-f_xray structures already in the results
+# directory. There is no phi sweep and no restart from a previous frame.
+# The target geometry is copied to ${RESULTS_DIR}/${FRAME}_target.xyz before
+# the workers start.
 #
 # Usage:
-#   ./run_chd_ewald.sh [--phi 0.5] [description]
+#   ./run_chd_ewald.sh [--phi 0.5] [--from-top-m 200] [description]
 #   ./run_chd_ewald.sh --help
 #
 # Options:
 #   --phi VALUE   tuning_ratio_target in [0, 1]. Overrides PHI.
 #                 Default: 0 (signal-only, pure x-ray).
+#   --from-top-m M
+#                 Each worker draws uniformly from the M lowest-f_xray xyz
+#                 files already in the results directory. Overrides TOP_M.
+#                 STARTING_XYZ is not used. M must be an integer >= 1.
 #
 # Environment (defaults shown):
 #   TRAJ=094
@@ -27,7 +33,8 @@
 #   N_WORKERS=64
 #   C_TUNING_INITIAL=0.1                  used only when PHI > 0
 #                                         (PHI=0 forces c_tuning 0 and signal-only)
-#   STARTING_XYZ=xyz/start.xyz
+#   TOP_M                                 used when --from-top-m is omitted; unset disables the pool
+#   STARTING_XYZ=xyz/start.xyz            ignored when --from-top-m / TOP_M is set
 #   TARGET_FILE                           default: xyz/target_traj${TRAJ}/target_${FRAME}.xyz
 #   EXTRA_RUN_PY_ARGS                     appended after the Ewald grid flags
 #
@@ -46,10 +53,25 @@ usage() {
 
 DESCRIPTION=""
 PHI_FROM_CLI=0
+TOP_M_FROM_CLI=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -h|--help)
             usage
+            ;;
+        --from-top-m)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --from-top-m requires an integer >= 1 (e.g. --from-top-m 200)" >&2
+                exit 1
+            fi
+            TOP_M="$2"
+            TOP_M_FROM_CLI=1
+            shift 2
+            ;;
+        --from-top-m=*)
+            TOP_M="${1#--from-top-m=}"
+            TOP_M_FROM_CLI=1
+            shift
             ;;
         --phi)
             if [[ $# -lt 2 ]]; then
@@ -102,6 +124,9 @@ QMAX="${QMAX:-4}"
 N_WORKERS="${N_WORKERS:-64}"
 C_TUNING_INITIAL="${C_TUNING_INITIAL:-0.1}"
 STARTING_XYZ="${STARTING_XYZ:-xyz/start.xyz}"
+if [[ "$TOP_M_FROM_CLI" -eq 0 ]]; then
+    TOP_M="${TOP_M:-}"
+fi
 USER_EXTRA_RUN_PY_ARGS="${EXTRA_RUN_PY_ARGS:-}"
 
 if [[ "$PHI" == *","* || "$PHI" == *" "* ]]; then
@@ -160,7 +185,14 @@ fi
 if [[ -z "${TARGET_FILE:-}" ]]; then
     TARGET_FILE="xyz/target_traj${TRAJ}/target_${FRAME_PADDED}.xyz"
 fi
-if [[ ! -f "$STARTING_XYZ" ]]; then
+START_FROM_TOP_RANDOM=0
+if [[ -n "$TOP_M" ]]; then
+    if [[ ! "$TOP_M" =~ ^[0-9]+$ || "$TOP_M" -lt 1 ]]; then
+        echo "ERROR: TOP_M must be an integer >= 1 (got '$TOP_M')" >&2
+        exit 1
+    fi
+    START_FROM_TOP_RANDOM=1
+elif [[ ! -f "$STARTING_XYZ" ]]; then
     echo "ERROR: STARTING_XYZ='$STARTING_XYZ' not found" >&2
     exit 1
 fi
@@ -211,9 +243,16 @@ fi
 
 export RESULTS_DIR
 export N_WORKERS
-export STARTING_XYZ
 export TARGET_FILE
 export EXTRA_RUN_PY_ARGS
+if [[ "$START_FROM_TOP_RANDOM" == "1" ]]; then
+    export START_FROM_TOP_RANDOM
+    export TOP_M
+    unset STARTING_XYZ
+else
+    export START_FROM_TOP_RANDOM=0
+    export STARTING_XYZ
+fi
 
 RUN_STARTED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
 SECONDS=0
@@ -233,7 +272,11 @@ echo "=== CHD Ewald single-frame minimisation (CPU) ==="
 echo "  results:     $RESULTS_DIR"
 echo "  traj/frame:  $TRAJ / $FRAME_PADDED"
 echo "  target:      $TARGET_FILE"
-echo "  start:       $STARTING_XYZ"
+if [[ "$START_FROM_TOP_RANDOM" == "1" ]]; then
+    echo "  start:       uniform draw from lowest TOP_M=$TOP_M in $RESULTS_DIR"
+else
+    echo "  start:       $STARTING_XYZ"
+fi
 echo "  phi:         $PHI"
 if [[ "$PHI_IS_ZERO" -eq 1 ]]; then
     echo "  objective:   signal-only (c_tuning=0, pure x-ray)"
